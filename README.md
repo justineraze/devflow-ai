@@ -7,89 +7,57 @@
 
 devflow-ai doesn't reinvent Claude Code — it provides what Claude Code can't do natively: **persistent state**, **state machine**, **project tracking**, and **automated quality gates**.
 
-## What it does
-
-```
-You describe a feature
-    → devflow creates a tracked feature with a state machine
-    → specialized agents (planner, developer, reviewer, tester) execute each phase
-    → state persists in .devflow/state.json (crash-safe, resumable)
-    → quality gate runs automatically (lint, tests, secrets scan)
-    → feature marked done only when gate passes
-```
+---
 
 ## Quickstart
 
 ```bash
-# Install
-pip install devflow-ai  # or: uv add devflow-ai
+pip install devflow-ai          # or: uv add devflow-ai
 
-# Set up agents and skills in ~/.claude/
-devflow install
-
-# Initialize in your project
-devflow init
-
-# Build a feature end-to-end
-devflow build "Add user authentication"
-
-# Fix a bug (lightweight workflow, no planning)
-devflow fix "Login fails on empty password"
-
-# Check quality gate manually
-devflow check
-
-# See what's in progress
-devflow status
+devflow install                 # sync agents & skills to ~/.claude/
+devflow init                    # initialize in your project
+devflow build "Add user auth"   # build a feature end-to-end
+devflow fix "Fix login bug"     # quick fix (no planning phase)
+devflow check                   # run quality gate
+devflow status                  # see what's in progress
 ```
+
+---
 
 ## Architecture
 
-```
-                    YOU
-                     │
-                     ▼
-               ┌───────────┐
-               │  devflow   │  CLI (Typer)
-               │   cli.py   │  zero business logic
-               └─────┬──────┘
-                     │
-         ┌───────────┼───────────┐
-         ▼           ▼           ▼
-   ┌──────────┐ ┌──────────┐ ┌──────────┐
-   │ build.py │ │ track.py │ │ gate.py  │
-   │orchestr. │ │  state   │ │ quality  │
-   └────┬─────┘ └────┬─────┘ └──────────┘
-        │             │
-        ▼             ▼
-   ┌──────────┐ ┌──────────────┐
-   │workflow.py│ │.devflow/     │
-   │YAML+state│ │ state.json   │
-   └────┬─────┘ └──────────────┘
-        │
-        ▼
-   ┌──────────┐
-   │models.py │  Pydantic types
-   │state     │  + state machine
-   │machine   │
-   └──────────┘
+```mermaid
+graph TD
+    YOU([You]) --> CLI[cli.py<br><i>Typer CLI</i>]
 
-   ~/.claude/agents/  ← devflow install
-   ~/.claude/skills/  ← syncs from assets/
+    CLI --> BUILD[build.py<br><i>orchestration loop</i>]
+    CLI --> TRACK[track.py<br><i>state read/write</i>]
+    CLI --> GATE[gate.py<br><i>quality checks</i>]
+
+    BUILD --> RUNNER[runner.py<br><i>claude -p prompt</i>]
+    BUILD --> WORKFLOW[workflow.py<br><i>YAML + state persistence</i>]
+
+    TRACK --> STATE[(.devflow/state.json)]
+    WORKFLOW --> STATE
+    WORKFLOW --> MODELS[models.py<br><i>Pydantic + state machine</i>]
+    WORKFLOW --> YAMLS[workflows/*.yaml]
+
+    GATE --> RUFF[ruff]
+    GATE --> PYTEST[pytest]
+    GATE --> SECRETS[secrets scan]
+
+    RUNNER --> AGENTS[~/.claude/agents/*.md]
+    RUNNER --> SKILLS[~/.claude/skills/*.md]
+
+    style YOU fill:#f9f,stroke:#333
+    style STATE fill:#ffa,stroke:#333
+    style AGENTS fill:#aff,stroke:#333
+    style SKILLS fill:#aff,stroke:#333
 ```
 
-### The fundamental split
+**The split:** Python handles what must be programmatic (state, validation, automation). Markdown handles what must be flexible (agent behavior, instructions, prompts).
 
-| Lives in Python | Lives in .md files |
-|---|---|
-| State persistence (state.json) | Agent behavior (how to plan, code, review) |
-| State machine (validated transitions) | Skills (build workflow, GSD, RTK) |
-| Quality gate (lint, tests, secrets) | Checklists and conventions |
-| Multi-feature tracking | Context management rules |
-| `devflow install` (file sync) | — |
-
-Python handles what **must be programmatic** (state, validation, automation).
-Markdown handles what **must be flexible** (behavior, instructions, prompts).
+---
 
 ## Workflows
 
@@ -104,46 +72,71 @@ Four built-in workflows, from fast to thorough:
 
 ```bash
 devflow build "Add caching layer" --workflow full
-devflow fix "Fix timezone bug"  # uses quick automatically
+devflow fix "Fix timezone bug"    # uses quick automatically
 ```
 
-## Agents
-
-9 specialized agents installed to `~/.claude/agents/`:
-
-| Agent | Role |
-|-------|------|
-| **architect** | System design, module boundaries, dependency graphs |
-| **planner** | Step-by-step implementation plans with risk assessment |
-| **developer** | Base rules: git workflow, architecture, error handling |
-| **developer-python** | Pydantic v2, typing, pytest, crash-safe I/O |
-| **developer-typescript** | Strict types, Zod, ESM, discriminated unions |
-| **developer-php** | PHP 8.2+, Laravel patterns, Pest, PHPStan |
-| **developer-frontend** | React/Next.js, CSS modules, a11y, performance |
-| **reviewer** | 5-pass code review (plan, correctness, security, quality, tests) |
-| **tester** | Quality gate, coverage analysis, edge case audit |
-
-Each agent has deep behavioral instructions: code examples, anti-patterns,
-output formats, and constraints. Not generic prompts — real engineering standards.
+---
 
 ## State machine
 
 Every feature follows a lifecycle with validated transitions:
 
-```
-pending → planning → plan_review → implementing → reviewing
-       → fixing → gate → done
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> planning
+    pending --> implementing : fix workflow
 
-Any state → blocked  (question needs answering)
-Any state → failed   (terminal)
+    planning --> plan_review
+    plan_review --> implementing
+    plan_review --> planning : revise
+
+    implementing --> reviewing
+    implementing --> gate : skip review
+
+    reviewing --> fixing
+    reviewing --> gate : no issues
+
+    fixing --> reviewing : re-review
+    fixing --> gate
+
+    gate --> done : pass
+    gate --> fixing : fail
+
+    done --> [*]
+    failed --> [*]
+
+    state "any non-terminal" as any
+    any --> blocked
+    any --> failed
+    blocked --> any
 ```
 
-Invalid transitions raise `InvalidTransition`. State persists to
-`.devflow/state.json` before every phase change (crash-safe via tmp + rename).
+Invalid transitions raise `InvalidTransition`. State persists to `.devflow/state.json` before every phase change (crash-safe via tmp + rename).
+
+---
+
+## Agents
+
+9 specialized agents installed to `~/.claude/agents/`:
+
+| | Agent | Role |
+|-|-------|------|
+| **Planning** | `architect` | System design, module boundaries, dependency graphs |
+| | `planner` | Step-by-step plans with risk assessment |
+| **Implementation** | `developer` | Base rules: git workflow, architecture, error handling |
+| | `developer-python` | Pydantic v2, typing, pytest, crash-safe I/O |
+| | `developer-typescript` | Strict types, Zod, ESM, discriminated unions |
+| | `developer-php` | PHP 8.2+, Laravel patterns, Pest, PHPStan |
+| | `developer-frontend` | React/Next.js, CSS modules, a11y, performance |
+| **Quality** | `reviewer` | 5-pass review: plan, correctness, security, quality, tests |
+| | `tester` | Quality gate, coverage analysis, edge case audit |
+
+Each agent has deep behavioral instructions with code examples, anti-patterns, output formats, and constraints. Not generic prompts — real engineering standards.
+
+---
 
 ## Skills
-
-4 skills installed to `~/.claude/skills/`:
 
 | Skill | Purpose |
 |-------|---------|
@@ -151,6 +144,8 @@ Invalid transitions raise `InvalidTransition`. State persists to
 | **check** | Quality gate checklist (automated + behavioral) |
 | **gsd** | Fresh context per phase, atomic commits, verify-after-change |
 | **rtk** | Token compression: targeted reads, filtered output, skip known-good |
+
+---
 
 ## Commands
 
@@ -160,39 +155,23 @@ Invalid transitions raise `InvalidTransition`. State persists to
 | `devflow update` | Update agents and skills to latest |
 | `devflow init` | Initialize `.devflow/` in current project |
 | `devflow build "..."` | Build a feature (default: standard workflow) |
-| `devflow build --resume feat-001` | Resume a feature |
+| `devflow build "..." --dry-run` | Show prompts without executing |
+| `devflow build --resume feat-001` | Resume a feature from where it left off |
 | `devflow fix "..."` | Fix a bug (quick workflow) |
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
 | `devflow status` | Show all tracked features |
 | `devflow status feat-001` | Show details for one feature |
 
-## Project structure
-
-```
-devflow-ai/
-├── src/devflow/
-│   ├── cli.py        — Typer commands, zero logic
-│   ├── models.py     — Pydantic types + state machine
-│   ├── workflow.py   — YAML loading, state persistence
-│   ├── build.py      — Build/fix orchestration
-│   ├── track.py      — Feature state read/write
-│   ├── gate.py       — Quality gate (ruff, pytest, secrets)
-│   ├── install.py    — Sync assets to ~/.claude/
-│   └── display.py    — Rich display components
-├── assets/
-│   ├── agents/       — 9 agent definitions (.md)
-│   └── skills/       — 4 skill definitions (.md)
-├── workflows/        — 4 YAML workflow definitions
-├── tests/            — 71 tests
-└── pyproject.toml
-```
+---
 
 ## Inspired by
 
-- **[Everything Claude Code](https://github.com/anthropics/everything-claude-code)** — agents as .md files, skills composable, continuous learning
+- **[Everything Claude Code](https://github.com/anthropics/everything-claude-code)** — agents as .md files, composable skills, continuous learning
 - **[AWF](https://github.com/awf-project/cli)** — chained phases with context injection, externalized prompts
 - **GSD** — fresh context per phase, no context rot
 - **RTK** — token compression for agent operations
+
+---
 
 ## Contributing
 

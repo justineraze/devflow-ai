@@ -47,38 +47,37 @@ def build(
     workflow: Annotated[
         str, typer.Option("--workflow", "-w", help="Workflow to use")
     ] = "standard",
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show prompts without executing")
+    ] = False,
 ) -> None:
     """Build a feature end-to-end using the AI workflow."""
-    from devflow.build import resume_build, run_phase, start_build
+    from devflow.build import execute_build_loop, resume_build, start_build
 
     feature = resume_build(resume) if resume else start_build(description, workflow)
 
     if not feature:
         raise typer.Exit(1)
 
-    # Run all phases sequentially.
-    while not feature.is_terminal:
-        phase = run_phase(feature)
-        if not phase:
-            break
-        # In a real run, this is where Claude Code executes the phase.
-        # For now, we mark phases as done to advance the state machine.
-        console.print(
-            f"[dim]→ Phase {phase.name!r} ready for agent execution[/dim]"
-        )
-        break  # Stop after preparing one phase — Claude Code takes over.
+    success = execute_build_loop(feature, dry_run=dry_run)
+    if not success:
+        raise typer.Exit(1)
 
 
 @app.command()
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show prompts without executing")
+    ] = False,
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
-    from devflow.build import start_fix
+    from devflow.build import execute_build_loop, start_fix
 
     feature = start_fix(description)
-    console.print(f"[green]Fix started:[/green] {feature.id}")
-    console.print("[dim]Workflow: quick (implement → gate)[/dim]")
+    success = execute_build_loop(feature, dry_run=dry_run)
+    if not success:
+        raise typer.Exit(1)
 
 
 @app.command()

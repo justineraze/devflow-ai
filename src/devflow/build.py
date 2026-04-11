@@ -152,6 +152,61 @@ def run_phase(
     return phase
 
 
+def execute_build_loop(
+    feature: Feature,
+    dry_run: bool = False,
+    base: Path | None = None,
+) -> bool:
+    """Run all remaining phases of a feature through Claude Code.
+
+    This is the main orchestration loop:
+    1. Advance to the next phase
+    2. Execute it (Claude Code or gate)
+    3. Mark done/failed
+    4. Repeat until all phases complete or a phase fails
+
+    Returns True if the feature completed successfully.
+    """
+    from devflow.runner import execute_phase, run_gate_phase
+
+    while True:
+        phase = run_phase(feature, base)
+        if not phase:
+            return True  # All phases done.
+
+        agent_name = _get_phase_agent(feature, phase.name)
+
+        # Gate phase runs locally, not through Claude Code.
+        if phase.name == "gate":
+            success, output = run_gate_phase(base)
+        else:
+            # Load timeout from workflow definition.
+            timeout = _get_phase_timeout(feature, phase.name)
+            success, output = execute_phase(
+                feature, phase, agent_name,
+                timeout=timeout, dry_run=dry_run,
+            )
+
+        if success:
+            complete_phase(feature.id, phase.name, output, base)
+            console.print(f"[green]✓ Phase {phase.name!r} complete[/green]")
+        else:
+            fail_phase(feature.id, phase.name, output, base)
+            console.print(f"[red]✗ Phase {phase.name!r} failed[/red]")
+            if output:
+                console.print(f"[dim]{output[:500]}[/dim]")
+            return False
+
+        # Refresh feature from state (phases are updated on disk).
+        state = load_state(base)
+        tracked = state.get_feature(feature.id)
+        if not tracked or tracked.is_terminal:
+            return tracked.status == FeatureStatus.DONE if tracked else False
+        feature = tracked
+
+    return False
+
+
 def complete_phase(
     feature_id: str,
     phase_name: str,
@@ -214,3 +269,15 @@ def _get_phase_agent(feature: Feature, phase_name: str) -> str:
     except FileNotFoundError:
         pass
     return "developer"
+
+
+def _get_phase_timeout(feature: Feature, phase_name: str) -> int:
+    """Get the timeout for a phase from the workflow definition."""
+    try:
+        wf = load_workflow(feature.workflow)
+        for phase_def in wf.phases:
+            if phase_def.name == phase_name:
+                return phase_def.timeout
+    except FileNotFoundError:
+        pass
+    return 600
