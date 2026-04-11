@@ -1,0 +1,27 @@
+name: standard
+description: Standard workflow — plan, implement, review, gate
+
+phases:
+  - name: planning
+    agent: planner
+    description: Analyze the request and create an implementation plan
+    required: true
+    timeout: 180
+
+  - name: implementing
+    agent: developer
+    description: Implement the plan step by step
+    required: true
+    timeout: 600
+
+  - name: reviewing
+    agent: reviewer
+    description: Review the implementation for quality and correctness
+    required: true
+    timeout: 180
+
+  - name: gate
+    agent: tester
+    description: Run quality gate and verify coverage
+    required: true
+    timeout: 120

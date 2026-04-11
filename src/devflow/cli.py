@@ -49,8 +49,24 @@ def build(
     ] = "standard",
 ) -> None:
     """Build a feature end-to-end using the AI workflow."""
-    # Stub — implemented in Phase 5.
-    console.print(f"[yellow]build: not yet implemented (description={description!r})[/yellow]")
+    from devflow.build import resume_build, run_phase, start_build
+
+    feature = resume_build(resume) if resume else start_build(description, workflow)
+
+    if not feature:
+        raise typer.Exit(1)
+
+    # Run all phases sequentially.
+    while not feature.is_terminal:
+        phase = run_phase(feature)
+        if not phase:
+            break
+        # In a real run, this is where Claude Code executes the phase.
+        # For now, we mark phases as done to advance the state machine.
+        console.print(
+            f"[dim]→ Phase {phase.name!r} ready for agent execution[/dim]"
+        )
+        break  # Stop after preparing one phase — Claude Code takes over.
 
 
 @app.command()
@@ -58,8 +74,11 @@ def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
-    # Stub — implemented in Phase 5.
-    console.print(f"[yellow]fix: not yet implemented (description={description!r})[/yellow]")
+    from devflow.build import start_fix
+
+    feature = start_fix(description)
+    console.print(f"[green]Fix started:[/green] {feature.id}")
+    console.print("[dim]Workflow: quick (implement → gate)[/dim]")
 
 
 @app.command()
