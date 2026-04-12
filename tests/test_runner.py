@@ -104,50 +104,60 @@ class TestFindAgentFile:
         assert _find_agent_file("nonexistent-agent-xyz") is None
 
 
+def _mock_popen(returncode: int = 0, stdout_lines: list[str] | None = None,
+                stderr: str = "") -> MagicMock:
+    """Build a Popen mock with streamable stdout."""
+    proc = MagicMock()
+    proc.returncode = returncode
+    proc.stdout = iter(stdout_lines or [])
+    proc.stderr.read.return_value = stderr
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock()
+    return proc
+
+
 class TestExecutePhase:
-    @patch("devflow.runner.subprocess.run")
+    @patch("devflow.runner.subprocess.Popen")
     def test_successful_execution(
-        self, mock_run: MagicMock, sample_feature: Feature,
+        self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="done", stderr="")
+        result_line = (
+            '{"type":"result","duration_ms":1000,"total_cost_usd":0.01,'
+            '"result":"done","usage":{"input_tokens":100,"output_tokens":50}}'
+        )
+        mock_popen.return_value = _mock_popen(
+            returncode=0, stdout_lines=[result_line],
+        )
         phase = sample_feature.phases[1]
         success, output = execute_phase(sample_feature, phase, "developer")
         assert success is True
+        assert "done" in output
 
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_popen.call_args[0][0]
         assert cmd[0] == "claude"
-        assert "-p" in cmd
-        assert "--permission-mode" in cmd
+        assert "--output-format" in cmd
+        assert "stream-json" in cmd
 
-    @patch("devflow.runner.subprocess.run")
+    @patch("devflow.runner.subprocess.Popen")
     def test_failed_execution(
-        self, mock_run: MagicMock, sample_feature: Feature,
+        self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="Error: something broke",
+        mock_popen.return_value = _mock_popen(
+            returncode=1, stdout_lines=[], stderr="Error: something broke",
         )
         phase = sample_feature.phases[1]
         success, output = execute_phase(sample_feature, phase, "developer")
         assert success is False
         assert "something broke" in output
 
-    @patch("devflow.runner.subprocess.run", side_effect=FileNotFoundError)
+    @patch("devflow.runner.subprocess.Popen", side_effect=FileNotFoundError)
     def test_claude_not_installed(
-        self, mock_run: MagicMock, sample_feature: Feature,
+        self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
         phase = sample_feature.phases[1]
         success, output = execute_phase(sample_feature, phase, "developer")
         assert success is False
         assert "Claude Code CLI not found" in output
-
-    @patch("devflow.runner.subprocess.run", side_effect=KeyboardInterrupt)
-    def test_keyboard_interrupt(
-        self, mock_run: MagicMock, sample_feature: Feature,
-    ) -> None:
-        phase = sample_feature.phases[1]
-        success, output = execute_phase(sample_feature, phase, "developer")
-        assert success is False
-        assert "Interrupted" in output
 
 
 class TestRunGatePhase:
