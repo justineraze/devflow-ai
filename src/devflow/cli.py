@@ -174,6 +174,14 @@ def doctor() -> None:
 
 
 @app.command()
+def version() -> None:
+    """Show the current devflow version."""
+    from devflow import __version__
+
+    console.print(f"devflow {__version__}")
+
+
+@app.command()
 def init() -> None:
     """Initialize devflow in the current project."""
     from pathlib import Path

@@ -7,6 +7,20 @@ from devflow.cli import app
 runner = CliRunner()
 
 
+class TestVersionCommand:
+    def test_command_is_registered(self) -> None:
+        result = runner.invoke(app, ["version", "--help"])
+        assert result.exit_code == 0
+        assert "Show the current devflow version" in result.output
+
+    def test_shows_version(self) -> None:
+        from devflow import __version__
+
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0
+        assert f"devflow {__version__}" in result.output
+
+
 class TestRetryCommand:
     def test_command_is_registered(self) -> None:
         result = runner.invoke(app, ["retry", "--help"])
