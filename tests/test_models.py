@@ -67,10 +67,11 @@ class TestFeatureTransitions:
         with pytest.raises(InvalidTransition):
             feat.transition_to(FeatureStatus.IMPLEMENTING)
 
-    def test_cannot_leave_failed(self) -> None:
+    def test_failed_can_recover(self) -> None:
+        """Failed features can be resumed — transition back to any state."""
         feat = Feature(id="f-001", description="test", status=FeatureStatus.FAILED)
-        with pytest.raises(InvalidTransition):
-            feat.transition_to(FeatureStatus.PENDING)
+        feat.transition_to(FeatureStatus.PENDING)
+        assert feat.status == FeatureStatus.PENDING
 
     def test_any_state_can_go_to_blocked(self) -> None:
         for status in FeatureStatus:
@@ -122,9 +123,9 @@ class TestFeatureProperties:
         feat = Feature(id="f-001", description="test", status=FeatureStatus.DONE)
         assert feat.is_terminal is True
 
-    def test_is_terminal_failed(self) -> None:
+    def test_failed_is_not_terminal(self) -> None:
         feat = Feature(id="f-001", description="test", status=FeatureStatus.FAILED)
-        assert feat.is_terminal is True
+        assert feat.is_terminal is False
 
     def test_not_terminal_pending(self) -> None:
         feat = Feature(id="f-001", description="test")
