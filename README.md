@@ -9,14 +9,25 @@ devflow-ai doesn't reinvent Claude Code — it provides what Claude Code can't d
 
 ---
 
+## Prerequisites
+
+- [Python 3.11+](https://www.python.org)
+- [uv](https://docs.astral.sh/uv/) — Python package manager
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `claude` CLI
+- [GitHub CLI](https://cli.github.com/) — `gh` (for PR creation)
+
+```bash
+devflow doctor                  # check your setup
+```
+
 ## Quickstart
 
 ```bash
-pip install devflow-ai          # or: uv add devflow-ai
+uv tool install devflow-ai      # install globally
 
 devflow install                 # sync agents & skills to ~/.claude/
-devflow init                    # initialize in your project
-devflow build "Add user auth"   # build a feature end-to-end
+devflow init                    # detect stack + initialize project
+devflow build "Add user auth"   # plan → review → implement → PR
 devflow fix "Fix login bug"     # quick fix (no planning phase)
 devflow check                   # run quality gate
 devflow status                  # see what's in progress
@@ -151,9 +162,10 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 
 | Command | Description |
 |---------|-------------|
+| `devflow doctor` | Check installation health (Python, Claude, gh, agents) |
 | `devflow install` | Sync agents and skills to `~/.claude/` |
 | `devflow update` | Update agents and skills to latest |
-| `devflow init` | Initialize `.devflow/` in current project |
+| `devflow init` | Detect stack + initialize `.devflow/` |
 | `devflow build "..."` | Build a feature (default: standard workflow) |
 | `devflow build "feedback" --resume feat-001` | Resume with feedback on the plan |
 | `devflow fix "..."` | Fix a bug (quick workflow) |
