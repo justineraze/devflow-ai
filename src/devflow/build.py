@@ -118,7 +118,11 @@ def resume_build(
     feature_id: str,
     base: Path | None = None,
 ) -> Feature | None:
-    """Resume an existing feature build."""
+    """Resume an existing feature build.
+
+    If the feature is failed, resets the failed phase to pending
+    so it can be retried.
+    """
     state = load_state(base)
     feature = state.get_feature(feature_id)
 
@@ -130,7 +134,40 @@ def resume_build(
             f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
         )
         return None
+
+    # Recover from failed: reset the failed phase to pending.
+    if feature.status == FeatureStatus.FAILED:
+        _recover_failed_feature(feature)
+        save_state(state, base)
+        console.print(f"[cyan]Recovering {feature_id} from failed state.[/cyan]")
+
     return feature
+
+
+def _recover_failed_feature(feature: Feature) -> None:
+    """Reset a failed feature so it can be retried.
+
+    Finds the last failed phase, resets it to pending, and sets
+    the feature status to the appropriate state for that phase.
+    """
+    for phase in reversed(feature.phases):
+        if phase.status == PhaseStatus.FAILED:
+            phase.status = PhaseStatus.PENDING
+            phase.started_at = None
+            phase.completed_at = None
+            phase.error = ""
+
+            # Reset to PENDING, then walk forward through done phases.
+            feature.status = FeatureStatus.PENDING
+            # Walk forward to the state just before the failed phase.
+            for p in feature.phases:
+                if p.name == phase.name:
+                    break
+                if p.status == PhaseStatus.DONE:
+                    t = PHASE_TO_STATUS.get(p.name)
+                    if t:
+                        _transition_safe(feature, t)
+            return
 
 
 def start_fix(description: str, base: Path | None = None) -> Feature:

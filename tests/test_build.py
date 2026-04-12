@@ -77,13 +77,34 @@ class TestResumeBuild:
     def test_returns_none_for_missing(self, project_dir: Path) -> None:
         assert resume_build("nonexistent", project_dir) is None
 
-    def test_returns_none_for_terminal(self, project_dir: Path) -> None:
+    def test_returns_none_for_done(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         tracked.status = FeatureStatus.DONE
         save_state(state, project_dir)
         assert resume_build(feature.id, project_dir) is None
+
+    def test_recovers_failed_feature(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        # Advance to implementing, then fail it.
+        run_phase(feature, project_dir)  # planning
+        complete_phase(feature.id, "planning", "plan", project_dir)
+        state = load_state(project_dir)
+        tracked = state.get_feature(feature.id)
+        run_phase(tracked, project_dir)  # implementing
+        fail_phase(feature.id, "implementing", "broke", project_dir)
+
+        # Resume should recover.
+        resumed = resume_build(feature.id, project_dir)
+        assert resumed is not None
+        assert resumed.status != FeatureStatus.FAILED
+
+        # The failed phase should be pending again.
+        state = load_state(project_dir)
+        tracked = state.get_feature(feature.id)
+        impl_phase = next(p for p in tracked.phases if p.name == "implementing")
+        assert impl_phase.status == PhaseStatus.PENDING
 
 
 class TestRunPhase:

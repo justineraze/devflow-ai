@@ -55,7 +55,16 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
     },
-    FeatureStatus.FAILED: set(),
+    # FAILED is recoverable via --resume: can go back to any non-terminal state.
+    FeatureStatus.FAILED: {
+        FeatureStatus.PENDING,
+        FeatureStatus.PLANNING,
+        FeatureStatus.PLAN_REVIEW,
+        FeatureStatus.IMPLEMENTING,
+        FeatureStatus.REVIEWING,
+        FeatureStatus.FIXING,
+        FeatureStatus.GATE,
+    },
 }
 
 # Any non-terminal state can transition to BLOCKED or FAILED.
@@ -132,8 +141,8 @@ class Feature(BaseModel):
 
     @property
     def is_terminal(self) -> bool:
-        """Return True if the feature is in a terminal state (done or failed)."""
-        return self.status in {FeatureStatus.DONE, FeatureStatus.FAILED}
+        """Return True if the feature is done. Failed features can be resumed."""
+        return self.status == FeatureStatus.DONE
 
 
 class WorkflowState(BaseModel):
