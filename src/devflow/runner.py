@@ -250,6 +250,22 @@ def create_pull_request(
 
     body = "\n".join(body_parts)
     title = feature.description[:70]
+    cwd = str(Path.cwd())
+
+    # Commit any uncommitted changes (Claude Code may not have committed).
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    if status.stdout.strip():
+        subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"feat: {feature.description}"],
+            cwd=cwd,
+            capture_output=True,
+        )
 
     # Push branch then create PR.
     push = subprocess.run(

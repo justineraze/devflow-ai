@@ -327,7 +327,9 @@ def execute_build_loop(
         if not phase:
             break
 
-        phase_num += 1
+        # Count done phases + current to get accurate numbering.
+        done_count = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
+        phase_num = done_count + 1
         agent_name = _get_phase_agent(feature, phase.name, base)
 
         console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]", end="")
@@ -359,7 +361,7 @@ def execute_build_loop(
         feature = tracked
 
     # === STEP 4: Create PR ===
-    console.print(f"\n[bold green]✓ Feature complete[/bold green] [{phase_num}/{total}]")
+    console.print(f"\n[bold green]✓ Feature complete[/bold green] [{total}/{total}]")
 
     console.print("[dim]Creating PR...[/dim]")
     state = load_state(base)
