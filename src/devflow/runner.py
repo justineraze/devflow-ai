@@ -215,15 +215,26 @@ def run_gate_phase(base: Path | None = None) -> tuple[bool, str]:
 def create_branch(feature_id: str) -> str:
     """Create and checkout a git branch for the feature.
 
-    Returns the branch name.
+    If the branch already exists, switches to it instead.
+    Returns the actual branch name.
     """
     branch = f"feat/{feature_id}"
-    subprocess.run(
+    cwd = str(Path.cwd())
+
+    result = subprocess.run(
         ["git", "checkout", "-b", branch],
         capture_output=True,
         text=True,
-        cwd=str(Path.cwd()),
+        cwd=cwd,
     )
+    # Branch already exists — switch to it.
+    if result.returncode != 0:
+        subprocess.run(
+            ["git", "checkout", branch],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+        )
     return branch
 
 
@@ -253,19 +264,30 @@ def create_pull_request(
     cwd = str(Path.cwd())
 
     # Commit any uncommitted changes (Claude Code may not have committed).
-    status = subprocess.run(
-        ["git", "status", "--porcelain"],
-        capture_output=True,
-        text=True,
+    # Stage everything first, then check if there's anything to commit.
+    subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True)
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
         cwd=cwd,
+        capture_output=True,
     )
-    if status.stdout.strip():
-        subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True)
+    if diff.returncode != 0:  # There are staged changes.
         subprocess.run(
             ["git", "commit", "-m", f"feat: {feature.description}"],
             cwd=cwd,
             capture_output=True,
         )
+
+    # Verify we have commits ahead of main before pushing.
+    ahead = subprocess.run(
+        ["git", "rev-list", "--count", "main..HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    if ahead.stdout.strip() == "0":
+        console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")
+        return None
 
     # Push branch then create PR.
     push = subprocess.run(
