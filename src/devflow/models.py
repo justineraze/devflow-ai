@@ -38,12 +38,32 @@ class FeatureStatus(StrEnum):
 # "blocked" can be reached from any non-terminal state.
 # "failed" is terminal — no transitions out.
 VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
-    FeatureStatus.PENDING: {FeatureStatus.PLANNING, FeatureStatus.IMPLEMENTING},
-    FeatureStatus.PLANNING: {FeatureStatus.PLAN_REVIEW},
-    FeatureStatus.PLAN_REVIEW: {FeatureStatus.IMPLEMENTING, FeatureStatus.PLANNING},
-    FeatureStatus.IMPLEMENTING: {FeatureStatus.REVIEWING, FeatureStatus.GATE},
-    FeatureStatus.REVIEWING: {FeatureStatus.FIXING, FeatureStatus.GATE},
-    FeatureStatus.FIXING: {FeatureStatus.REVIEWING, FeatureStatus.GATE},
+    FeatureStatus.PENDING: {
+        FeatureStatus.PLANNING,
+        FeatureStatus.IMPLEMENTING,
+    },
+    # PLANNING can skip plan_review in workflows that don't include it.
+    FeatureStatus.PLANNING: {
+        FeatureStatus.PLAN_REVIEW,
+        FeatureStatus.IMPLEMENTING,
+    },
+    FeatureStatus.PLAN_REVIEW: {
+        FeatureStatus.IMPLEMENTING,
+        FeatureStatus.PLANNING,
+    },
+    # IMPLEMENTING can skip review in light/quick workflows.
+    FeatureStatus.IMPLEMENTING: {
+        FeatureStatus.REVIEWING,
+        FeatureStatus.GATE,
+    },
+    FeatureStatus.REVIEWING: {
+        FeatureStatus.FIXING,
+        FeatureStatus.GATE,
+    },
+    FeatureStatus.FIXING: {
+        FeatureStatus.REVIEWING,
+        FeatureStatus.GATE,
+    },
     FeatureStatus.GATE: {FeatureStatus.DONE, FeatureStatus.FIXING},
     FeatureStatus.DONE: set(),
     FeatureStatus.BLOCKED: {
