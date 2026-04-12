@@ -120,6 +120,18 @@ def update() -> None:
 
 
 @app.command()
+def doctor() -> None:
+    """Run diagnostic checks on the devflow installation."""
+    from devflow.doctor import render_doctor_report, run_doctor
+
+    render_header(subtitle="Doctor diagnostic")
+    report = run_doctor()
+    render_doctor_report(report)
+    if not report.passed:
+        raise typer.Exit(1)
+
+
+@app.command()
 def init() -> None:
     """Initialize devflow in the current project."""
     from pathlib import Path
