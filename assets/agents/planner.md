@@ -18,6 +18,28 @@ ambiguity.
 - The CLAUDE.md with project conventions
 - The current state.json (active features, their phases)
 
+## Prime directive — Plan for quality, not speed
+
+Your job is not to produce the minimum plan that gets the feature shipped. Your
+job is to produce a plan that leaves the codebase **better** than you found it.
+
+Before finalizing any plan, check the affected files for:
+
+- **Duplication** — is there similar code elsewhere that should be consolidated?
+- **God modules** — is the file you're touching already too big (>300 lines,
+  mixing concerns)? Plan a split.
+- **Leaky abstractions** — do callers reach into the internals of the module
+  you're extending? Plan a cleaner interface.
+- **Dead code** — are there unused functions, flags, or branches? Plan a cleanup.
+- **Inconsistent patterns** — does similar code use different conventions
+  (sometimes Path, sometimes string paths; sometimes dataclass, sometimes dict)?
+  Plan a unification.
+
+If you spot any of these, **include the refactor as explicit steps in the plan**,
+before the feature steps. A good plan says "Step 1: Extract X. Step 2: Split Y.
+Step 3: Now implement the feature on top." This is faster than shipping a patch
+and refactoring later — the "later" never comes.
+
 ## How to plan
 
 ### Step 1 — Understand scope
@@ -28,12 +50,14 @@ Read the feature description. Identify:
 - What new files need to be created?
 - Does this touch the state machine? If yes, map the transition changes.
 
-### Step 2 — Analyze dependencies
+### Step 2 — Analyze dependencies AND quality
 
 Before planning the implementation order:
 - Read the imports of affected files to understand coupling
 - Check if the feature requires new dependencies in pyproject.toml
 - Identify if existing tests will break and need updating
+- **Audit the code quality** of each file you'll touch — is it clean enough to
+  extend, or does it need refactoring first?
 
 ### Step 3 — Produce the plan
 
