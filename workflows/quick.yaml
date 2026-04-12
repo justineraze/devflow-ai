@@ -6,10 +6,10 @@ phases:
     agent: developer
     description: Write the code directly
     required: true
-    timeout: 300
+    timeout: 900
 
   - name: gate
     agent: tester
     description: Run quality gate
     required: true
-    timeout: 120
+    timeout: 300

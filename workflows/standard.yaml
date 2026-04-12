@@ -6,22 +6,22 @@ phases:
     agent: planner
     description: Analyze the request and create an implementation plan
     required: true
-    timeout: 180
+    timeout: 600
 
   - name: implementing
     agent: developer
     description: Implement the plan step by step
     required: true
-    timeout: 600
+    timeout: 900
 
   - name: reviewing
     agent: reviewer
     description: Review the implementation for quality and correctness
     required: true
-    timeout: 180
+    timeout: 600
 
   - name: gate
     agent: tester
     description: Run quality gate and verify coverage
     required: true
-    timeout: 120
+    timeout: 300

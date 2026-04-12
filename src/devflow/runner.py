@@ -27,11 +27,17 @@ def _find_agent_file(agent_name: str) -> Path | None:
 
 
 def _load_agent_prompt(agent_name: str) -> str:
-    """Load the agent's .md file content as system instructions."""
+    """Load the agent's .md file content, stripping YAML frontmatter."""
     path = _find_agent_file(agent_name)
     if not path:
         return ""
-    return path.read_text()
+    content = path.read_text()
+    # Strip YAML frontmatter (---\n...\n---) — it's metadata, not instructions.
+    if content.startswith("---"):
+        end = content.find("---", 3)
+        if end != -1:
+            content = content[end + 3:].lstrip("\n")
+    return content
 
 
 def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
@@ -80,6 +86,18 @@ Feature status: {feature.status.value}""")
 
     if previous_context:
         sections.append(f"## Context from previous phases\n\n{previous_context}")
+
+    # If resuming planning with feedback, inject it.
+    feedback = feature.metadata.get("feedback")
+    if feedback and phase.name == "planning":
+        sections.append(
+            "## Feedback utilisateur sur le plan précédent\n\n"
+            f"L'utilisateur a refusé le plan précédent avec ce retour :\n\n"
+            f"> {feedback}\n\n"
+            "Produis un nouveau plan qui prend en compte ce feedback. "
+            "Ne répète pas les parties du plan qui n'ont pas changé, "
+            "concentre-toi sur les modifications demandées."
+        )
 
     # Phase-specific instructions.
     phase_instructions = _get_phase_instructions(phase.name, feature)
@@ -141,70 +159,117 @@ def execute_phase(
     feature: Feature,
     phase: PhaseRecord,
     agent_name: str,
-    timeout: int = 600,
-    dry_run: bool = False,
 ) -> tuple[bool, str]:
     """Execute a phase by calling Claude Code.
 
-    Args:
-        feature: The feature being built.
-        phase: The current phase to execute.
-        agent_name: Which agent to use.
-        timeout: Max seconds for Claude Code execution.
-        dry_run: If True, print the prompt instead of executing.
+    Captures output silently — the user sees only phase status.
+    No timeout — waits for Claude Code to finish.
 
     Returns:
         Tuple of (success: bool, output: str).
     """
     prompt = build_prompt(feature, phase, agent_name)
 
-    if dry_run:
-        console.print("[yellow]DRY RUN — prompt that would be sent:[/yellow]")
-        console.print(prompt[:3000])
-        if len(prompt) > 3000:
-            console.print(f"[dim]... ({len(prompt)} chars total)[/dim]")
-        return True, "[dry run]"
-
-    console.print(f"[cyan]Executing phase {phase.name!r} with agent {agent_name}...[/cyan]")
-
     try:
         result = subprocess.run(
-            ["claude", "-p", prompt],
+            [
+                "claude", "-p", "-",
+                "--permission-mode", "acceptEdits",
+            ],
+            input=prompt,
             capture_output=True,
             text=True,
-            timeout=timeout,
             cwd=str(Path.cwd()),
         )
 
         output = result.stdout.strip()
         if result.returncode == 0:
             return True, output
-        else:
-            error = result.stderr.strip() or output or "Unknown error"
-            return False, error
+        error = result.stderr.strip() or output or "Unknown error"
+        return False, error
 
     except FileNotFoundError:
         return False, (
             "Claude Code CLI not found. "
             "Install it: https://docs.anthropic.com/en/docs/claude-code"
         )
-    except subprocess.TimeoutExpired:
-        return False, f"Phase {phase.name!r} timed out after {timeout}s"
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        return False, "Interrupted by user"
 
 
 def run_gate_phase(base: Path | None = None) -> tuple[bool, str]:
-    """Run the gate phase by executing devflow check directly.
-
-    The gate phase is special — it doesn't need Claude Code,
-    it runs the automated quality checks.
-    """
+    """Run the gate phase by executing devflow check directly."""
     from devflow.gate import run_gate
 
     report = run_gate(base)
-    summary_parts = []
+    parts = []
     for check in report.checks:
-        icon = "PASS" if check.passed else "FAIL"
-        summary_parts.append(f"{check.name}: {icon} — {check.message}")
+        icon = "✓" if check.passed else "✗"
+        parts.append(f"{icon} {check.name}: {check.message}")
 
-    summary = "\n".join(summary_parts)
+    summary = "  ".join(parts)
     return report.passed, summary
+
+
+def create_branch(feature_id: str) -> str:
+    """Create and checkout a git branch for the feature.
+
+    Returns the branch name.
+    """
+    branch = f"feat/{feature_id}"
+    subprocess.run(
+        ["git", "checkout", "-b", branch],
+        capture_output=True,
+        text=True,
+        cwd=str(Path.cwd()),
+    )
+    return branch
+
+
+def create_pull_request(
+    feature: Feature,
+    branch: str,
+) -> str | None:
+    """Create a GitHub PR for the feature.
+
+    Returns the PR URL, or None if creation failed.
+    """
+    # Build PR body from phase outputs.
+    body_parts = ["## Summary", "", feature.description, ""]
+
+    for phase in feature.phases:
+        if phase.status.value == "done" and phase.output and phase.output != "[dry run]":
+            if phase.name == "planning":
+                body_parts.extend(["## Plan", "", phase.output, ""])
+            elif phase.name == "gate":
+                body_parts.extend(["## Quality gate", "", phase.output, ""])
+
+    body_parts.append("---")
+    body_parts.append("Built with [devflow-ai](https://github.com/JustineRaze/devflow-ai)")
+
+    body = "\n".join(body_parts)
+    title = feature.description[:70]
+
+    # Push branch then create PR.
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", branch],
+        capture_output=True,
+        text=True,
+        cwd=str(Path.cwd()),
+    )
+    if push.returncode != 0:
+        console.print(f"[red]Push failed: {push.stderr.strip()}[/red]")
+        return None
+
+    pr = subprocess.run(
+        ["gh", "pr", "create", "--title", title, "--body", body],
+        capture_output=True,
+        text=True,
+        cwd=str(Path.cwd()),
+    )
+    if pr.returncode == 0:
+        return pr.stdout.strip()
+
+    console.print(f"[red]PR creation failed: {pr.stderr.strip()}[/red]")
+    return None

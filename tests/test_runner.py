@@ -94,50 +94,37 @@ class TestFindAgentFile:
 
 
 class TestExecutePhase:
-    def test_dry_run_returns_success(self, sample_feature: Feature) -> None:
-        phase = sample_feature.phases[1]
-        success, output = execute_phase(
-            sample_feature, phase, "developer", dry_run=True,
-        )
-        assert success is True
-        assert output == "[dry run]"
-
     @patch("devflow.runner.subprocess.run")
     def test_successful_execution(
         self, mock_run: MagicMock, sample_feature: Feature,
     ) -> None:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="Implementation complete.\nAll tests pass.",
-            stderr="",
-        )
+        mock_run.return_value = MagicMock(returncode=0)
         phase = sample_feature.phases[1]
         success, output = execute_phase(
             sample_feature, phase, "developer",
         )
         assert success is True
-        assert "Implementation complete" in output
 
-        # Verify claude was called with -p flag.
+        # Verify claude was called with -p and --permission-mode.
         call_args = mock_run.call_args
-        assert call_args[0][0][0] == "claude"
-        assert "-p" in call_args[0][0]
+        cmd = call_args[0][0]
+        assert cmd[0] == "claude"
+        assert "-p" in cmd
+        assert "--permission-mode" in cmd
 
     @patch("devflow.runner.subprocess.run")
     def test_failed_execution(
         self, mock_run: MagicMock, sample_feature: Feature,
     ) -> None:
         mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="Error: context limit exceeded",
+            returncode=1, stdout="", stderr="Error: something broke",
         )
         phase = sample_feature.phases[1]
         success, output = execute_phase(
             sample_feature, phase, "developer",
         )
         assert success is False
-        assert "context limit" in output
+        assert "something broke" in output
 
     @patch(
         "devflow.runner.subprocess.run",
@@ -153,18 +140,19 @@ class TestExecutePhase:
         assert success is False
         assert "Claude Code CLI not found" in output
 
-    @patch("devflow.runner.subprocess.run")
-    def test_timeout(
+    @patch(
+        "devflow.runner.subprocess.run",
+        side_effect=KeyboardInterrupt,
+    )
+    def test_keyboard_interrupt(
         self, mock_run: MagicMock, sample_feature: Feature,
     ) -> None:
-        import subprocess
-        mock_run.side_effect = subprocess.TimeoutExpired("claude", 60)
         phase = sample_feature.phases[1]
         success, output = execute_phase(
-            sample_feature, phase, "developer", timeout=60,
+            sample_feature, phase, "developer",
         )
         assert success is False
-        assert "timed out" in output
+        assert "Interrupted" in output
 
 
 class TestRunGatePhase:

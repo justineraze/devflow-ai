@@ -40,26 +40,35 @@ def status(
 
 @app.command()
 def build(
-    description: Annotated[str, typer.Argument(help="What to build")],
+    description: Annotated[str, typer.Argument(help="What to build, or feedback when resuming")],
     resume: Annotated[
         str | None, typer.Option("--resume", help="Resume a feature by ID")
     ] = None,
     workflow: Annotated[
         str, typer.Option("--workflow", "-w", help="Workflow to use")
     ] = "standard",
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Show prompts without executing")
-    ] = False,
 ) -> None:
-    """Build a feature end-to-end using the AI workflow."""
+    """Build a feature end-to-end using the AI workflow.
+
+    Runs planning first, shows the plan for review, then asks
+    for confirmation before implementing.
+
+    When resuming with --resume, the description becomes feedback
+    on the previous plan (e.g. "no framework detection, just languages").
+    """
     from devflow.build import execute_build_loop, resume_build, start_build
 
-    feature = resume_build(resume) if resume else start_build(description, workflow)
+    if resume:
+        feature = resume_build(resume)
+        feedback = description  # When resuming, description = feedback.
+    else:
+        feature = start_build(description, workflow)
+        feedback = None
 
     if not feature:
         raise typer.Exit(1)
 
-    success = execute_build_loop(feature, dry_run=dry_run)
+    success = execute_build_loop(feature, feedback=feedback)
     if not success:
         raise typer.Exit(1)
 
@@ -67,15 +76,12 @@ def build(
 @app.command()
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Show prompts without executing")
-    ] = False,
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
     from devflow.build import execute_build_loop, start_fix
 
     feature = start_fix(description)
-    success = execute_build_loop(feature, dry_run=dry_run)
+    success = execute_build_loop(feature)
     if not success:
         raise typer.Exit(1)
 

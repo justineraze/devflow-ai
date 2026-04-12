@@ -31,6 +31,8 @@ SKIP_EXTENSIONS: set[str] = {
 }
 SKIP_DIRS: set[str] = {
     ".git", ".venv", "venv", "__pycache__", ".devflow", "node_modules", ".ruff_cache",
+    "assets",  # Agent/skill .md files contain code examples with fake secrets.
+    "tests",  # Test files contain intentional fake secrets for scanner testing.
 }
 
 
