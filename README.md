@@ -155,21 +155,11 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 | `devflow update` | Update agents and skills to latest |
 | `devflow init` | Initialize `.devflow/` in current project |
 | `devflow build "..."` | Build a feature (default: standard workflow) |
-| `devflow build "..." --dry-run` | Show prompts without executing |
-| `devflow build --resume feat-001` | Resume a feature from where it left off |
+| `devflow build "feedback" --resume feat-001` | Resume with feedback on the plan |
 | `devflow fix "..."` | Fix a bug (quick workflow) |
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
 | `devflow status` | Show all tracked features |
 | `devflow status feat-001` | Show details for one feature |
-
----
-
-## Inspired by
-
-- **[Everything Claude Code](https://github.com/anthropics/everything-claude-code)** — agents as .md files, composable skills, continuous learning
-- **[AWF](https://github.com/awf-project/cli)** — chained phases with context injection, externalized prompts
-- **GSD** — fresh context per phase, no context rot
-- **RTK** — token compression for agent operations
 
 ---
 
