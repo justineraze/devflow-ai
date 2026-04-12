@@ -247,7 +247,7 @@ def execute_build_loop(
             break
 
         phase_num += 1
-        agent_name = _get_phase_agent(feature, phase.name)
+        agent_name = _get_phase_agent(feature, phase.name, base)
         is_planning_phase = phase.name in ("architecture", "planning", "plan_review")
 
         if not is_planning_phase:
@@ -328,7 +328,7 @@ def execute_build_loop(
             break
 
         phase_num += 1
-        agent_name = _get_phase_agent(feature, phase.name)
+        agent_name = _get_phase_agent(feature, phase.name, base)
 
         console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]", end="")
         start_time = time.monotonic()
@@ -423,13 +423,37 @@ def start_fix(
     return start_build(description, workflow_name="quick", base=base)
 
 
-def _get_phase_agent(feature: Feature, phase_name: str) -> str:
-    """Get the agent name for a phase from the workflow definition."""
+_STACK_AGENT_MAP: dict[str, str] = {
+    "python": "developer-python",
+    "typescript": "developer-typescript",
+    "php": "developer-php",
+}
+
+
+def _get_phase_agent(
+    feature: Feature,
+    phase_name: str,
+    base: Path | None = None,
+) -> str:
+    """Get the agent name for a phase from the workflow definition.
+
+    When the workflow assigns the generic ``"developer"`` agent and
+    a stack has been detected (via ``devflow init``), return the
+    language-specific agent instead (e.g. ``"developer-python"``).
+    """
+    agent = "developer"
     try:
         wf = load_workflow(feature.workflow)
         for phase_def in wf.phases:
             if phase_def.name == phase_name:
-                return phase_def.agent
+                agent = phase_def.agent
+                break
     except FileNotFoundError:
         pass
-    return "developer"
+
+    if agent == "developer":
+        state = load_state(base)
+        if state.stack and state.stack in _STACK_AGENT_MAP:
+            agent = _STACK_AGENT_MAP[state.stack]
+
+    return agent

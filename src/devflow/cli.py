@@ -122,7 +122,20 @@ def update() -> None:
 @app.command()
 def init() -> None:
     """Initialize devflow in the current project."""
-    from devflow.workflow import ensure_devflow_dir
+    from pathlib import Path
+
+    from devflow.detect import detect_stack
+    from devflow.workflow import ensure_devflow_dir, load_state, save_state
 
     devflow_dir = ensure_devflow_dir()
+
+    stack = detect_stack(Path.cwd())
+    state = load_state()
+    state.stack = stack
+    save_state(state)
+
     console.print(f"[green]Initialized devflow in {devflow_dir}[/green]")
+    if stack:
+        console.print(f"[green]Stack detected: {stack}[/green]")
+    else:
+        console.print("[yellow]No stack detected.[/yellow]")
