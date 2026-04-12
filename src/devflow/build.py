@@ -178,6 +178,24 @@ def start_fix(description: str, base: Path | None = None) -> Feature:
 # ── Phase management ───────────────────────────────────────────────────
 
 
+def _walk_to_done(feature: Feature) -> None:
+    """Walk the state machine from the current state through to DONE.
+
+    Tries each intermediate state that can reach DONE, silently
+    skipping invalid transitions.
+    """
+    path = [
+        FeatureStatus.IMPLEMENTING,
+        FeatureStatus.REVIEWING,
+        FeatureStatus.GATE,
+        FeatureStatus.DONE,
+    ]
+    for target in path:
+        if feature.status == target:
+            continue
+        _transition_safe(feature, target)
+
+
 def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
     """Advance to the next phase, update state machine, persist."""
     state = load_state(base)
@@ -187,8 +205,8 @@ def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
 
     phase = advance_phase(tracked)
     if not phase:
-        _transition_safe(tracked, FeatureStatus.GATE)
-        _transition_safe(tracked, FeatureStatus.DONE)
+        # All phases done — walk the state machine forward to DONE.
+        _walk_to_done(tracked)
         save_state(state, base)
         return None
 
@@ -403,7 +421,8 @@ def execute_build_loop(
 
             # Auto-commit after code-changing phases.
             if phase.name in ("implementing", "fixing"):
-                msg = f"feat({feature.id}): {phase.name} complete"
+                prefix = "fix" if feature.workflow == "quick" else "feat"
+                msg = f"{prefix}: {phase.name} — {feature.description[:60]}"
                 if commit_changes(msg):
                     console.print("  [dim]Auto-committed changes[/dim]")
                 diff = get_diff_stat()
