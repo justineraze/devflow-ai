@@ -184,3 +184,42 @@ def render_log_table(features: list[Feature]) -> None:
         )
 
     console.print(table)
+
+
+def render_log_detail(feature: Feature) -> None:
+    """Render detailed log view for a single feature."""
+    style = status_style(feature.status.value)
+    duration = _format_duration(feature.created_at, feature.updated_at)
+
+    console.print(f"\n[bold]{feature.id}[/bold] — {feature.description}")
+    console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
+    console.print(f"Workflow: [dim]{feature.workflow}[/dim]")
+    console.print(f"Created: [dim]{feature.created_at.strftime('%Y-%m-%d %H:%M')}[/dim]")
+    console.print(f"Duration: [dim]{duration}[/dim]")
+
+    if not feature.phases:
+        console.print("\n[dim]No phases recorded.[/dim]")
+        return
+
+    table = Table(title="Phases", border_style="dim")
+    table.add_column("Phase")
+    table.add_column("Status")
+    table.add_column("Duration")
+    table.add_column("Error", max_width=60)
+
+    for phase in feature.phases:
+        ps = status_style(phase.status.value)
+        marker = _phase_marker(phase.status)
+        if phase.started_at and phase.completed_at:
+            phase_duration = _format_duration(phase.started_at, phase.completed_at)
+        else:
+            phase_duration = "—"
+        error = _truncate(phase.error, 60) if phase.error else ""
+        table.add_row(
+            phase.name,
+            Text(f"{marker} {phase.status.value}", style=ps),
+            phase_duration,
+            error,
+        )
+
+    console.print(table)
