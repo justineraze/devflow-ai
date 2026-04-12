@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from pathlib import Path
 
@@ -158,22 +159,66 @@ def execute_phase(
 
     Captures output silently. No timeout — waits for Claude Code to finish.
     """
+    from devflow.stream import (
+        PhaseMetrics,
+        format_cost,
+        format_tokens,
+        format_tool_line,
+        parse_event,
+    )
+
     prompt = build_prompt(feature, phase, agent_name)
 
     try:
-        result = subprocess.run(
-            ["claude", "-p", "-", "--permission-mode", "acceptEdits"],
-            input=prompt,
-            capture_output=True,
+        proc = subprocess.Popen(
+            [
+                "claude", "-p", "-",
+                "--permission-mode", "acceptEdits",
+                "--output-format", "stream-json",
+                "--verbose",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=str(Path.cwd()),
         )
 
-        output = result.stdout.strip()
-        if result.returncode == 0:
-            return True, output
-        error = result.stderr.strip() or output or "Unknown error"
-        return False, error
+        # Send prompt and close stdin.
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+
+        metrics = PhaseMetrics()
+        tool_count = 0
+
+        # Stream stdout line by line, showing tool uses live.
+        for line in proc.stdout:
+            parsed = parse_event(line)
+            if not parsed:
+                continue
+            kind, payload = parsed
+            if kind == "tool":
+                tool_count += 1
+                console.print(f"  [dim]{format_tool_line(payload)}[/dim]")
+            elif kind == "metrics":
+                metrics = payload
+                metrics.tool_count = tool_count
+
+        proc.wait()
+
+        # Display token + cost summary for the phase.
+        if metrics.input_tokens or metrics.output_tokens:
+            console.print(
+                f"  [dim]→ {tool_count} tools | "
+                f"{format_tokens(metrics.input_tokens)} in / "
+                f"{format_tokens(metrics.output_tokens)} out | "
+                f"{format_cost(metrics.cost_usd)}[/dim]"
+            )
+
+        if proc.returncode == 0:
+            return True, metrics.final_text or "Phase completed"
+        stderr = proc.stderr.read().strip()
+        return False, stderr or metrics.final_text or "Unknown error"
 
     except FileNotFoundError:
         return False, (
@@ -182,6 +227,8 @@ def execute_phase(
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
+        with contextlib.suppress(Exception):
+            proc.terminate()
         return False, "Interrupted by user"
 
 
