@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -128,3 +130,57 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 1] + "…"
+
+
+def _format_duration(start: datetime, end: datetime) -> str:
+    """Format the duration between two datetimes as a human-readable string."""
+    total_seconds = int((end - start).total_seconds())
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes = total_seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    remaining_minutes = minutes % 60
+    if hours < 24:
+        if remaining_minutes:
+            return f"{hours}h {remaining_minutes}m"
+        return f"{hours}h"
+    days = hours // 24
+    remaining_hours = hours % 24
+    if remaining_hours:
+        return f"{days}d {remaining_hours}h"
+    return f"{days}d"
+
+
+def render_log_table(features: list[Feature]) -> None:
+    """Render a summary table of features sorted by created_at descending."""
+    if not features:
+        console.print("[dim]No features in history.[/dim]")
+        return
+
+    sorted_features = sorted(features, key=lambda f: f.created_at, reverse=True)
+
+    table = Table(title="Feature log", border_style="dim")
+    table.add_column("ID", style="bold")
+    table.add_column("Status")
+    table.add_column("Workflow", style="dim")
+    table.add_column("Phases")
+    table.add_column("Duration")
+    table.add_column("Date", style="dim")
+
+    for feature in sorted_features:
+        style = status_style(feature.status.value)
+        total = len(feature.phases)
+        done = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
+        duration = _format_duration(feature.created_at, feature.updated_at)
+        table.add_row(
+            feature.id,
+            Text(feature.status.value, style=style),
+            feature.workflow,
+            f"{done}/{total}",
+            duration,
+            feature.created_at.strftime("%Y-%m-%d %H:%M"),
+        )
+
+    console.print(table)
