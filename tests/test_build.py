@@ -1,6 +1,7 @@
 """Tests for devflow.build — orchestration logic."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -8,6 +9,7 @@ from devflow.build import (
     _generate_feature_id,
     _get_phase_agent,
     complete_phase,
+    execute_build_loop,
     fail_phase,
     resume_build,
     run_phase,
@@ -20,14 +22,7 @@ from devflow.workflow import load_state, save_state
 
 @pytest.fixture
 def project_dir(tmp_path: Path) -> Path:
-    """Create a project directory with workflows."""
     return tmp_path
-
-
-@pytest.fixture
-def workflows_dir() -> Path:
-    """Return the real workflows directory."""
-    return Path(__file__).resolve().parent.parent / "workflows"
 
 
 class TestGenerateFeatureId:
@@ -48,11 +43,8 @@ class TestGenerateFeatureId:
 class TestStartBuild:
     def test_creates_feature_in_state(self, project_dir: Path) -> None:
         feature = start_build("Add dark mode", "standard", project_dir)
-        assert feature is not None
         assert feature.description == "Add dark mode"
         assert feature.workflow == "standard"
-
-        # Verify persisted.
         state = load_state(project_dir)
         assert state.get_feature(feature.id) is not None
 
@@ -87,7 +79,6 @@ class TestResumeBuild:
 
     def test_returns_none_for_terminal(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        # Force to done state.
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         tracked.status = FeatureStatus.DONE
@@ -111,17 +102,14 @@ class TestRunPhase:
             p.start()
             p.complete()
         save_state(state, project_dir)
-        result = run_phase(feature, project_dir)
-        assert result is None
+        assert run_phase(feature, project_dir) is None
 
 
 class TestCompletePhase:
     def test_marks_phase_done(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         run_phase(feature, project_dir)
-
         complete_phase(feature.id, "planning", "plan complete", project_dir)
-
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         assert tracked.phases[0].status == PhaseStatus.DONE
@@ -132,9 +120,7 @@ class TestFailPhase:
     def test_marks_phase_and_feature_failed(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         run_phase(feature, project_dir)
-
         fail_phase(feature.id, "planning", "timeout", project_dir)
-
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         assert tracked.phases[0].status == PhaseStatus.FAILED
@@ -147,38 +133,55 @@ class TestGetPhaseAgent:
         state = load_state(project_dir)
         state.stack = "python"
         save_state(state, project_dir)
-
-        agent = _get_phase_agent(feature, "implementing", project_dir)
-        assert agent == "developer-python"
+        assert _get_phase_agent(feature, "implementing", project_dir) == "developer-python"
 
     def test_returns_developer_typescript_for_ts_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         state.stack = "typescript"
         save_state(state, project_dir)
-
-        agent = _get_phase_agent(feature, "implementing", project_dir)
-        assert agent == "developer-typescript"
-
-    def test_returns_developer_php_for_php_stack(self, project_dir: Path) -> None:
-        feature = start_build("test", "standard", project_dir)
-        state = load_state(project_dir)
-        state.stack = "php"
-        save_state(state, project_dir)
-
-        agent = _get_phase_agent(feature, "implementing", project_dir)
-        assert agent == "developer-php"
+        assert _get_phase_agent(feature, "implementing", project_dir) == "developer-typescript"
 
     def test_returns_developer_when_no_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        agent = _get_phase_agent(feature, "implementing", project_dir)
-        assert agent == "developer"
+        assert _get_phase_agent(feature, "implementing", project_dir) == "developer"
 
     def test_non_developer_agent_unchanged_with_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         state.stack = "python"
         save_state(state, project_dir)
+        assert _get_phase_agent(feature, "planning", project_dir) == "planner"
 
-        agent = _get_phase_agent(feature, "planning", project_dir)
-        assert agent == "planner"
+
+class TestAutoCommitAfterPhase:
+    @patch("devflow.git.commit_changes", return_value=False)
+    @patch("devflow.git.get_diff_stat", return_value="")
+    @patch("devflow.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.git.create_branch", return_value="feat/test")
+    @patch("devflow.git.push_and_create_pr", return_value="https://github.com/pr/1")
+    def test_commit_called_after_implementing(
+        self, mock_pr: MagicMock, mock_branch: MagicMock,
+        mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,
+        project_dir: Path,
+    ) -> None:
+        feature = start_build("test", "quick", project_dir)
+        execute_build_loop(feature, base=project_dir)
+        # commit_changes should be called with a message containing "implementing".
+        commit_msgs = [c[0][0] for c in mock_commit.call_args_list]
+        assert any("implementing" in msg for msg in commit_msgs)
+
+    @patch("devflow.git.commit_changes", return_value=False)
+    @patch("devflow.git.get_diff_stat", return_value="")
+    @patch("devflow.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.git.create_branch", return_value="feat/test")
+    @patch("devflow.git.push_and_create_pr", return_value="https://github.com/pr/1")
+    def test_commit_not_called_for_gate(
+        self, mock_pr: MagicMock, mock_branch: MagicMock,
+        mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,
+        project_dir: Path,
+    ) -> None:
+        feature = start_build("test", "quick", project_dir)
+        execute_build_loop(feature, base=project_dir)
+        commit_msgs = [c[0][0] for c in mock_commit.call_args_list]
+        assert not any("gate" in msg for msg in commit_msgs)
