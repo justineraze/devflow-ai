@@ -6,6 +6,7 @@ import pytest
 
 from devflow.build import (
     _generate_feature_id,
+    _get_phase_agent,
     complete_phase,
     fail_phase,
     resume_build,
@@ -138,3 +139,46 @@ class TestFailPhase:
         tracked = state.get_feature(feature.id)
         assert tracked.phases[0].status == PhaseStatus.FAILED
         assert tracked.status == FeatureStatus.FAILED
+
+
+class TestGetPhaseAgent:
+    def test_returns_developer_python_for_python_stack(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        state = load_state(project_dir)
+        state.stack = "python"
+        save_state(state, project_dir)
+
+        agent = _get_phase_agent(feature, "implementing", project_dir)
+        assert agent == "developer-python"
+
+    def test_returns_developer_typescript_for_ts_stack(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        state = load_state(project_dir)
+        state.stack = "typescript"
+        save_state(state, project_dir)
+
+        agent = _get_phase_agent(feature, "implementing", project_dir)
+        assert agent == "developer-typescript"
+
+    def test_returns_developer_php_for_php_stack(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        state = load_state(project_dir)
+        state.stack = "php"
+        save_state(state, project_dir)
+
+        agent = _get_phase_agent(feature, "implementing", project_dir)
+        assert agent == "developer-php"
+
+    def test_returns_developer_when_no_stack(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        agent = _get_phase_agent(feature, "implementing", project_dir)
+        assert agent == "developer"
+
+    def test_non_developer_agent_unchanged_with_stack(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        state = load_state(project_dir)
+        state.stack = "python"
+        save_state(state, project_dir)
+
+        agent = _get_phase_agent(feature, "planning", project_dir)
+        assert agent == "planner"

@@ -140,6 +140,7 @@ class WorkflowState(BaseModel):
     """Top-level project state persisted in .devflow/state.json."""
 
     version: int = 1
+    stack: str | None = None
     features: dict[str, Feature] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
