@@ -100,6 +100,22 @@ def build(
 
 
 @app.command()
+def retry(
+    feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
+) -> None:
+    """Retry a failed feature from its last failed phase."""
+    from devflow.build import execute_build_loop, retry_build
+
+    feature = retry_build(feature_id)
+    if not feature:
+        raise typer.Exit(1)
+
+    success = execute_build_loop(feature)
+    if not success:
+        raise typer.Exit(1)
+
+
+@app.command()
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
 ) -> None:

@@ -12,6 +12,7 @@ from devflow.build import (
     execute_build_loop,
     fail_phase,
     resume_build,
+    retry_build,
     run_phase,
     start_build,
     start_fix,
@@ -105,6 +106,33 @@ class TestResumeBuild:
         tracked = state.get_feature(feature.id)
         impl_phase = next(p for p in tracked.phases if p.name == "implementing")
         assert impl_phase.status == PhaseStatus.PENDING
+
+
+class TestRetryBuild:
+    def test_retries_failed_feature(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        # Advance to implementing, then fail it.
+        run_phase(feature, project_dir)  # planning
+        complete_phase(feature.id, "planning", "plan", project_dir)
+        state = load_state(project_dir)
+        tracked = state.get_feature(feature.id)
+        run_phase(tracked, project_dir)  # implementing
+        fail_phase(feature.id, "implementing", "broke", project_dir)
+
+        retried = retry_build(feature.id, project_dir)
+        assert retried is not None
+        assert retried.status != FeatureStatus.FAILED
+
+        # The failed phase should be pending again.
+        impl_phase = next(p for p in retried.phases if p.name == "implementing")
+        assert impl_phase.status == PhaseStatus.PENDING
+
+    def test_returns_none_for_non_failed(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        assert retry_build(feature.id, project_dir) is None
+
+    def test_returns_none_for_unknown(self, project_dir: Path) -> None:
+        assert retry_build("nonexistent", project_dir) is None
 
 
 class TestRunPhase:

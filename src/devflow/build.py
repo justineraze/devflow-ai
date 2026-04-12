@@ -170,6 +170,34 @@ def _recover_failed_feature(feature: Feature) -> None:
             return
 
 
+def retry_build(
+    feature_id: str,
+    base: Path | None = None,
+) -> Feature | None:
+    """Retry a failed feature by resetting the failed phase.
+
+    Unlike resume_build, this is strictly for FAILED features
+    and skips any feedback/re-planning flow.
+    """
+    state = load_state(base)
+    feature = state.get_feature(feature_id)
+
+    if not feature:
+        console.print(f"[red]Feature {feature_id!r} not found.[/red]")
+        return None
+
+    if feature.status != FeatureStatus.FAILED:
+        console.print(
+            f"[yellow]Feature {feature_id!r} is {feature.status.value}, not failed.[/yellow]"
+        )
+        return None
+
+    _recover_failed_feature(feature)
+    save_state(state, base)
+    console.print(f"[cyan]Retrying {feature_id} — reset failed phase to pending.[/cyan]")
+    return feature
+
+
 def start_fix(description: str, base: Path | None = None) -> Feature:
     """Start a bug fix using the quick workflow (no planning phase)."""
     return start_build(description, workflow_name="quick", base=base)
