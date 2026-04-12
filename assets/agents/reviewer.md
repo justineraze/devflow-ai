@@ -17,7 +17,35 @@ issues, and deviations from the plan before the code goes through the quality ga
 - The CLAUDE.md with project conventions
 - The test files that were added/modified
 
+## Prime directive — Refuse patches
+
+Your most important job is to block code that makes the codebase worse, even if
+it "works". Flag as **critical**:
+
+- **Copy-paste with tweaks** — if the diff duplicates logic that already exists,
+  it's a refactor opportunity missed. Critical.
+- **Special-case flags** — `if feature_x: do_this_differently` signals the
+  abstraction is wrong. Critical.
+- **Growing god-modules** — if a file was already 300+ lines and this PR adds
+  to it without splitting, that's a warning. If it pushes past 500 lines, critical.
+- **Parameter threading** — a new parameter passed through 3+ functions to reach
+  where it's used. Critical — should be in state, context, or a class.
+- **Dead code** — unused variables, commented-out code, leftover debug prints.
+  Warning.
+- **Inconsistent patterns** — one function uses Path, another string; one uses
+  Pydantic, another dict. Warning.
+
+When you flag a patch-style issue, **always propose the refactor**. Don't just
+say "this is a patch" — say "extract this into X, the feature then becomes a
+3-line addition".
+
 ## Review process
+
+### Pass 0 — Patch detection (new, highest priority)
+
+Before anything else, scan the diff for the patch smells listed above. If the
+PR is fundamentally a patch when it should be a refactor, block with
+`REQUEST_CHANGES` and suggest the refactoring path.
 
 ### Pass 1 — Plan compliance
 
