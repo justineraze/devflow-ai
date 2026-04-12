@@ -7,8 +7,14 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from devflow.display import render_feature_detail, render_header, render_status_table
-from devflow.track import get_feature, get_state
+from devflow.display import (
+    render_feature_detail,
+    render_header,
+    render_log_detail,
+    render_log_table,
+    render_status_table,
+)
+from devflow.track import get_feature, get_state, list_all_features
 
 app = typer.Typer(
     name="devflow",
@@ -36,6 +42,26 @@ def status(
     else:
         state = get_state()
         render_status_table(state)
+
+
+@app.command()
+def log(
+    feature_id: Annotated[
+        str | None, typer.Argument(help="Feature ID for detailed view")
+    ] = None,
+) -> None:
+    """Show the history of tracked features."""
+    render_header(subtitle="Feature log")
+
+    if feature_id:
+        feat = get_feature(feature_id)
+        if not feat:
+            console.print(f"[red]Feature {feature_id!r} not found.[/red]")
+            raise typer.Exit(1)
+        render_log_detail(feat)
+    else:
+        features = list_all_features()
+        render_log_table(features)
 
 
 @app.command()
