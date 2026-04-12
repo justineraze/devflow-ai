@@ -421,7 +421,8 @@ def execute_build_loop(
 
             # Auto-commit after code-changing phases.
             if phase.name in ("implementing", "fixing"):
-                msg = f"feat({feature.id}): {phase.name} complete"
+                prefix = "fix" if feature.workflow == "quick" else "feat"
+                msg = f"{prefix}: {phase.name} — {feature.description[:60]}"
                 if commit_changes(msg):
                     console.print("  [dim]Auto-committed changes[/dim]")
                 diff = get_diff_stat()

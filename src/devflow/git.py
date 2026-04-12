@@ -11,6 +11,34 @@ from devflow.models import Feature
 
 console = Console()
 
+# Max length for PR titles (Conventional Commits best practice).
+_PR_TITLE_MAX_LEN = 70
+
+
+def build_pr_title(feature: Feature) -> str:
+    """Build a Conventional Commits PR title from a feature.
+
+    Uses ``fix:`` prefix for the quick workflow (bug fixes), ``feat:``
+    otherwise. Capitalizes the description and truncates cleanly.
+    """
+    prefix = "fix" if feature.workflow == "quick" else "feat"
+    desc = feature.description.strip().rstrip(".!?")
+
+    # Capitalize first letter, keep the rest as-is (preserve acronyms).
+    if desc:
+        desc = desc[0].upper() + desc[1:]
+
+    title = f"{prefix}: {desc}"
+    if len(title) <= _PR_TITLE_MAX_LEN:
+        return title
+
+    # Truncate to last complete word within limit.
+    truncated = title[:_PR_TITLE_MAX_LEN]
+    last_space = truncated.rfind(" ")
+    if last_space > len(prefix) + 2:
+        truncated = truncated[:last_space]
+    return truncated
+
 
 def create_branch(feature_id: str) -> str:
     """Create and checkout a git branch for the feature.
@@ -90,7 +118,8 @@ def push_and_create_pr(feature: Feature, branch: str) -> str | None:
     cwd = str(Path.cwd())
 
     # Safety net: commit anything left uncommitted.
-    commit_changes(f"chore({feature.id}): uncommitted changes")
+    prefix = "fix" if feature.workflow == "quick" else "feat"
+    commit_changes(f"{prefix}: {feature.description[:60]} (remaining changes)")
 
     if not has_commits_ahead():
         console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")
@@ -105,9 +134,9 @@ def push_and_create_pr(feature: Feature, branch: str) -> str | None:
         console.print(f"[red]Push failed: {push.stderr.strip()}[/red]")
         return None
 
-    # Build PR body from phase outputs.
+    # Build PR body and title using Conventional Commits format.
     body = _build_pr_body(feature)
-    title = feature.description[:70]
+    title = build_pr_title(feature)
 
     pr = subprocess.run(
         ["gh", "pr", "create", "--title", title, "--body", body],
