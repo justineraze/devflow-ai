@@ -1,9 +1,8 @@
-"""Build and fix orchestration — state machine, branch/PR, Claude Code delegation."""
+"""Build and fix orchestration — state machine, phases, confirmation flow."""
 
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +33,13 @@ PHASE_TO_STATUS: dict[str, FeatureStatus] = {
     "gate": FeatureStatus.GATE,
 }
 
+# Stack → specialized developer agent.
+_STACK_AGENT_MAP: dict[str, str] = {
+    "python": "developer-python",
+    "typescript": "developer-typescript",
+    "php": "developer-php",
+}
+
 
 def _generate_feature_id(description: str) -> str:
     """Generate a short feature ID from description."""
@@ -61,32 +67,31 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}m{secs:02d}s"
 
 
-def _run_single_phase(
+def _get_phase_agent(
     feature: Feature,
-    phase: PhaseRecord,
-    agent_name: str,
+    phase_name: str,
     base: Path | None = None,
-) -> tuple[bool, str]:
-    """Execute a single phase and update state."""
-    from devflow.runner import execute_phase, run_gate_phase
+) -> str:
+    """Get the agent name for a phase, with stack-aware override."""
+    agent = "developer"
+    try:
+        wf = load_workflow(feature.workflow)
+        for phase_def in wf.phases:
+            if phase_def.name == phase_name:
+                agent = phase_def.agent
+                break
+    except FileNotFoundError:
+        pass
 
-    if phase.name == "gate":
-        return run_gate_phase(base)
-    return execute_phase(feature, phase, agent_name)
+    if agent == "developer":
+        state = load_state(base)
+        if state.stack and state.stack in _STACK_AGENT_MAP:
+            agent = _STACK_AGENT_MAP[state.stack]
+
+    return agent
 
 
-def _show_diff_stat() -> None:
-    """Show git diff --stat for implemented changes."""
-    diff = subprocess.run(
-        ["git", "diff", "--stat", "HEAD~1"],
-        capture_output=True,
-        text=True,
-        cwd=str(Path.cwd()),
-    )
-    if diff.stdout.strip():
-        console.print("\n[bold]Changements :[/bold]")
-        for line in diff.stdout.strip().split("\n"):
-            console.print(f"  {line}")
+# ── Feature lifecycle ──────────────────────────────────────────────────
 
 
 def start_build(
@@ -120,24 +125,25 @@ def resume_build(
     if not feature:
         console.print(f"[red]Feature {feature_id!r} not found.[/red]")
         return None
-
     if feature.is_terminal:
         console.print(
-            f"[yellow]Feature {feature_id!r} is already"
-            f" {feature.status.value}.[/yellow]"
+            f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
         )
         return None
-
     return feature
 
 
-def run_phase(
-    feature: Feature,
-    base: Path | None = None,
-) -> PhaseRecord | None:
+def start_fix(description: str, base: Path | None = None) -> Feature:
+    """Start a bug fix using the quick workflow (no planning phase)."""
+    return start_build(description, workflow_name="quick", base=base)
+
+
+# ── Phase management ───────────────────────────────────────────────────
+
+
+def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
     """Advance to the next phase, update state machine, persist."""
     state = load_state(base)
-
     tracked = state.get_feature(feature.id)
     if not tracked:
         return None
@@ -157,32 +163,74 @@ def run_phase(
     return phase
 
 
-def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
-    """Reset planning phases back to pending so they can be re-run."""
+def complete_phase(
+    feature_id: str, phase_name: str, output: str = "", base: Path | None = None,
+) -> None:
+    """Mark a phase as completed and persist state."""
     state = load_state(base)
     feature = state.get_feature(feature_id)
     if not feature:
         return
+    for phase in feature.phases:
+        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
+            phase.complete(output)
+            break
+    save_state(state, base)
 
+
+def fail_phase(
+    feature_id: str, phase_name: str, error: str = "", base: Path | None = None,
+) -> None:
+    """Mark a phase as failed and persist state."""
+    state = load_state(base)
+    feature = state.get_feature(feature_id)
+    if not feature:
+        return
+    for phase in feature.phases:
+        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
+            phase.fail(error)
+            break
+    _transition_safe(feature, FeatureStatus.FAILED)
+    save_state(state, base)
+
+
+def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
+    """Reset planning phases back to pending for re-planning with feedback."""
+    state = load_state(base)
+    feature = state.get_feature(feature_id)
+    if not feature:
+        return
     for phase in feature.phases:
         if phase.name in ("architecture", "planning", "plan_review"):
             phase.status = PhaseStatus.PENDING
             phase.started_at = None
             phase.completed_at = None
             phase.output = ""
-
-    # Reset feature status back to pending.
     feature.status = FeatureStatus.PENDING
-
     save_state(state, base)
 
 
-def _get_plan_output(feature: Feature) -> str:
-    """Extract the planning phase output from a feature."""
-    for phase in feature.phases:
-        if phase.name == "planning" and phase.output:
-            return phase.output
-    return ""
+# ── Execution helpers ──────────────────────────────────────────────────
+
+
+def _execute_phase(
+    feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
+) -> tuple[bool, str]:
+    """Execute a single phase via Claude Code or local gate."""
+    from devflow.runner import execute_phase, run_gate_phase
+
+    if phase.name == "gate":
+        return run_gate_phase(base)
+    return execute_phase(feature, phase, agent_name)
+
+
+def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | None:
+    """Reload feature from state after a phase completes."""
+    state = load_state(base)
+    return state.get_feature(feature_id)
+
+
+# ── Main build loop ───────────────────────────────────────────────────
 
 
 def execute_build_loop(
@@ -192,52 +240,44 @@ def execute_build_loop(
 ) -> bool:
     """Run a feature build with plan-first confirmation flow.
 
-    Flow:
-    1. Create git branch (or switch to existing one)
-    2. Run planning phases — if feedback provided, inject it
-    3. Show the plan and ask for confirmation
-    4. If refused → pause, user can resume with feedback
-    5. If confirmed → run remaining phases, then create PR
-
-    Returns True if the feature completed successfully.
+    1. Create git branch
+    2. Run planning phases — show plan, ask confirmation
+    3. If refused → pause, user can resume with feedback
+    4. If confirmed → run remaining phases
+    5. Auto-commit after implementing/fixing
+    6. Create PR on success
     """
-    from devflow.runner import create_branch, create_pull_request
+    from devflow.git import (
+        commit_changes,
+        create_branch,
+        get_diff_stat,
+        push_and_create_pr,
+        switch_branch,
+    )
 
     total = len(feature.phases)
     is_resuming = feedback is not None
 
-    # Header.
+    # ── Header ──
     console.print(f"\n[bold cyan]devflow build[/bold cyan] — {feature.description}")
-    console.print(
-        f"[dim]{feature.id} | workflow: {feature.workflow} | {total} phases[/dim]"
-    )
+    console.print(f"[dim]{feature.id} | workflow: {feature.workflow} | {total} phases[/dim]")
 
-    # Create or switch to feature branch.
+    # ── Branch ──
     branch = f"feat/{feature.id}"
     if is_resuming:
-        # Reset planning to re-run with feedback.
         _reset_planning_phases(feature.id, base)
         state = load_state(base)
         feature = state.get_feature(feature.id) or feature
-
-        # Store feedback in metadata for the planner prompt.
         feature.metadata["feedback"] = feedback
         save_state(state, base)
-
-        # Try to switch to existing branch.
-        subprocess.run(
-            ["git", "checkout", branch],
-            capture_output=True,
-            text=True,
-            cwd=str(Path.cwd()),
-        )
+        switch_branch(branch)
         console.print(f"[dim]branch: {branch} (resumed)[/dim]")
         console.print(f"[dim]feedback: {feedback}[/dim]\n")
     else:
         branch = create_branch(feature.id)
         console.print(f"[dim]branch: {branch}[/dim]\n")
 
-    # === STEP 1: Run planning phases ===
+    # ── STEP 1: Planning phases ──
     plan_output = ""
     phase_num = 0
 
@@ -248,10 +288,9 @@ def execute_build_loop(
 
         phase_num += 1
         agent_name = _get_phase_agent(feature, phase.name, base)
-        is_planning_phase = phase.name in ("architecture", "planning", "plan_review")
 
-        if not is_planning_phase:
-            # Past planning — undo advance, will re-run after confirmation.
+        # Stop before non-planning phases — wait for confirmation.
+        if phase.name not in ("architecture", "planning", "plan_review"):
             state = load_state(base)
             tracked = state.get_feature(feature.id)
             if tracked:
@@ -264,15 +303,15 @@ def execute_build_loop(
             break
 
         console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]")
-        start_time = time.monotonic()
-        success, output = _run_single_phase(feature, phase, agent_name, base)
-        elapsed = time.monotonic() - start_time
+        start = time.monotonic()
+        success, output = _execute_phase(feature, phase, agent_name, base)
+        elapsed = time.monotonic() - start
 
         if not success:
             fail_phase(feature.id, phase.name, output, base)
             console.print(f"[red]✗ {phase.name} failed ({_format_duration(elapsed)})[/red]")
             if output:
-                for line in output.split("\n")[:3]:
+                for line in output.split("\n")[:5]:
                     console.print(f"  [dim]{line}[/dim]")
             return False
 
@@ -282,14 +321,9 @@ def execute_build_loop(
         if phase.name == "planning":
             plan_output = output
 
-        # Refresh feature.
-        state = load_state(base)
-        tracked = state.get_feature(feature.id)
-        if not tracked or tracked.is_terminal:
-            break
-        feature = tracked
+        feature = _refresh_feature(feature.id, base) or feature
 
-    # === STEP 2: Show plan and ask for confirmation ===
+    # ── STEP 2: Show plan + confirm ──
     if plan_output:
         console.print()
         console.print(Panel(
@@ -307,155 +341,65 @@ def execute_build_loop(
             console.print(f"[dim]Le plan est sauvegardé dans {feature.id}.[/dim]")
             console.print()
             console.print("[bold]Reprendre avec :[/bold]")
-            console.print(
-                f'  devflow build "ton feedback ici" --resume {feature.id}'
-            )
-            console.print()
-            console.print("[dim]Exemples :[/dim]")
-            console.print(
-                f'  devflow build "pas de framework detection" --resume {feature.id}'
-            )
-            console.print(
-                f'  devflow build "ajoute aussi le support Go" --resume {feature.id}'
-            )
+            console.print(f'  devflow build "ton feedback ici" --resume {feature.id}')
             return False
 
-    # === STEP 3: Run remaining phases ===
+    # ── STEP 3: Run remaining phases ──
     console.print()
     while True:
         phase = run_phase(feature, base)
         if not phase:
             break
 
-        # Count done phases + current to get accurate numbering.
         done_count = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
         phase_num = done_count + 1
         agent_name = _get_phase_agent(feature, phase.name, base)
 
         console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]", end="")
-        start_time = time.monotonic()
-        success, output = _run_single_phase(feature, phase, agent_name, base)
-        elapsed = time.monotonic() - start_time
+        start = time.monotonic()
+        success, output = _execute_phase(feature, phase, agent_name, base)
+        elapsed = time.monotonic() - start
 
         if success:
             complete_phase(feature.id, phase.name, output, base)
             console.print(f" [green]✓[/green] [dim]({_format_duration(elapsed)})[/dim]")
 
+            # Auto-commit after code-changing phases.
+            if phase.name in ("implementing", "fixing"):
+                msg = f"feat({feature.id}): {phase.name} complete"
+                if commit_changes(msg):
+                    console.print("  [dim]Auto-committed changes[/dim]")
+                diff = get_diff_stat()
+                if diff:
+                    console.print("\n[bold]Changements :[/bold]")
+                    for line in diff.split("\n"):
+                        console.print(f"  {line}")
+
+            # Show gate results.
             if phase.name == "gate" and output:
-                console.print(f"  {output}")
-            if phase.name == "implementing":
-                _show_diff_stat()
+                for line in output.split("\n"):
+                    console.print(f"  {line}")
         else:
             fail_phase(feature.id, phase.name, output, base)
             console.print(f" [red]✗[/red] [dim]({_format_duration(elapsed)})[/dim]")
             if output:
-                for line in output.split("\n")[:3]:
+                for line in output.split("\n")[:5]:
                     console.print(f"  [dim]{line}[/dim]")
             return False
 
-        # Refresh feature.
-        state = load_state(base)
-        tracked = state.get_feature(feature.id)
-        if not tracked or tracked.is_terminal:
-            break
-        feature = tracked
+        feature = _refresh_feature(feature.id, base) or feature
 
-    # === STEP 4: Create PR ===
+    # ── STEP 4: Create PR ──
     console.print(f"\n[bold green]✓ Feature complete[/bold green] [{total}/{total}]")
-
     console.print("[dim]Creating PR...[/dim]")
+
     state = load_state(base)
-    final_feature = state.get_feature(feature.id)
-    if final_feature:
-        pr_url = create_pull_request(final_feature, branch)
+    final = state.get_feature(feature.id)
+    if final:
+        pr_url = push_and_create_pr(final, branch)
         if pr_url:
             console.print(f"\n[bold green]PR:[/bold green] {pr_url}")
         else:
             console.print("[yellow]PR creation failed — push manually.[/yellow]")
 
     return True
-
-
-def complete_phase(
-    feature_id: str,
-    phase_name: str,
-    output: str = "",
-    base: Path | None = None,
-) -> None:
-    """Mark a phase as completed and persist state."""
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return
-
-    for phase in feature.phases:
-        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
-            phase.complete(output)
-            break
-
-    save_state(state, base)
-
-
-def fail_phase(
-    feature_id: str,
-    phase_name: str,
-    error: str = "",
-    base: Path | None = None,
-) -> None:
-    """Mark a phase as failed and persist state."""
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return
-
-    for phase in feature.phases:
-        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
-            phase.fail(error)
-            break
-
-    _transition_safe(feature, FeatureStatus.FAILED)
-    save_state(state, base)
-
-
-def start_fix(
-    description: str,
-    base: Path | None = None,
-) -> Feature:
-    """Start a bug fix using the quick workflow (no planning phase)."""
-    return start_build(description, workflow_name="quick", base=base)
-
-
-_STACK_AGENT_MAP: dict[str, str] = {
-    "python": "developer-python",
-    "typescript": "developer-typescript",
-    "php": "developer-php",
-}
-
-
-def _get_phase_agent(
-    feature: Feature,
-    phase_name: str,
-    base: Path | None = None,
-) -> str:
-    """Get the agent name for a phase from the workflow definition.
-
-    When the workflow assigns the generic ``"developer"`` agent and
-    a stack has been detected (via ``devflow init``), return the
-    language-specific agent instead (e.g. ``"developer-python"``).
-    """
-    agent = "developer"
-    try:
-        wf = load_workflow(feature.workflow)
-        for phase_def in wf.phases:
-            if phase_def.name == phase_name:
-                agent = phase_def.agent
-                break
-    except FileNotFoundError:
-        pass
-
-    if agent == "developer":
-        state = load_state(base)
-        if state.stack and state.stack in _STACK_AGENT_MAP:
-            agent = _STACK_AGENT_MAP[state.stack]
-
-    return agent

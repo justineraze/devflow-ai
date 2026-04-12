@@ -1,4 +1,4 @@
-"""Runner — executes phases by calling Claude Code with the right agent context."""
+"""Runner — prompt building and Claude Code execution."""
 
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ def _load_agent_prompt(agent_name: str) -> str:
     if not path:
         return ""
     content = path.read_text()
-    # Strip YAML frontmatter (---\n...\n---) — it's metadata, not instructions.
     if content.startswith("---"):
         end = content.find("---", 3)
         if end != -1:
@@ -41,11 +40,7 @@ def _load_agent_prompt(agent_name: str) -> str:
 
 
 def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
-    """Build contextual information from previous phases.
-
-    Each phase gets the output of completed phases as context,
-    so the planner's output feeds into the developer, etc.
-    """
+    """Build contextual information from previous phases."""
     parts: list[str] = []
     for prev in feature.phases:
         if prev.name == phase.name:
@@ -60,14 +55,7 @@ def build_prompt(
     phase: PhaseRecord,
     agent_name: str,
 ) -> str:
-    """Construct the full prompt sent to Claude Code for a phase.
-
-    Structure:
-    1. Agent instructions (from .md file)
-    2. Feature context (description, workflow, current state)
-    3. Previous phase outputs (plan feeds into implementation, etc.)
-    4. Phase-specific instructions
-    """
+    """Construct the full prompt sent to Claude Code for a phase."""
     agent_instructions = _load_agent_prompt(agent_name)
     previous_context = _build_phase_context(feature, phase)
 
@@ -87,27 +75,26 @@ Feature status: {feature.status.value}""")
     if previous_context:
         sections.append(f"## Context from previous phases\n\n{previous_context}")
 
-    # If resuming planning with feedback, inject it.
+    # Feedback injection for plan revision.
     feedback = feature.metadata.get("feedback")
     if feedback and phase.name == "planning":
         sections.append(
             "## Feedback utilisateur sur le plan précédent\n\n"
-            f"L'utilisateur a refusé le plan précédent avec ce retour :\n\n"
+            "L'utilisateur a refusé le plan précédent avec ce retour :\n\n"
             f"> {feedback}\n\n"
             "Produis un nouveau plan qui prend en compte ce feedback. "
             "Ne répète pas les parties du plan qui n'ont pas changé, "
             "concentre-toi sur les modifications demandées."
         )
 
-    # Phase-specific instructions.
-    phase_instructions = _get_phase_instructions(phase.name, feature)
+    phase_instructions = _get_phase_instructions(phase.name)
     if phase_instructions:
         sections.append(phase_instructions)
 
     return "\n\n---\n\n".join(sections)
 
 
-def _get_phase_instructions(phase_name: str, feature: Feature) -> str:
+def _get_phase_instructions(phase_name: str) -> str:
     """Return specific instructions depending on the phase type."""
     instructions: dict[str, str] = {
         "architecture": (
@@ -133,8 +120,12 @@ def _get_phase_instructions(phase_name: str, feature: Feature) -> str:
             "Implement the plan step by step.\n"
             "Follow the plan exactly — one step at a time.\n"
             "Write tests alongside the code.\n"
-            "Run ruff and pytest after each change.\n"
-            "Commit each step atomically."
+            "Run ruff and pytest after each change.\n\n"
+            "**IMPORTANT — Commits atomiques obligatoires:**\n"
+            "After completing each plan step, you MUST run:\n"
+            "  git add -A && git commit -m 'feat: <short description of step>'\n"
+            "Do NOT batch multiple steps into a single commit.\n"
+            "Each commit = one plan step, verified green (ruff + pytest pass)."
         ),
         "reviewing": (
             "## Instructions\n\n"
@@ -149,7 +140,10 @@ def _get_phase_instructions(phase_name: str, feature: Feature) -> str:
             "## Instructions\n\n"
             "Address the review feedback from the reviewing phase.\n"
             "Fix each issue flagged as critical or warning.\n"
-            "Run tests after each fix."
+            "Run tests after each fix.\n\n"
+            "**Commit each fix separately:**\n"
+            "  git add -A && git commit -m 'fix: <short description>'\n"
+            "Do NOT batch multiple fixes into one commit."
         ),
     }
     return instructions.get(phase_name, "")
@@ -162,20 +156,13 @@ def execute_phase(
 ) -> tuple[bool, str]:
     """Execute a phase by calling Claude Code.
 
-    Captures output silently — the user sees only phase status.
-    No timeout — waits for Claude Code to finish.
-
-    Returns:
-        Tuple of (success: bool, output: str).
+    Captures output silently. No timeout — waits for Claude Code to finish.
     """
     prompt = build_prompt(feature, phase, agent_name)
 
     try:
         result = subprocess.run(
-            [
-                "claude", "-p", "-",
-                "--permission-mode", "acceptEdits",
-            ],
+            ["claude", "-p", "-", "--permission-mode", "acceptEdits"],
             input=prompt,
             capture_output=True,
             text=True,
@@ -199,115 +186,16 @@ def execute_phase(
 
 
 def run_gate_phase(base: Path | None = None) -> tuple[bool, str]:
-    """Run the gate phase by executing devflow check directly."""
+    """Run the gate phase locally (ruff + pytest + secrets)."""
     from devflow.gate import run_gate
 
     report = run_gate(base)
-    parts = []
+    lines = []
     for check in report.checks:
         icon = "✓" if check.passed else "✗"
-        parts.append(f"{icon} {check.name}: {check.message}")
+        lines.append(f"{icon} {check.name}: {check.message}")
+        if not check.passed and check.details:
+            for detail in check.details.split("\n")[:10]:
+                lines.append(f"    {detail}")
 
-    summary = "  ".join(parts)
-    return report.passed, summary
-
-
-def create_branch(feature_id: str) -> str:
-    """Create and checkout a git branch for the feature.
-
-    If the branch already exists, switches to it instead.
-    Returns the actual branch name.
-    """
-    branch = f"feat/{feature_id}"
-    cwd = str(Path.cwd())
-
-    result = subprocess.run(
-        ["git", "checkout", "-b", branch],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-    )
-    # Branch already exists — switch to it.
-    if result.returncode != 0:
-        subprocess.run(
-            ["git", "checkout", branch],
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-        )
-    return branch
-
-
-def create_pull_request(
-    feature: Feature,
-    branch: str,
-) -> str | None:
-    """Create a GitHub PR for the feature.
-
-    Returns the PR URL, or None if creation failed.
-    """
-    # Build PR body from phase outputs.
-    body_parts = ["## Summary", "", feature.description, ""]
-
-    for phase in feature.phases:
-        if phase.status.value == "done" and phase.output and phase.output != "[dry run]":
-            if phase.name == "planning":
-                body_parts.extend(["## Plan", "", phase.output, ""])
-            elif phase.name == "gate":
-                body_parts.extend(["## Quality gate", "", phase.output, ""])
-
-    body_parts.append("---")
-    body_parts.append("Built with [devflow-ai](https://github.com/JustineRaze/devflow-ai)")
-
-    body = "\n".join(body_parts)
-    title = feature.description[:70]
-    cwd = str(Path.cwd())
-
-    # Commit any uncommitted changes (Claude Code may not have committed).
-    # Stage everything first, then check if there's anything to commit.
-    subprocess.run(["git", "add", "-A"], cwd=cwd, capture_output=True)
-    diff = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=cwd,
-        capture_output=True,
-    )
-    if diff.returncode != 0:  # There are staged changes.
-        subprocess.run(
-            ["git", "commit", "-m", f"feat: {feature.description}"],
-            cwd=cwd,
-            capture_output=True,
-        )
-
-    # Verify we have commits ahead of main before pushing.
-    ahead = subprocess.run(
-        ["git", "rev-list", "--count", "main..HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-    )
-    if ahead.stdout.strip() == "0":
-        console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")
-        return None
-
-    # Push branch then create PR.
-    push = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        capture_output=True,
-        text=True,
-        cwd=str(Path.cwd()),
-    )
-    if push.returncode != 0:
-        console.print(f"[red]Push failed: {push.stderr.strip()}[/red]")
-        return None
-
-    pr = subprocess.run(
-        ["gh", "pr", "create", "--title", title, "--body", body],
-        capture_output=True,
-        text=True,
-        cwd=str(Path.cwd()),
-    )
-    if pr.returncode == 0:
-        return pr.stdout.strip()
-
-    console.print(f"[red]PR creation failed: {pr.stderr.strip()}[/red]")
-    return None
+    return report.passed, "\n".join(lines)
