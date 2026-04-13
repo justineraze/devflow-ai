@@ -87,32 +87,47 @@ implementation slice. PR created automatically with the plan as description.
 ## Architecture
 
 ```mermaid
-graph TD
-    YOU([You]) --> CLI[cli.py<br><i>Typer CLI</i>]
+flowchart TB
+    YOU([You])
 
-    CLI --> BUILD[build.py<br><i>orchestration loop</i>]
-    CLI --> TRACK[track.py<br><i>state read/write</i>]
-    CLI --> GATE[gate.py<br><i>quality checks</i>]
+    subgraph CORE[Python — deterministic layer]
+        CLI[cli.py]
+        BUILD[build.py]
+        RUNNER[runner.py]
+        GATE[gate.py]
+        GIT[git.py]
+        STATE[(.devflow/<br>state.json)]
+    end
 
-    BUILD --> RUNNER[runner.py<br><i>claude -p prompt</i>]
-    BUILD --> WORKFLOW[workflow.py<br><i>YAML + state persistence</i>]
+    subgraph ASSETS[Markdown — flexible layer in ~/.claude/]
+        AGENTS[agents/<br>9 roles]
+        SKILLS[skills/<br>8 disciplines]
+    end
 
-    TRACK --> STATE[(.devflow/state.json)]
-    WORKFLOW --> STATE
-    WORKFLOW --> MODELS[models.py<br><i>Pydantic + state machine</i>]
-    WORKFLOW --> YAMLS[workflows/*.yaml]
+    subgraph TOOLS[External tools]
+        CLAUDE([claude -p])
+        GH([gh pr create])
+    end
 
-    GATE --> RUFF[ruff]
-    GATE --> PYTEST[pytest]
-    GATE --> SECRETS[secrets scan]
+    YOU --> CLI
+    CLI --> BUILD
+    BUILD --> RUNNER
+    BUILD --> GIT
+    BUILD --> STATE
+    RUNNER --> CLAUDE
+    RUNNER --> AGENTS
+    RUNNER --> SKILLS
+    GIT --> GH
+    BUILD --> GATE
 
-    RUNNER --> AGENTS[~/.claude/agents/*.md]
-    RUNNER --> SKILLS[~/.claude/skills/*.md]
-
-    style YOU fill:#f9f,stroke:#333
-    style STATE fill:#ffa,stroke:#333
-    style AGENTS fill:#aff,stroke:#333
-    style SKILLS fill:#aff,stroke:#333
+    classDef user fill:#f9c,stroke:#333,stroke-width:2px
+    classDef data fill:#ffe082,stroke:#333
+    classDef md fill:#b3e5fc,stroke:#333
+    classDef ext fill:#c8e6c9,stroke:#333
+    class YOU user
+    class STATE data
+    class AGENTS,SKILLS md
+    class CLAUDE,GH ext
 ```
 
 **The split:** Python handles what must be programmatic (state, validation, automation). Markdown handles what must be flexible (agent behavior, instructions, prompts).
@@ -156,33 +171,25 @@ Every feature follows a lifecycle with validated transitions:
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> pending
-    pending --> planning
-    pending --> implementing : fix workflow
+    pending --> planning : build
+    pending --> implementing : fix
 
     planning --> plan_review
     plan_review --> implementing
-    plan_review --> planning : revise
-
     implementing --> reviewing
-    implementing --> gate : skip review
-
-    reviewing --> fixing
-    reviewing --> gate : no issues
-
-    fixing --> reviewing : re-review
+    reviewing --> fixing : issues
+    reviewing --> gate : clean
     fixing --> gate
-
     gate --> done : pass
     gate --> fixing : fail
-
     done --> [*]
-    failed --> [*]
 
-    state "any non-terminal" as any
-    any --> blocked
-    any --> failed
-    blocked --> any
+    note left of pending
+      failed → retry from last phase
+      blocked → waiting on user
+    end note
 ```
 
 Invalid transitions raise `InvalidTransition`. State persists to `.devflow/state.json` before every phase change (crash-safe via tmp + rename).
