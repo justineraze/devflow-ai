@@ -1,8 +1,8 @@
-"""Tests for devflow.install — agent and skill sync."""
+"""Tests for devflow.setup.install — agent and skill sync."""
 
 from pathlib import Path
 
-from devflow.install import install_agents, install_all, install_skills
+from devflow.setup.install import install_agents, install_all, install_skills
 
 
 def _create_assets(tmp_path: Path) -> Path:

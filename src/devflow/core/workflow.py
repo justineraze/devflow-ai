@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from devflow.models import (
+from devflow.core.models import (
     Feature,
     PhaseDefinition,
     PhaseRecord,
@@ -20,7 +20,7 @@ DEVFLOW_DIR = Path(".devflow")
 STATE_FILE = DEVFLOW_DIR / "state.json"
 
 # Where workflow definitions live (relative to package root).
-WORKFLOWS_DIR = Path(__file__).resolve().parent.parent.parent / "workflows"
+WORKFLOWS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "workflows"
 
 
 def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefinition:

@@ -11,8 +11,8 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from devflow.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
-from devflow.workflow import (
+from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
+from devflow.core.workflow import (
     advance_phase,
     create_feature,
     load_state,
@@ -300,7 +300,7 @@ def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
 ) -> tuple[bool, str]:
     """Execute a single phase via Claude Code or local gate."""
-    from devflow.runner import execute_phase, run_gate_phase
+    from devflow.orchestration.runner import execute_phase, run_gate_phase
 
     if phase.name == "gate":
         state = load_state(base)
@@ -331,7 +331,7 @@ def execute_build_loop(
     5. Auto-commit after implementing/fixing
     6. Create PR on success
     """
-    from devflow.git import (
+    from devflow.integrations.git import (
         build_commit_message,
         commit_changes,
         create_branch,

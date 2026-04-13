@@ -1,9 +1,9 @@
-"""Tests for devflow.models — state machine, transitions, and data models."""
+"""Tests for devflow.core.models — state machine, transitions, and data models."""
 
 
 import pytest
 
-from devflow.models import (
+from devflow.core.models import (
     Feature,
     FeatureStatus,
     InvalidTransition,

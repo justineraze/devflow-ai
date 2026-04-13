@@ -1,14 +1,14 @@
-"""Tests for devflow.git — git operations."""
+"""Tests for devflow.integrations.git — git operations."""
 
 from unittest.mock import MagicMock, patch
 
-from devflow.git import (
+from devflow.core.models import Feature, FeatureStatus
+from devflow.integrations.git import (
     build_commit_message,
     build_pr_title,
     commit_changes,
     has_commits_ahead,
 )
-from devflow.models import Feature, FeatureStatus
 
 
 class TestBuildPrTitle:
@@ -86,7 +86,7 @@ class TestBuildCommitMessage:
 
 
 class TestCommitChanges:
-    @patch("devflow.git.subprocess.run")
+    @patch("devflow.integrations.git.subprocess.run")
     def test_commits_when_changes_exist(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = [
             MagicMock(returncode=0),  # git add -A
@@ -98,7 +98,7 @@ class TestCommitChanges:
         commit_call = mock_run.call_args_list[2]
         assert "feat: test commit" in commit_call[0][0]
 
-    @patch("devflow.git.subprocess.run")
+    @patch("devflow.integrations.git.subprocess.run")
     def test_skips_when_nothing_to_commit(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = [
             MagicMock(returncode=0),  # git add -A
@@ -110,21 +110,21 @@ class TestCommitChanges:
 
 
 class TestHasCommitsAhead:
-    @patch("devflow.git.subprocess.run")
+    @patch("devflow.integrations.git.subprocess.run")
     def test_has_commits(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="3\n")
         assert has_commits_ahead() is True
 
-    @patch("devflow.git.subprocess.run")
+    @patch("devflow.integrations.git.subprocess.run")
     def test_no_commits(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="0\n")
         assert has_commits_ahead() is False
 
 
 class TestPushAndCreatePr:
-    @patch("devflow.git.subprocess.run")
+    @patch("devflow.integrations.git.subprocess.run")
     def test_uses_conventional_commit_title(self, mock_run: MagicMock) -> None:
-        from devflow.git import push_and_create_pr
+        from devflow.integrations.git import push_and_create_pr
 
         feature = Feature(
             id="feat-test-001", description="Add auth",

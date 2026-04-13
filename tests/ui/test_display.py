@@ -1,16 +1,16 @@
-"""Tests for devflow.display — log table, log detail, format duration."""
+"""Tests for devflow.ui.display — log table, log detail, format duration."""
 
 from datetime import UTC, datetime, timedelta
 from io import StringIO
 
 from rich.console import Console
 
-from devflow.display import (
+from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
+from devflow.ui.display import (
     _format_duration,
     render_log_detail,
     render_log_table,
 )
-from devflow.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 
 
 def _make_feature(
@@ -37,7 +37,7 @@ def _make_feature(
 
 def _capture(func, *args) -> str:  # noqa: ANN001
     """Capture Rich console output from a display function."""
-    import devflow.display as display_mod
+    import devflow.ui.display as display_mod
 
     original = display_mod.console
     buf = StringIO()

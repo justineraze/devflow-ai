@@ -1,12 +1,12 @@
-"""Tests for devflow.runner — prompt building and Claude Code execution."""
+"""Tests for devflow.orchestration.runner — prompt building and Claude Code execution."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devflow.models import Feature, FeatureStatus, PhaseRecord
-from devflow.runner import (
+from devflow.core.models import Feature, FeatureStatus, PhaseRecord
+from devflow.orchestration.runner import (
     _build_phase_context,
     _find_agent_file,
     _find_skill_file,
@@ -119,7 +119,7 @@ def _mock_popen(returncode: int = 0, stdout_lines: list[str] | None = None,
 
 
 class TestExecutePhase:
-    @patch("devflow.runner.subprocess.Popen")
+    @patch("devflow.orchestration.runner.subprocess.Popen")
     def test_successful_execution(
         self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
@@ -140,7 +140,7 @@ class TestExecutePhase:
         assert "--output-format" in cmd
         assert "stream-json" in cmd
 
-    @patch("devflow.runner.subprocess.Popen")
+    @patch("devflow.orchestration.runner.subprocess.Popen")
     def test_failed_execution(
         self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
@@ -152,7 +152,7 @@ class TestExecutePhase:
         assert success is False
         assert "something broke" in output
 
-    @patch("devflow.runner.subprocess.Popen", side_effect=FileNotFoundError)
+    @patch("devflow.orchestration.runner.subprocess.Popen", side_effect=FileNotFoundError)
     def test_claude_not_installed(
         self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
@@ -208,7 +208,7 @@ class TestPromptSplit:
     def test_system_prompt_contains_skills_and_agent(
         self, sample_feature: Feature,
     ) -> None:
-        from devflow.runner import build_system_prompt
+        from devflow.orchestration.runner import build_system_prompt
 
         system = build_system_prompt("implementing", "developer")
         assert "Skills (discipline rules)" in system
@@ -218,7 +218,7 @@ class TestPromptSplit:
     def test_user_prompt_contains_task_not_skills(
         self, sample_feature: Feature,
     ) -> None:
-        from devflow.runner import build_user_prompt
+        from devflow.orchestration.runner import build_user_prompt
 
         phase = sample_feature.phases[1]
         user = build_user_prompt(sample_feature, phase)
@@ -242,20 +242,20 @@ class TestModelForPhase:
     """Tests for per-phase model selection."""
 
     def test_opus_for_reasoning_phases(self) -> None:
-        from devflow.runner import _model_for_phase
+        from devflow.orchestration.runner import _model_for_phase
 
         assert _model_for_phase("architecture") == "opus"
         assert _model_for_phase("planning") == "opus"
         assert _model_for_phase("reviewing") == "opus"
 
     def test_sonnet_for_execution_phases(self) -> None:
-        from devflow.runner import _model_for_phase
+        from devflow.orchestration.runner import _model_for_phase
 
         assert _model_for_phase("implementing") == "sonnet"
         assert _model_for_phase("fixing") == "sonnet"
         assert _model_for_phase("plan_review") == "sonnet"
 
     def test_sonnet_default_for_unknown_phase(self) -> None:
-        from devflow.runner import _model_for_phase
+        from devflow.orchestration.runner import _model_for_phase
 
         assert _model_for_phase("unknown-phase") == "sonnet"

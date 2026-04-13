@@ -1,8 +1,8 @@
-"""Tests for devflow.detect — stack detection."""
+"""Tests for devflow.integrations.detect — stack detection."""
 
 from pathlib import Path
 
-from devflow.detect import detect_stack
+from devflow.integrations.detect import detect_stack
 
 
 class TestDetectStack:
@@ -76,9 +76,9 @@ class TestResolveStack:
     """Tests for resolve_stack — saved state takes precedence over detection."""
 
     def test_uses_saved_state_when_present(self, tmp_path: Path) -> None:
-        from devflow.detect import resolve_stack
-        from devflow.models import WorkflowState
-        from devflow.workflow import save_state
+        from devflow.core.models import WorkflowState
+        from devflow.core.workflow import save_state
+        from devflow.integrations.detect import resolve_stack
 
         # Saved stack is "typescript" — but no .ts files exist on disk.
         state = WorkflowState(stack="typescript")
@@ -87,7 +87,7 @@ class TestResolveStack:
         assert resolve_stack(tmp_path) == "typescript"
 
     def test_falls_back_to_detection_when_no_saved_stack(self, tmp_path: Path) -> None:
-        from devflow.detect import resolve_stack
+        from devflow.integrations.detect import resolve_stack
 
         (tmp_path / "main.py").touch()
         (tmp_path / "lib.py").touch()
@@ -95,6 +95,6 @@ class TestResolveStack:
         assert resolve_stack(tmp_path) == "python"
 
     def test_returns_none_when_nothing_to_detect(self, tmp_path: Path) -> None:
-        from devflow.detect import resolve_stack
+        from devflow.integrations.detect import resolve_stack
 
         assert resolve_stack(tmp_path) is None

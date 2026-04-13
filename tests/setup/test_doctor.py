@@ -1,9 +1,9 @@
-"""Tests for devflow.doctor — installation diagnostic checks."""
+"""Tests for devflow.setup.doctor — installation diagnostic checks."""
 
 import json
 from pathlib import Path
 
-from devflow.doctor import (
+from devflow.setup.doctor import (
     DoctorReport,
     check_agents_synced,
     check_cli_available,
@@ -102,7 +102,7 @@ class TestCheckDevflowInit:
 
 class TestCheckClaudeDefaultModel:
     def test_no_settings_file_is_ok(self, tmp_path: Path, monkeypatch) -> None:
-        from devflow.doctor import check_claude_default_model
+        from devflow.setup.doctor import check_claude_default_model
 
         monkeypatch.setenv("HOME", str(tmp_path))
         result = check_claude_default_model()
@@ -112,7 +112,7 @@ class TestCheckClaudeDefaultModel:
     def test_opus_default_fails_with_hint(self, tmp_path: Path, monkeypatch) -> None:
         import json as _json
 
-        from devflow.doctor import check_claude_default_model
+        from devflow.setup.doctor import check_claude_default_model
 
         monkeypatch.setenv("HOME", str(tmp_path))
         claude_dir = tmp_path / ".claude"
@@ -126,7 +126,7 @@ class TestCheckClaudeDefaultModel:
     def test_sonnet_default_is_ok(self, tmp_path: Path, monkeypatch) -> None:
         import json as _json
 
-        from devflow.doctor import check_claude_default_model
+        from devflow.setup.doctor import check_claude_default_model
 
         monkeypatch.setenv("HOME", str(tmp_path))
         claude_dir = tmp_path / ".claude"
@@ -138,7 +138,7 @@ class TestCheckClaudeDefaultModel:
         assert "sonnet" in result.message
 
     def test_invalid_json(self, tmp_path: Path, monkeypatch) -> None:
-        from devflow.doctor import check_claude_default_model
+        from devflow.setup.doctor import check_claude_default_model
 
         monkeypatch.setenv("HOME", str(tmp_path))
         claude_dir = tmp_path / ".claude"

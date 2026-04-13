@@ -1,11 +1,11 @@
-"""Tests for devflow.workflow — YAML loading, state persistence, phase management."""
+"""Tests for devflow.core.workflow — YAML loading, state persistence, phase management."""
 
 from pathlib import Path
 
 import pytest
 
-from devflow.models import Feature, PhaseStatus, WorkflowState
-from devflow.workflow import (
+from devflow.core.models import Feature, PhaseStatus, WorkflowState
+from devflow.core.workflow import (
     advance_phase,
     create_feature,
     load_state,

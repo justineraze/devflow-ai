@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from devflow.models import Feature
+from devflow.core.models import Feature
 
 console = Console()
 

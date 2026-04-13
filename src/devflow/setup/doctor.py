@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from devflow.gate import CheckResult, GateReport
+from devflow.integrations.gate import CheckResult, GateReport
 
 console = Console()
 
@@ -58,14 +58,14 @@ def check_cli_available(name: str, cmd: list[str]) -> CheckResult:
 def check_agents_synced(target: Path | None = None) -> CheckResult:
     """Check that agents are synced to ~/.claude/agents/."""
     target = target or (Path.home() / ".claude" / "agents")
-    assets = Path(__file__).resolve().parent.parent.parent / "assets" / "agents"
+    assets = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "agents"
     return _check_assets_synced("agents", assets, target)
 
 
 def check_skills_synced(target: Path | None = None) -> CheckResult:
     """Check that skills are synced to ~/.claude/skills/."""
     target = target or (Path.home() / ".claude" / "skills")
-    assets = Path(__file__).resolve().parent.parent.parent / "assets" / "skills"
+    assets = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "skills"
     return _check_assets_synced("skills", assets, target)
 
 
@@ -98,7 +98,7 @@ def _check_assets_synced(name: str, assets_dir: Path, target_dir: Path) -> Check
 
 def check_devflow_init(base: Path | None = None) -> CheckResult:
     """Check that .devflow/state.json exists and is valid."""
-    from devflow.models import WorkflowState
+    from devflow.core.models import WorkflowState
 
     root = base or Path.cwd()
     state_file = root / ".devflow" / "state.json"

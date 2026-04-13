@@ -10,7 +10,7 @@ from rich.console import Console
 console = Console()
 
 # Package assets directory (relative to this file).
-ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
+ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"
 
 # Default Claude Code directories.
 CLAUDE_DIR = Path.home() / ".claude"

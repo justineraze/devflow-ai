@@ -1,12 +1,18 @@
-"""Tests for devflow.track — project state reading."""
+"""Tests for devflow.core.track — project state reading."""
 
 from pathlib import Path
 
 import pytest
 
-from devflow.models import Feature, FeatureStatus, WorkflowState
-from devflow.track import get_feature, get_state, list_active_features, list_all_features, persist
-from devflow.workflow import save_state
+from devflow.core.models import Feature, FeatureStatus, WorkflowState
+from devflow.core.track import (
+    get_feature,
+    get_state,
+    list_active_features,
+    list_all_features,
+    persist,
+)
+from devflow.core.workflow import save_state
 
 
 @pytest.fixture

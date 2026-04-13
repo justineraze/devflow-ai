@@ -1,8 +1,8 @@
-"""Tests for devflow.stream — Claude Code stream-json parser."""
+"""Tests for devflow.orchestration.stream — Claude Code stream-json parser."""
 
 import json
 
-from devflow.stream import (
+from devflow.orchestration.stream import (
     ToolUse,
     format_cost,
     format_tokens,

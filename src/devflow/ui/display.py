@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from devflow.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
+from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
 
 console = Console()
 

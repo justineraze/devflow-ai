@@ -1,11 +1,13 @@
-"""Tests for devflow.build — orchestration logic."""
+"""Tests for devflow.orchestration.build — orchestration logic."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devflow.build import (
+from devflow.core.models import FeatureStatus, PhaseStatus
+from devflow.core.workflow import load_state, save_state
+from devflow.orchestration.build import (
     _generate_feature_id,
     _get_phase_agent,
     complete_phase,
@@ -17,8 +19,6 @@ from devflow.build import (
     start_build,
     start_fix,
 )
-from devflow.models import FeatureStatus, PhaseStatus
-from devflow.workflow import load_state, save_state
 
 
 @pytest.fixture
@@ -204,11 +204,11 @@ class TestGetPhaseAgent:
 
 
 class TestAutoCommitAfterPhase:
-    @patch("devflow.git.commit_changes", return_value=False)
-    @patch("devflow.git.get_diff_stat", return_value="")
-    @patch("devflow.build._execute_phase", return_value=(True, "done"))
-    @patch("devflow.git.create_branch", return_value="feat/test")
-    @patch("devflow.git.push_and_create_pr", return_value="https://github.com/pr/1")
+    @patch("devflow.integrations.git.commit_changes", return_value=False)
+    @patch("devflow.integrations.git.get_diff_stat", return_value="")
+    @patch("devflow.orchestration.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.integrations.git.create_branch", return_value="feat/test")
+    @patch("devflow.integrations.git.push_and_create_pr", return_value="https://github.com/pr/1")
     def test_commit_called_after_implementing(
         self, mock_pr: MagicMock, mock_branch: MagicMock,
         mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,
@@ -220,11 +220,11 @@ class TestAutoCommitAfterPhase:
         commit_msgs = [c[0][0] for c in mock_commit.call_args_list]
         assert any("implementing" in msg for msg in commit_msgs)
 
-    @patch("devflow.git.commit_changes", return_value=False)
-    @patch("devflow.git.get_diff_stat", return_value="")
-    @patch("devflow.build._execute_phase", return_value=(True, "done"))
-    @patch("devflow.git.create_branch", return_value="feat/test")
-    @patch("devflow.git.push_and_create_pr", return_value="https://github.com/pr/1")
+    @patch("devflow.integrations.git.commit_changes", return_value=False)
+    @patch("devflow.integrations.git.get_diff_stat", return_value="")
+    @patch("devflow.orchestration.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.integrations.git.create_branch", return_value="feat/test")
+    @patch("devflow.integrations.git.push_and_create_pr", return_value="https://github.com/pr/1")
     def test_commit_not_called_for_gate(
         self, mock_pr: MagicMock, mock_branch: MagicMock,
         mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,

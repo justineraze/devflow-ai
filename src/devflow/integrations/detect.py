@@ -49,7 +49,7 @@ def resolve_stack(base: Path | None = None) -> str | None:
     runs `detect_stack()` on the current directory. Returns None when
     nothing can be determined.
     """
-    from devflow.workflow import load_state
+    from devflow.core.workflow import load_state
 
     root = base or Path.cwd()
     saved = load_state(base).stack

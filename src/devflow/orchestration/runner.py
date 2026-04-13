@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from devflow.models import Feature, PhaseRecord, PhaseStatus
+from devflow.core.models import Feature, PhaseRecord, PhaseStatus
 
 console = Console()
 
@@ -16,7 +16,7 @@ console = Console()
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
 INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
 # Fallback: bundled assets in the package.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BUNDLED_AGENTS_DIR = _PROJECT_ROOT / "assets" / "agents"
 BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
 
@@ -248,7 +248,7 @@ def execute_phase(
 
     Captures output silently. No timeout — waits for Claude Code to finish.
     """
-    from devflow.stream import (
+    from devflow.orchestration.stream import (
         PhaseMetrics,
         format_cost,
         format_tokens,
@@ -344,7 +344,7 @@ def run_gate_phase(
     base: Path | None = None, stack: str | None = None,
 ) -> tuple[bool, str]:
     """Run the gate phase locally (ruff + pytest + secrets)."""
-    from devflow.gate import run_gate
+    from devflow.integrations.gate import run_gate
 
     report = run_gate(base, stack=stack)
     lines = []

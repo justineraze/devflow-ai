@@ -7,14 +7,14 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from devflow.display import (
+from devflow.core.track import get_feature, get_state, list_all_features
+from devflow.ui.display import (
     render_feature_detail,
     render_header,
     render_log_detail,
     render_log_table,
     render_status_table,
 )
-from devflow.track import get_feature, get_state, list_all_features
 
 app = typer.Typer(
     name="devflow",
@@ -82,7 +82,7 @@ def build(
     When resuming with --resume, the description becomes feedback
     on the previous plan (e.g. "no framework detection, just languages").
     """
-    from devflow.build import execute_build_loop, resume_build, start_build
+    from devflow.orchestration.build import execute_build_loop, resume_build, start_build
 
     if resume:
         feature = resume_build(resume)
@@ -104,7 +104,7 @@ def retry(
     feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
 ) -> None:
     """Retry a failed feature from its last failed phase."""
-    from devflow.build import execute_build_loop, retry_build
+    from devflow.orchestration.build import execute_build_loop, retry_build
 
     feature = retry_build(feature_id)
     if not feature:
@@ -120,7 +120,7 @@ def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
-    from devflow.build import execute_build_loop, start_fix
+    from devflow.orchestration.build import execute_build_loop, start_fix
 
     feature = start_fix(description)
     success = execute_build_loop(feature)
@@ -131,8 +131,8 @@ def fix(
 @app.command()
 def check() -> None:
     """Run the quality gate (lint, tests, secrets detection)."""
-    from devflow.detect import resolve_stack
-    from devflow.gate import render_gate_report, run_gate
+    from devflow.integrations.detect import resolve_stack
+    from devflow.integrations.gate import render_gate_report, run_gate
 
     render_header(subtitle="Quality gate")
     report = run_gate(stack=resolve_stack())
@@ -144,7 +144,7 @@ def check() -> None:
 @app.command()
 def install() -> None:
     """Install/sync agents and skills to ~/.claude/."""
-    from devflow.install import install_all, render_install_report
+    from devflow.setup.install import install_all, render_install_report
 
     render_header(subtitle="Installing agents & skills")
     result = install_all()
@@ -154,7 +154,7 @@ def install() -> None:
 @app.command()
 def update() -> None:
     """Update agents and skills to latest version."""
-    from devflow.install import install_all, render_install_report
+    from devflow.setup.install import install_all, render_install_report
 
     render_header(subtitle="Updating agents & skills")
     result = install_all()
@@ -165,7 +165,7 @@ def update() -> None:
 @app.command()
 def doctor() -> None:
     """Run diagnostic checks on the devflow installation."""
-    from devflow.doctor import render_doctor_report, run_doctor
+    from devflow.setup.doctor import render_doctor_report, run_doctor
 
     render_header(subtitle="Doctor diagnostic")
     report = run_doctor()
@@ -187,8 +187,8 @@ def init() -> None:
     """Initialize devflow in the current project."""
     from pathlib import Path
 
-    from devflow.detect import detect_stack
-    from devflow.workflow import ensure_devflow_dir, load_state, save_state
+    from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
+    from devflow.integrations.detect import detect_stack
 
     devflow_dir = ensure_devflow_dir()
 

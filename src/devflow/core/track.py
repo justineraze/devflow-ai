@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from devflow.models import Feature, WorkflowState
-from devflow.workflow import load_state, save_state
+from devflow.core.models import Feature, WorkflowState
+from devflow.core.workflow import load_state, save_state
 
 
 def get_state(base: Path | None = None) -> WorkflowState:
