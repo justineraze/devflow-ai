@@ -128,12 +128,64 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
         )
 
 
+def check_claude_default_model() -> CheckResult:
+    """Check the default Claude Code model.
+
+    devflow overrides per phase via ``--model``, so this only affects
+    general interactive ``claude`` usage outside devflow. Warn when
+    the global default is Opus (expensive).
+    """
+    import json
+
+    settings = Path.home() / ".claude" / "settings.json"
+    if not settings.exists():
+        return CheckResult(
+            name="claude model",
+            passed=True,
+            message="no settings.json — uses Claude Code default",
+        )
+
+    try:
+        data = json.loads(settings.read_text())
+    except json.JSONDecodeError as exc:
+        return CheckResult(
+            name="claude model",
+            passed=False,
+            message=f"invalid settings.json: {exc}",
+        )
+
+    model = data.get("model", "")
+    if not model:
+        return CheckResult(
+            name="claude model",
+            passed=True,
+            message="no default set — Claude Code picks",
+        )
+
+    if "opus" in model.lower():
+        return CheckResult(
+            name="claude model",
+            passed=False,
+            message=(
+                f"default is {model!r} (expensive)"
+                " — set to 'sonnet' in ~/.claude/settings.json"
+            ),
+        )
+
+    return CheckResult(
+        name="claude model",
+        passed=True,
+        message=f"default: {model}",
+    )
+
+
 def run_doctor(base: Path | None = None) -> DoctorReport:
     """Run all diagnostic checks and return the report."""
     report = DoctorReport()
     report.add(check_python_version())
     report.add(check_cli_available("claude", ["claude", "--version"]))
     report.add(check_cli_available("gh", ["gh", "--version"]))
+    report.add(check_claude_default_model())
     report.add(check_agents_synced())
     report.add(check_skills_synced())
     report.add(check_devflow_init(base))

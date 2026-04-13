@@ -100,6 +100,56 @@ class TestCheckDevflowInit:
         assert "Invalid" in result.message
 
 
+class TestCheckClaudeDefaultModel:
+    def test_no_settings_file_is_ok(self, tmp_path: Path, monkeypatch) -> None:
+        from devflow.doctor import check_claude_default_model
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = check_claude_default_model()
+        assert result.passed is True
+        assert "no settings.json" in result.message
+
+    def test_opus_default_fails_with_hint(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        from devflow.doctor import check_claude_default_model
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(_json.dumps({"model": "opus"}))
+
+        result = check_claude_default_model()
+        assert result.passed is False
+        assert "sonnet" in result.message
+
+    def test_sonnet_default_is_ok(self, tmp_path: Path, monkeypatch) -> None:
+        import json as _json
+
+        from devflow.doctor import check_claude_default_model
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text(_json.dumps({"model": "sonnet"}))
+
+        result = check_claude_default_model()
+        assert result.passed is True
+        assert "sonnet" in result.message
+
+    def test_invalid_json(self, tmp_path: Path, monkeypatch) -> None:
+        from devflow.doctor import check_claude_default_model
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        (claude_dir / "settings.json").write_text("not json")
+
+        result = check_claude_default_model()
+        assert result.passed is False
+        assert "invalid" in result.message.lower()
+
+
 class TestRunDoctor:
     def test_returns_report_with_all_checks(self, tmp_path: Path) -> None:
         report = run_doctor(base=tmp_path)
@@ -108,10 +158,11 @@ class TestRunDoctor:
         assert "python" in names
         assert "claude" in names
         assert "gh" in names
+        assert "claude model" in names
         assert "agents" in names
         assert "skills" in names
         assert "init" in names
-        assert len(report.checks) == 6
+        assert len(report.checks) == 7
 
     def test_empty_report_alias(self) -> None:
         report = DoctorReport()
