@@ -135,6 +135,19 @@ devflow build "Add caching layer" --workflow full
 devflow fix "Fix timezone bug"    # uses quick automatically
 ```
 
+### Model selection per phase
+
+Each phase uses the right Claude tier automatically — Opus for deep reasoning,
+Sonnet for execution. Typical savings: **3-5x cheaper** than running everything
+on Opus.
+
+| Phase | Model | Why |
+|-------|-------|-----|
+| `architecture`, `planning` | Opus | Structural decisions, multi-step plans |
+| `reviewing` | Opus | Deep patch detection, security |
+| `plan_review`, `implementing`, `fixing` | Sonnet | Execution, light checks |
+| `gate` | (local) | No Claude involved — ruff/pytest/secrets |
+
 ---
 
 ## State machine

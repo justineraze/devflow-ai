@@ -34,6 +34,24 @@ PHASE_SKILLS: dict[str, tuple[str, ...]] = {
     "gate": ("tdd-discipline",),
 }
 
+# Claude model alias to use for each phase. Opus for deep reasoning
+# (architecture, planning, review), Sonnet for execution and light
+# checks. Saves 3-5x on phases that don't need Opus-level reasoning.
+DEFAULT_MODEL = "sonnet"
+PHASE_MODELS: dict[str, str] = {
+    "architecture": "opus",      # structural decisions, blast radius
+    "planning":     "opus",      # multi-step plan with risk assessment
+    "plan_review":  "sonnet",    # light compliance check
+    "implementing": "sonnet",    # bulk execution, tests
+    "fixing":       "sonnet",    # targeted fixes
+    "reviewing":    "opus",      # deep patch detection, security
+}
+
+
+def _model_for_phase(phase_name: str) -> str:
+    """Return the Claude model alias for a phase (defaults to Sonnet)."""
+    return PHASE_MODELS.get(phase_name, DEFAULT_MODEL)
+
 
 def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path | None:
     """Locate an asset .md file, preferring installed over bundled."""
@@ -240,21 +258,25 @@ def execute_phase(
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
+    model = _model_for_phase(phase.name)
     cwd = str(Path.cwd())
 
     # Stable content (skills + agent) goes to --system-prompt, which
     # Anthropic caches automatically → big cost savings across phases.
     # Variable content (task + context) goes via stdin.
-    # NOTE: --bare would also save ~30k tokens of hooks/auto-memory but
-    # breaks OAuth auth (requires ANTHROPIC_API_KEY). Skipped for now.
+    # --model picks the right tier per phase: Opus for deep reasoning,
+    # Sonnet for execution. See PHASE_MODELS.
     cmd = [
         "claude", "-p", "-",
+        "--model", model,
         "--permission-mode", "acceptEdits",
         "--output-format", "stream-json",
         "--verbose",
     ]
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
+
+    console.print(f"  [dim]model: {model}[/dim]")
 
     try:
         proc = subprocess.Popen(
