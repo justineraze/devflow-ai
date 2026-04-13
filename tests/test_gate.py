@@ -1,8 +1,10 @@
 """Tests for devflow.gate — quality gate checks."""
 
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
-from devflow.gate import CheckResult, GateReport, scan_secrets
+from devflow.gate import CheckResult, GateReport, _run_command_check, scan_secrets
 
 
 class TestCheckResult:
@@ -31,6 +33,59 @@ class TestGateReport:
     def test_empty_report_passes(self) -> None:
         report = GateReport()
         assert report.passed is True
+
+
+class TestRunCommandCheck:
+    """Tests for the generic _run_command_check helper."""
+
+    @patch("devflow.gate.subprocess.run")
+    def test_success(self, mock_run: patch, tmp_path: Path) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["tool"], returncode=0, stdout="all good\n", stderr="",
+        )
+        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path)
+        assert result.passed is True
+        assert result.message == "No issues"
+
+    @patch("devflow.gate.subprocess.run")
+    def test_failure(self, mock_run: patch, tmp_path: Path) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["tool"], returncode=1, stdout="error line 1\nerror line 2\n", stderr="",
+        )
+        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path)
+        assert result.passed is False
+        assert "issues found" in result.message
+
+    @patch("devflow.gate.subprocess.run", side_effect=FileNotFoundError)
+    def test_missing_tool_skipped(self, _mock: patch, tmp_path: Path) -> None:
+        result = _run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
+        assert result.passed is True
+        assert "not found" in result.message
+        assert "skipped" in result.message
+
+    @patch(
+        "devflow.gate.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["tool"], timeout=60),
+    )
+    def test_timeout(self, _mock: patch, tmp_path: Path) -> None:
+        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path, timeout=60)
+        assert result.passed is False
+        assert "timed out" in result.message
+
+    @patch("devflow.gate.subprocess.run")
+    def test_custom_parse_output(self, mock_run: patch, tmp_path: Path) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["t"], returncode=0, stdout="5 passed in 0.1s\n", stderr="",
+        )
+
+        def _parse(rc: int, stdout: str) -> tuple[str, str]:
+            return stdout.strip().split("\n")[-1], ""
+
+        result = _run_command_check(
+            "pytest", ["pytest"], cwd=tmp_path, parse_output=_parse,
+        )
+        assert result.passed is True
+        assert result.message == "5 passed in 0.1s"
 
 
 class TestScanSecrets:
