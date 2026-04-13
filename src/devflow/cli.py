@@ -131,10 +131,11 @@ def fix(
 @app.command()
 def check() -> None:
     """Run the quality gate (lint, tests, secrets detection)."""
+    from devflow.detect import resolve_stack
     from devflow.gate import render_gate_report, run_gate
 
     render_header(subtitle="Quality gate")
-    report = run_gate()
+    report = run_gate(stack=resolve_stack())
     render_gate_report(report)
     if not report.passed:
         raise typer.Exit(1)

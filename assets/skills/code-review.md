@@ -11,22 +11,51 @@ regressions, and drift.**
 
 ## Five passes, in order
 
-### Pass 0 — Patch detection (highest priority)
+### Pass 0 — Patch detection (non-negotiable, comes first)
 
-Before anything else, scan the diff for patch smells:
+**This is the most important pass. Spend 30%+ of your effort here.** Skipping
+or rushing Pass 0 means shipping technical debt. Read every changed file's
+**full content**, not just the diff — patches often hide in surrounding code
+that didn't change but should have.
 
-- **Copy-paste with small tweaks** across the diff → critical, demand refactor
-- **Special-case flags** (`if feature_x: ...`) → critical, wrong abstraction
-- **Parameter threading** (same new arg in 3+ signatures) → critical
-- **God modules growing** (file passes 500 lines) → critical
-- **Inconsistent patterns** (one file uses Path, another string) → warning
-- **Dead code** (unused vars, commented blocks) → warning
+Scan for these patch smells:
 
-For every flagged smell, **propose the refactor**. Don't just say "this is a
-patch" — say "extract Y from X; the feature becomes a 3-line addition to Y".
+- **Module-level mutation / import-order hacks** — code that defines a constant
+  then mutates it later because something "wasn't defined yet". Look for
+  comments like "patch this in later", "see below", "done after X is defined".
+  These are automatic critical. The fix is always trivial: reorder definitions.
+
+- **Copy-paste with small tweaks** across the diff → critical, demand refactor.
+
+- **Special-case flags** (`if feature_x: do_this_differently`) → critical,
+  wrong abstraction.
+
+- **Parameter threading** (same new arg in 3+ signatures) → critical.
+
+- **Anonymous tuples with 4+ fields** in registries or data structures →
+  critical, suggest NamedTuple/dataclass. They invite silent breakage when
+  growing.
+
+- **Overly defensive try/except** — bare `except Exception` (often with
+  `noqa: BLE001`) catching errors from functions that don't raise. Critical
+  when it duplicates logic that should be a helper. Warning otherwise.
+
+- **God modules growing** (file passes 500 lines) → critical.
+
+- **Inconsistent patterns** (one file uses Path, another string) → warning.
+
+- **Dead code** (unused vars, commented blocks) → warning.
+
+For every flagged smell, **propose the concrete refactor**. Don't just say
+"this is a patch" — show the before/after code, name the helper to extract,
+explain how the feature becomes shorter on top of cleaner code.
 
 If the PR is fundamentally a patch when a refactor was the right answer,
-block with REQUEST_CHANGES and link the suggested path.
+block with REQUEST_CHANGES.
+
+**Self-check before declaring Pass 0 done**: did you find at least one thing
+to flag? Most diffs have something. If you found nothing, you probably read
+too fast — re-read the largest file in the diff before moving on.
 
 ### Pass 1 — Plan compliance
 

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -62,56 +64,113 @@ class GateReport:
         self.checks.append(check)
 
 
-def run_ruff(base: Path | None = None) -> CheckResult:
-    """Run ruff linter on the project."""
-    cwd = str(base or Path.cwd())
+# Type alias for an output parser: (returncode, stdout) -> (message, details).
+ParseOutput = Callable[[int, str], tuple[str, str]]
+
+
+class CheckDef(NamedTuple):
+    """Definition of a quality gate check (lint, test, etc.)."""
+
+    name: str
+    cmd: list[str]
+    timeout: int = 60
+    parse_output: ParseOutput | None = None
+
+
+def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
+    """Extract the pytest summary line from stdout."""
+    last_line = stdout.strip().split("\n")[-1] if stdout.strip() else ""
+    if returncode == 0:
+        return last_line, ""
+    return last_line or "Tests failed", stdout[:2000]
+
+
+STACK_CHECKS: dict[str, list[CheckDef]] = {
+    "python": [
+        CheckDef("ruff", ["ruff", "check", "src/", "tests/"]),
+        CheckDef(
+            "pytest",
+            ["python", "-m", "pytest", "tests/", "-q", "--tb=short"],
+            timeout=120,
+            parse_output=_parse_pytest,
+        ),
+    ],
+    "typescript": [
+        CheckDef("biome", ["npx", "biome", "check", "."]),
+        CheckDef("vitest", ["npx", "vitest", "run", "--reporter=verbose"], timeout=120),
+    ],
+    "php": [
+        CheckDef("pint", ["./vendor/bin/pint", "--test"]),
+        CheckDef("pest", ["./vendor/bin/pest", "--compact"], timeout=120),
+    ],
+}
+
+
+def _checks_for_stack(stack: str | None) -> list[CheckDef]:
+    """Return the check definitions for *stack*, defaulting to python."""
+    return STACK_CHECKS.get(stack or "python", STACK_CHECKS["python"])
+
+
+def _run_command_check(
+    name: str,
+    cmd: list[str],
+    cwd: Path,
+    timeout: int = 60,
+    parse_output: ParseOutput | None = None,
+) -> CheckResult:
+    """Run an external tool and return a CheckResult.
+
+    Args:
+        name: Human-readable check name (e.g. "ruff", "pytest").
+        cmd: Command and arguments to execute.
+        cwd: Working directory for the subprocess.
+        timeout: Maximum seconds before killing the process.
+        parse_output: Optional callback ``(returncode, stdout) -> (message, details)``
+            for custom summary extraction. When *None*, a generic summary is used.
+
+    Returns:
+        CheckResult with *passed=True* when the tool exits 0 **or** is missing.
+        Missing tools are reported but never fail the gate.
+    """
     try:
         result = subprocess.run(
-            ["ruff", "check", "src/", "tests/"],
+            cmd,
             capture_output=True,
             text=True,
-            cwd=cwd,
-            timeout=60,
-        )
-        if result.returncode == 0:
-            return CheckResult(name="ruff", passed=True, message="No lint issues")
-        return CheckResult(
-            name="ruff",
-            passed=False,
-            message=f"{result.stdout.count(chr(10))} lint issues found",
-            details=result.stdout[:2000],
+            cwd=str(cwd),
+            timeout=timeout,
         )
     except FileNotFoundError:
-        return CheckResult(name="ruff", passed=False, message="ruff not installed")
+        return CheckResult(name=name, passed=True, message=f"{name} not found — skipped")
     except subprocess.TimeoutExpired:
-        return CheckResult(name="ruff", passed=False, message="ruff timed out")
+        return CheckResult(name=name, passed=False, message=f"{name} timed out")
+
+    if parse_output is not None:
+        message, details = parse_output(result.returncode, result.stdout)
+    elif result.returncode == 0:
+        message, details = "No issues", ""
+    else:
+        message = f"{result.stdout.count(chr(10))} issues found"
+        details = result.stdout[:2000]
+
+    passed = result.returncode == 0
+    return CheckResult(name=name, passed=passed, message=message, details=details)
+
+
+def run_ruff(base: Path | None = None) -> CheckResult:
+    """Run ruff linter (kept for back-compat — prefer run_gate)."""
+    check = STACK_CHECKS["python"][0]
+    return _run_command_check(
+        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
+    )
 
 
 def run_pytest(base: Path | None = None) -> CheckResult:
-    """Run pytest on the project."""
-    cwd = str(base or Path.cwd())
-    try:
-        result = subprocess.run(
-            ["python", "-m", "pytest", "tests/", "-q", "--tb=short"],
-            capture_output=True,
-            text=True,
-            cwd=cwd,
-            timeout=120,
-        )
-        # Extract summary line (e.g., "33 passed in 0.09s").
-        last_line = result.stdout.strip().split("\n")[-1] if result.stdout.strip() else ""
-        if result.returncode == 0:
-            return CheckResult(name="pytest", passed=True, message=last_line)
-        return CheckResult(
-            name="pytest",
-            passed=False,
-            message=last_line or "Tests failed",
-            details=result.stdout[:2000],
-        )
-    except FileNotFoundError:
-        return CheckResult(name="pytest", passed=False, message="pytest not installed")
-    except subprocess.TimeoutExpired:
-        return CheckResult(name="pytest", passed=False, message="Tests timed out")
+    """Run pytest (kept for back-compat — prefer run_gate)."""
+    check = STACK_CHECKS["python"][1]
+    return _run_command_check(
+        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
+    )
 
 
 def scan_secrets(base: Path | None = None) -> CheckResult:
@@ -147,11 +206,20 @@ def scan_secrets(base: Path | None = None) -> CheckResult:
     return CheckResult(name="secrets", passed=True, message="No secrets detected")
 
 
-def run_gate(base: Path | None = None) -> GateReport:
-    """Run all quality gate checks and return the report."""
+def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
+    """Run all quality gate checks and return the report.
+
+    Args:
+        base: Project root directory (defaults to cwd).
+        stack: Tech stack name (e.g. "python", "typescript", "php").
+            Determines which lint/test tools to run. Defaults to "python".
+    """
+    cwd = base or Path.cwd()
     report = GateReport()
-    report.add(run_ruff(base))
-    report.add(run_pytest(base))
+    for check in _checks_for_stack(stack):
+        report.add(_run_command_check(
+            check.name, check.cmd, cwd, check.timeout, check.parse_output,
+        ))
     report.add(scan_secrets(base))
     return report
 

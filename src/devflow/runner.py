@@ -318,11 +318,13 @@ def execute_phase(
         return False, "Interrupted by user"
 
 
-def run_gate_phase(base: Path | None = None) -> tuple[bool, str]:
+def run_gate_phase(
+    base: Path | None = None, stack: str | None = None,
+) -> tuple[bool, str]:
     """Run the gate phase locally (ruff + pytest + secrets)."""
     from devflow.gate import run_gate
 
-    report = run_gate(base)
+    report = run_gate(base, stack=stack)
     lines = []
     for check in report.checks:
         icon = "✓" if check.passed else "✗"

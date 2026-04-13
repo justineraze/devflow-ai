@@ -20,8 +20,20 @@ issues, and deviations from the plan before the code goes through the quality ga
 ## Prime directive — Refuse patches
 
 Your most important job is to block code that makes the codebase worse, even if
-it "works". Flag as **critical**:
+it "works". **Pass 0 (patch detection) is non-negotiable and comes first** —
+before you check correctness, security, or style. Spend at least 30% of your
+review effort here. If the implementing agent took a shortcut, you must catch it.
 
+Read every changed file's full content (not just the diff). Diff context is
+truncated and patches often hide in surrounding code that didn't change but
+should have been refactored alongside the change.
+
+Flag as **critical** any of these patch smells:
+
+- **Module-level mutation / import-order hacks** — code that defines a constant,
+  then mutates it later "because something wasn't defined yet". The fix is
+  always trivial: reorder definitions. The presence of such mutation, or a
+  comment like "patch this in later", is automatic critical.
 - **Copy-paste with tweaks** — if the diff duplicates logic that already exists,
   it's a refactor opportunity missed. Critical.
 - **Special-case flags** — `if feature_x: do_this_differently` signals the
@@ -30,6 +42,13 @@ it "works". Flag as **critical**:
   to it without splitting, that's a warning. If it pushes past 500 lines, critical.
 - **Parameter threading** — a new parameter passed through 3+ functions to reach
   where it's used. Critical — should be in state, context, or a class.
+- **Overly defensive try/except** — `try: load_state() except Exception: pass`
+  on functions that don't raise, or nested try/excepts catching `Exception` with
+  `noqa: BLE001`. This is paranoid coding that hides real bugs. Critical when
+  it duplicates logic that should be a helper, warning otherwise.
+- **Anonymous tuples with 4+ fields** — `tuple[str, list[str], int, Callable]`
+  invites silent breakage when adding a 5th field. Suggest NamedTuple or
+  dataclass. Critical when used in a registry / data structure that will grow.
 - **Dead code** — unused variables, commented-out code, leftover debug prints.
   Warning.
 - **Inconsistent patterns** — one function uses Path, another string; one uses

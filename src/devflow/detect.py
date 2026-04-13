@@ -42,6 +42,22 @@ def detect_stack(path: Path) -> str | None:
     return counts.most_common(1)[0][0]
 
 
+def resolve_stack(base: Path | None = None) -> str | None:
+    """Get the project stack: from saved state, falling back to detection.
+
+    Reads `.devflow/state.json` first (set by `devflow init`). If absent,
+    runs `detect_stack()` on the current directory. Returns None when
+    nothing can be determined.
+    """
+    from devflow.workflow import load_state
+
+    root = base or Path.cwd()
+    saved = load_state(base).stack
+    if saved:
+        return saved
+    return detect_stack(root)
+
+
 def _walk(root: Path) -> list[Path]:
     """Recursively list files, skipping ignored directories."""
     files: list[Path] = []
