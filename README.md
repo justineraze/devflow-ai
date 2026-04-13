@@ -219,7 +219,7 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 | Command | Description |
 |---------|-------------|
 | `devflow doctor` | Check installation health (Python, Claude, gh, agents) |
-| `devflow version` / `devflow --about` | Show version / author / repo info |
+| `devflow version` | Show devflow version |
 | `devflow install` / `devflow update` | Sync agents and skills to `~/.claude/` |
 | `devflow init` | Detect stack + initialize `.devflow/` |
 | `devflow build "..."` | Build a feature (default: standard workflow) |
@@ -229,7 +229,6 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
 | `devflow status` | Show all tracked features |
 | `devflow status feat-001` | Show details for one feature |
-| `devflow status --json` | Output features as JSON |
 | `devflow log` | Show feature history (status, duration, date) |
 | `devflow log feat-001` | Detailed log for one feature with phase timings |
 
