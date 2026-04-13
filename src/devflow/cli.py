@@ -29,26 +29,8 @@ def status(
     feature_id: Annotated[
         str | None, typer.Argument(help="Feature ID for detailed view")
     ] = None,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Output as JSON")
-    ] = False,
 ) -> None:
     """Show the status of tracked features."""
-    if json_output:
-        import json
-
-        if feature_id:
-            feat = get_feature(feature_id)
-            if not feat:
-                console.print_json(json.dumps({"error": f"Feature {feature_id!r} not found"}))
-                raise typer.Exit(1)
-            console.print_json(json.dumps(feat.model_dump(mode="json")))
-        else:
-            state = get_state()
-            features = [f.model_dump(mode="json") for f in state.features.values()]
-            console.print_json(json.dumps(features))
-        return
-
     render_header(subtitle="Feature status")
 
     if feature_id:
@@ -197,17 +179,6 @@ def version() -> None:
     from devflow import __version__
 
     console.print(f"devflow {__version__}")
-
-
-@app.command()
-def about() -> None:
-    """Show author, repository URL, and license."""
-    from devflow import __author__, __license__, __repo_url__, __version__
-
-    console.print(f"devflow {__version__}")
-    console.print(f"Author:  {__author__}")
-    console.print(f"Repo:    {__repo_url__}")
-    console.print(f"License: {__license__}")
 
 
 @app.command()
