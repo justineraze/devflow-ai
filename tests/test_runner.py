@@ -202,3 +202,37 @@ class TestSkillInjection:
         prompt = build_prompt(sample_feature, phase, "developer")
         assert "Skills (discipline rules)" in prompt
         assert "Context Discipline" in prompt
+
+
+class TestPromptSplit:
+    def test_system_prompt_contains_skills_and_agent(
+        self, sample_feature: Feature,
+    ) -> None:
+        from devflow.runner import build_system_prompt
+
+        system = build_system_prompt("implementing", "developer")
+        assert "Skills (discipline rules)" in system
+        assert "Context Discipline" in system
+        assert "Agent role" in system
+
+    def test_user_prompt_contains_task_not_skills(
+        self, sample_feature: Feature,
+    ) -> None:
+        from devflow.runner import build_user_prompt
+
+        phase = sample_feature.phases[1]
+        user = build_user_prompt(sample_feature, phase)
+        assert "Current task" in user
+        assert "feat-test-001" in user
+        # Skills should NOT be in the user prompt anymore.
+        assert "Skills (discipline rules)" not in user
+        assert "Context Discipline" not in user
+
+    def test_build_prompt_still_combines_both(
+        self, sample_feature: Feature,
+    ) -> None:
+        phase = sample_feature.phases[1]
+        prompt = build_prompt(sample_feature, phase, "developer")
+        # Backward-compat: the combined prompt still has everything.
+        assert "Skills (discipline rules)" in prompt
+        assert "Current task" in prompt
