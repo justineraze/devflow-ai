@@ -1,5 +1,7 @@
 """Tests for devflow.cli — command registration and basic invocations."""
 
+import json
+
 from typer.testing import CliRunner
 
 from devflow.cli import app
@@ -39,6 +41,61 @@ class TestAboutCommand:
 
         result = runner.invoke(app, ["about"])
         assert f"devflow {__version__}" in result.output
+
+
+class TestStatusJsonFlag:
+    def test_json_flag_empty_state(self, tmp_path, monkeypatch) -> None:
+        """--json with no features returns an empty JSON list."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data == []
+
+    def test_json_flag_with_features(self, tmp_path, monkeypatch) -> None:
+        """--json outputs feature data as JSON array."""
+        from devflow.models import Feature, WorkflowState
+        from devflow.workflow import ensure_devflow_dir, save_state
+
+        monkeypatch.chdir(tmp_path)
+        ensure_devflow_dir(tmp_path)
+        state = WorkflowState()
+        feat = Feature(id="f-001", description="test feature")
+        state.add_feature(feat)
+        save_state(state, tmp_path)
+
+        result = runner.invoke(app, ["status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["id"] == "f-001"
+        assert data[0]["description"] == "test feature"
+
+    def test_json_flag_single_feature(self, tmp_path, monkeypatch) -> None:
+        """--json with a feature ID outputs that feature as JSON object."""
+        from devflow.models import Feature, WorkflowState
+        from devflow.workflow import ensure_devflow_dir, save_state
+
+        monkeypatch.chdir(tmp_path)
+        ensure_devflow_dir(tmp_path)
+        state = WorkflowState()
+        feat = Feature(id="f-002", description="specific feature")
+        state.add_feature(feat)
+        save_state(state, tmp_path)
+
+        result = runner.invoke(app, ["status", "f-002", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == "f-002"
+        assert data["description"] == "specific feature"
+
+    def test_json_flag_feature_not_found(self, tmp_path, monkeypatch) -> None:
+        """--json with unknown feature ID returns error JSON and exit code 1."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["status", "nope", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
 
 
 class TestRetryCommand:
