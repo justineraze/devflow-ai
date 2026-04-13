@@ -70,25 +70,45 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
 
     devflow-ai/
     ├── src/devflow/
-    │   ├── cli.py        — commandes Typer, zéro logique métier
-    │   ├── models.py     — Pydantic : Feature, WorkflowState, Phase...
-    │   ├── workflow.py   — chargement YAML + validation transitions
-    │   ├── build.py      — orchestration plan-first + confirmation loop
-    │   ├── runner.py     — bridge claude -p + build_prompt + skills inject
-    │   ├── stream.py     — parser stream-json pour le live progress
-    │   ├── git.py        — branch, commit, PR via gh
-    │   ├── track.py      — lecture/écriture .devflow/state.json
-    │   ├── gate.py       — quality gate (ruff, pytest, secrets)
-    │   ├── install.py    — sync assets vers ~/.claude/
-    │   ├── detect.py     — détection stack du projet
-    │   ├── doctor.py     — checks de santé (python, claude, gh, agents)
-    │   └── display.py    — composants Rich (panels, tables, logs)
+    │   ├── cli.py                      — commandes Typer, zéro logique métier
+    │   ├── core/                       — état & domaine
+    │   │   ├── models.py               — Pydantic : Feature, WorkflowState, Phase…
+    │   │   ├── workflow.py             — chargement YAML + persistance state.json
+    │   │   ├── track.py                — lecture/écriture state (haut niveau)
+    │   │   └── artifacts.py            — I/O atomique sur .devflow/<feat-id>/
+    │   ├── orchestration/              — le moteur
+    │   │   ├── build.py                — plan-first + boucle + auto-retry gate
+    │   │   ├── runner.py               — bridge claude -p + build_prompt
+    │   │   ├── model_routing.py        — routing mod. (YAML > sélecteur > défaut)
+    │   │   └── stream.py               — parser stream-json
+    │   ├── integrations/               — ponts vers l'extérieur
+    │   │   ├── gate.py                 — quality gate (parallèle)
+    │   │   ├── git.py                  — branch, commit, PR, diff summary
+    │   │   └── detect.py               — détection stack
+    │   ├── setup/
+    │   │   ├── install.py              — sync assets vers ~/.claude/
+    │   │   └── doctor.py               — checks de santé
+    │   └── ui/
+    │       └── display.py              — composants Rich
     ├── assets/
-    │   ├── agents/       — 9 agents (.md)
-    │   └── skills/       — 8 skills (.md)
-    ├── workflows/        — 4 YAML (quick / light / standard / full)
-    ├── tests/            — ~170 tests pytest
+    │   ├── agents/                     — 9 agents (.md)
+    │   └── skills/                     — 8 skills (.md)
+    ├── workflows/                      — 4 YAML (quick / light / standard / full)
+    ├── tests/                          — mirror de src/devflow/ (~235 tests)
     └── pyproject.toml
+
+## Artefacts par feature (.devflow/<feat-id>/)
+
+    planning.md      — output de la phase planning
+    reviewing.md     — output de la phase reviewing
+    gate.md          — texte humain du gate (snapshot dernière run)
+    gate.json        — rapport structuré du gate (checks passed/failed + details)
+    files.json       — diff summary (lines_added, paths, critical_paths)
+
+Chaque phase ne lit que les artefacts qu'elle déclare en dépendance
+(cf. `PHASE_CONTEXT_DEPS` dans artifacts.py). Prompts user plus petits
+et stables → prompt caching efficace. Gate.json alimente le router de
+modèle (Haiku pour fixes triviaux) et le prompt structuré de `fixing`.
 
 ## State machine
 
