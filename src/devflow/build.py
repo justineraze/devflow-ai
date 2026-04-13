@@ -303,7 +303,8 @@ def _execute_phase(
     from devflow.runner import execute_phase, run_gate_phase
 
     if phase.name == "gate":
-        return run_gate_phase(base)
+        state = load_state(base)
+        return run_gate_phase(base, stack=state.stack)
     return execute_phase(feature, phase, agent_name)
 
 
