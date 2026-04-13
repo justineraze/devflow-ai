@@ -4,7 +4,14 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from devflow.gate import CheckResult, GateReport, _run_command_check, scan_secrets
+from devflow.gate import (
+    STACK_CHECKS,
+    CheckResult,
+    GateReport,
+    _checks_for_stack,
+    _run_command_check,
+    scan_secrets,
+)
 
 
 class TestCheckResult:
@@ -86,6 +93,33 @@ class TestRunCommandCheck:
         )
         assert result.passed is True
         assert result.message == "5 passed in 0.1s"
+
+
+class TestChecksForStack:
+    """Tests for _checks_for_stack stack→tools mapping."""
+
+    def test_python_stack(self) -> None:
+        checks = _checks_for_stack("python")
+        names = [c[0] for c in checks]
+        assert names == ["ruff", "pytest"]
+
+    def test_typescript_stack(self) -> None:
+        checks = _checks_for_stack("typescript")
+        names = [c[0] for c in checks]
+        assert names == ["biome", "vitest"]
+
+    def test_php_stack(self) -> None:
+        checks = _checks_for_stack("php")
+        names = [c[0] for c in checks]
+        assert names == ["pint", "pest"]
+
+    def test_none_defaults_to_python(self) -> None:
+        checks = _checks_for_stack(None)
+        assert checks is STACK_CHECKS["python"]
+
+    def test_unknown_defaults_to_python(self) -> None:
+        checks = _checks_for_stack("ruby")
+        assert checks is STACK_CHECKS["python"]
 
 
 class TestScanSecrets:

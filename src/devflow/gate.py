@@ -63,6 +63,33 @@ class GateReport:
         self.checks.append(check)
 
 
+# Type alias for a check definition: (name, cmd, timeout, parse_output).
+CheckDef = tuple[str, list[str], int, Callable[[int, str], tuple[str, str]] | None]
+
+STACK_CHECKS: dict[str, list[CheckDef]] = {
+    "python": [
+        ("ruff", ["ruff", "check", "src/", "tests/"], 60, None),
+        ("pytest", ["python", "-m", "pytest", "tests/", "-q", "--tb=short"], 120, None),
+    ],
+    "typescript": [
+        ("biome", ["npx", "biome", "check", "."], 60, None),
+        ("vitest", ["npx", "vitest", "run", "--reporter=verbose"], 120, None),
+    ],
+    "php": [
+        ("pint", ["./vendor/bin/pint", "--test"], 60, None),
+        ("pest", ["./vendor/bin/pest", "--compact"], 120, None),
+    ],
+}
+
+# Pytest checks use a custom parser — patch it into the registry.
+# Done after _parse_pytest is defined (see below).
+
+
+def _checks_for_stack(stack: str | None) -> list[CheckDef]:
+    """Return the check definitions for *stack*, defaulting to python."""
+    return STACK_CHECKS.get(stack or "python", STACK_CHECKS["python"])
+
+
 def _run_command_check(
     name: str,
     cmd: list[str],
@@ -116,6 +143,12 @@ def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
     if returncode == 0:
         return last_line, ""
     return last_line or "Tests failed", stdout[:2000]
+
+
+# Patch pytest's custom parser into the registry now that _parse_pytest is defined.
+STACK_CHECKS["python"][1] = (
+    "pytest", ["python", "-m", "pytest", "tests/", "-q", "--tb=short"], 120, _parse_pytest,
+)
 
 
 def run_ruff(base: Path | None = None) -> CheckResult:
