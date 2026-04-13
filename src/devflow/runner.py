@@ -12,24 +12,50 @@ from devflow.models import Feature, PhaseRecord, PhaseStatus
 
 console = Console()
 
-# Where agents live after `devflow install`.
+# Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
-# Fallback: bundled agents in the package.
-BUNDLED_AGENTS_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "agents"
+INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
+# Fallback: bundled assets in the package.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+BUNDLED_AGENTS_DIR = _PROJECT_ROOT / "assets" / "agents"
+BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
+
+# Skills always injected on every phase.
+ALWAYS_ON_SKILLS: tuple[str, ...] = ("context-discipline",)
+
+# Skills injected per phase, in addition to ALWAYS_ON_SKILLS.
+PHASE_SKILLS: dict[str, tuple[str, ...]] = {
+    "architecture": ("planning-rigor", "refactor-first"),
+    "planning": ("planning-rigor", "refactor-first"),
+    "plan_review": ("code-review", "planning-rigor"),
+    "implementing": ("incremental-build", "tdd-discipline", "refactor-first"),
+    "fixing": ("incremental-build", "tdd-discipline"),
+    "reviewing": ("code-review", "refactor-first"),
+    "gate": ("tdd-discipline",),
+}
 
 
-def _find_agent_file(agent_name: str) -> Path | None:
-    """Locate the agent .md file, preferring installed over bundled."""
-    for base in (INSTALLED_AGENTS_DIR, BUNDLED_AGENTS_DIR):
-        path = base / f"{agent_name}.md"
+def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path | None:
+    """Locate an asset .md file, preferring installed over bundled."""
+    for base in (installed_dir, bundled_dir):
+        path = base / f"{name}.md"
         if path.exists():
             return path
     return None
 
 
-def _load_agent_prompt(agent_name: str) -> str:
-    """Load the agent's .md file content, stripping YAML frontmatter."""
-    path = _find_agent_file(agent_name)
+def _find_agent_file(agent_name: str) -> Path | None:
+    """Locate the agent .md file."""
+    return _find_asset_file(agent_name, INSTALLED_AGENTS_DIR, BUNDLED_AGENTS_DIR)
+
+
+def _find_skill_file(skill_name: str) -> Path | None:
+    """Locate the skill .md file."""
+    return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, BUNDLED_SKILLS_DIR)
+
+
+def _load_md_content(path: Path | None) -> str:
+    """Read an .md file and strip YAML frontmatter."""
     if not path:
         return ""
     content = path.read_text()
@@ -38,6 +64,22 @@ def _load_agent_prompt(agent_name: str) -> str:
         if end != -1:
             content = content[end + 3:].lstrip("\n")
     return content
+
+
+def _load_agent_prompt(agent_name: str) -> str:
+    """Load the agent's .md file content."""
+    return _load_md_content(_find_agent_file(agent_name))
+
+
+def _load_skills_for_phase(phase_name: str) -> str:
+    """Load and concatenate skill .md files relevant to a phase."""
+    skill_names = list(ALWAYS_ON_SKILLS) + list(PHASE_SKILLS.get(phase_name, ()))
+    sections = []
+    for name in skill_names:
+        content = _load_md_content(_find_skill_file(name))
+        if content:
+            sections.append(content)
+    return "\n\n---\n\n".join(sections)
 
 
 def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
@@ -56,16 +98,30 @@ def build_prompt(
     phase: PhaseRecord,
     agent_name: str,
 ) -> str:
-    """Construct the full prompt sent to Claude Code for a phase."""
-    agent_instructions = _load_agent_prompt(agent_name)
-    previous_context = _build_phase_context(feature, phase)
+    """Construct the full prompt sent to Claude Code for a phase.
 
+    Section order (most stable → most transient):
+      1. Skills — discipline rules for this phase
+      2. Agent — role-specific instructions
+      3. Task — current feature, workflow, phase
+      4. Previous phase outputs — context chain
+      5. Feedback — only when resuming with user feedback
+      6. Phase instructions — what to produce for this phase
+    """
     sections = []
 
-    if agent_instructions:
-        sections.append(agent_instructions)
+    # 1. Skills (discipline) come first — they shape how the agent behaves.
+    skills = _load_skills_for_phase(phase.name)
+    if skills:
+        sections.append(f"# Skills (discipline rules)\n\n{skills}")
 
-    sections.append(f"""## Current task
+    # 2. Agent (role) comes next.
+    agent_instructions = _load_agent_prompt(agent_name)
+    if agent_instructions:
+        sections.append(f"# Agent role\n\n{agent_instructions}")
+
+    # 3. Current task.
+    sections.append(f"""# Current task
 
 Feature: {feature.id}
 Description: {feature.description}
@@ -73,21 +129,23 @@ Workflow: {feature.workflow}
 Current phase: {phase.name}
 Feature status: {feature.status.value}""")
 
+    # 4. Previous phase outputs.
+    previous_context = _build_phase_context(feature, phase)
     if previous_context:
-        sections.append(f"## Context from previous phases\n\n{previous_context}")
+        sections.append(f"# Context from previous phases\n\n{previous_context}")
 
-    # Feedback injection for plan revision.
+    # 5. Feedback injection for plan revision.
     feedback = feature.metadata.get("feedback")
     if feedback and phase.name == "planning":
         sections.append(
-            "## Feedback utilisateur sur le plan précédent\n\n"
-            "L'utilisateur a refusé le plan précédent avec ce retour :\n\n"
+            "# User feedback on previous plan\n\n"
+            "The user rejected the previous plan with this feedback:\n\n"
             f"> {feedback}\n\n"
-            "Produis un nouveau plan qui prend en compte ce feedback. "
-            "Ne répète pas les parties du plan qui n'ont pas changé, "
-            "concentre-toi sur les modifications demandées."
+            "Produce a new plan that addresses this feedback. "
+            "Don't repeat the unchanged parts; focus on the requested changes."
         )
 
+    # 6. Phase-specific instructions.
     phase_instructions = _get_phase_instructions(phase.name)
     if phase_instructions:
         sections.append(phase_instructions)
