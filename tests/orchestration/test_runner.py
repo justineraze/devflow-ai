@@ -184,7 +184,14 @@ class TestSkillInjection:
         content = _load_skills_for_phase("implementing")
         assert "Context Discipline" in content
         assert "Incremental Build" in content
+        assert "TDD" in content
+        # refactor-first is scoped to reviewing only — not here.
+        assert "Refactor First" not in content
+
+    def test_reviewing_phase_keeps_refactor_first(self) -> None:
+        content = _load_skills_for_phase("reviewing")
         assert "Refactor First" in content
+        assert "Code Review" in content
 
     def test_planning_phase_loads_relevant_skills(self) -> None:
         content = _load_skills_for_phase("planning")

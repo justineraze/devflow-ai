@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -62,6 +63,21 @@ class GateReport:
     def add(self, check: CheckResult) -> None:
         """Add a check result."""
         self.checks.append(check)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the report for persistence and agent consumption."""
+        return {
+            "passed": self.passed,
+            "checks": [
+                {
+                    "name": c.name,
+                    "passed": c.passed,
+                    "message": c.message,
+                    "details": c.details,
+                }
+                for c in self.checks
+            ],
+        }
 
 
 # Type alias for an output parser: (returncode, stdout) -> (message, details).
@@ -207,7 +223,12 @@ def scan_secrets(base: Path | None = None) -> CheckResult:
 
 
 def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
-    """Run all quality gate checks and return the report.
+    """Run all quality gate checks in parallel and return the report.
+
+    All checks (lint, tests, secret scan) are independent subprocess or
+    I/O-bound operations — running them concurrently cuts wall-time by
+    roughly the slowest-minus-others factor on typical Python repos
+    (ruff ~300ms, pytest several seconds).
 
     Args:
         base: Project root directory (defaults to cwd).
@@ -215,12 +236,24 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
             Determines which lint/test tools to run. Defaults to "python".
     """
     cwd = base or Path.cwd()
+    checks = _checks_for_stack(stack)
     report = GateReport()
-    for check in _checks_for_stack(stack):
-        report.add(_run_command_check(
-            check.name, check.cmd, cwd, check.timeout, check.parse_output,
-        ))
-    report.add(scan_secrets(base))
+
+    with ThreadPoolExecutor(max_workers=len(checks) + 1) as pool:
+        command_futures = [
+            pool.submit(
+                _run_command_check,
+                c.name, c.cmd, cwd, c.timeout, c.parse_output,
+            )
+            for c in checks
+        ]
+        secrets_future = pool.submit(scan_secrets, base)
+
+        # Preserve declared order for a stable report layout.
+        for fut in command_futures:
+            report.add(fut.result())
+        report.add(secrets_future.result())
+
     return report
 
 

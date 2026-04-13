@@ -8,7 +8,13 @@ from pathlib import Path
 
 from rich.console import Console
 
+from devflow.core.artifacts import context_deps_for, load_phase_output
 from devflow.core.models import Feature, PhaseRecord, PhaseStatus
+from devflow.orchestration.model_routing import (
+    DEFAULT_MODEL,
+    PHASE_MODELS,
+    resolve_model,
+)
 
 console = Console()
 
@@ -23,33 +29,18 @@ BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
 # Skills always injected on every phase.
 ALWAYS_ON_SKILLS: tuple[str, ...] = ("context-discipline",)
 
-# Skills injected per phase, in addition to ALWAYS_ON_SKILLS.
+# Skills injected per phase, on top of ALWAYS_ON_SKILLS.
 PHASE_SKILLS: dict[str, tuple[str, ...]] = {
-    "architecture": ("planning-rigor", "refactor-first"),
-    "planning": ("planning-rigor", "refactor-first"),
-    "plan_review": ("code-review", "planning-rigor"),
-    "implementing": ("incremental-build", "tdd-discipline", "refactor-first"),
-    "fixing": ("incremental-build", "tdd-discipline"),
-    "reviewing": ("code-review", "refactor-first"),
-    "gate": ("tdd-discipline",),
+    "architecture": ("planning-rigor",),
+    "planning":     ("planning-rigor",),
+    "plan_review":  ("code-review", "planning-rigor"),
+    "implementing": ("incremental-build", "tdd-discipline"),
+    "fixing":       ("incremental-build", "tdd-discipline"),
+    "reviewing":    ("code-review", "refactor-first"),
 }
-
-# Claude model alias to use for each phase. Opus for deep reasoning
-# (architecture, planning, review), Sonnet for execution and light
-# checks. Saves 3-5x on phases that don't need Opus-level reasoning.
-DEFAULT_MODEL = "sonnet"
-PHASE_MODELS: dict[str, str] = {
-    "architecture": "opus",      # structural decisions, blast radius
-    "planning":     "opus",      # multi-step plan with risk assessment
-    "plan_review":  "sonnet",    # light compliance check
-    "implementing": "sonnet",    # bulk execution, tests
-    "fixing":       "sonnet",    # targeted fixes
-    "reviewing":    "opus",      # deep patch detection, security
-}
-
 
 def _model_for_phase(phase_name: str) -> str:
-    """Return the Claude model alias for a phase (defaults to Sonnet)."""
+    """Back-compat shim — returns the default model for *phase_name*."""
     return PHASE_MODELS.get(phase_name, DEFAULT_MODEL)
 
 
@@ -101,13 +92,30 @@ def _load_skills_for_phase(phase_name: str) -> str:
 
 
 def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
-    """Build contextual information from previous phases."""
+    """Build contextual information from previous phases.
+
+    Instead of concatenating every previous phase's output (which bloats
+    the user prompt and defeats prompt caching), only inject the phases
+    this one actually depends on — see artifacts.PHASE_CONTEXT_DEPS.
+
+    Falls back to in-memory phase.output when the on-disk artifact is
+    missing (e.g. first run before the artifacts dir was introduced, or
+    tests exercising the runner without a project dir).
+    """
+    deps = context_deps_for(phase.name)
+    if not deps:
+        return ""
+
+    phase_by_name = {p.name: p for p in feature.phases}
     parts: list[str] = []
-    for prev in feature.phases:
-        if prev.name == phase.name:
-            break
-        if prev.status == PhaseStatus.DONE and prev.output:
-            parts.append(f"## Output from phase: {prev.name}\n\n{prev.output}")
+    for dep_name in deps:
+        content = load_phase_output(feature.id, dep_name)
+        if content is None:
+            prev = phase_by_name.get(dep_name)
+            if prev and prev.status == PhaseStatus.DONE and prev.output:
+                content = prev.output
+        if content:
+            parts.append(f"## Output from phase: {dep_name}\n\n{content}")
     return "\n\n---\n\n".join(parts)
 
 
@@ -149,6 +157,25 @@ Feature status: {feature.status.value}""")
     previous_context = _build_phase_context(feature, phase)
     if previous_context:
         sections.append(f"# Context from previous phases\n\n{previous_context}")
+
+    if phase.name == "fixing":
+        from devflow.core.artifacts import read_artifact
+
+        gate_json = read_artifact(feature.id, "gate.json")
+        if gate_json:
+            sections.append(
+                "# Gate failures to fix (structured)\n\n"
+                "The quality gate failed with the following checks. This is "
+                "the authoritative source of truth — not the reviewer's "
+                "free-form text. For each check with `passed: false`:\n"
+                "- Read `details` for the exact errors (ruff rule codes, "
+                "pytest test names with tracebacks, secret patterns).\n"
+                "- Fix the failing check at its source, do not silence it.\n"
+                "- After each fix, commit atomically "
+                "(`git add -A && git commit -m 'fix: ...'`).\n"
+                "- Re-run the failing tool locally to verify before moving on.\n\n"
+                f"```json\n{gate_json}\n```"
+            )
 
     feedback = feature.metadata.get("feedback")
     if feedback and phase.name == "planning":
@@ -258,7 +285,7 @@ def execute_phase(
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
-    model = _model_for_phase(phase.name)
+    model = resolve_model(feature, phase)
     cwd = str(Path.cwd())
 
     # Stable content (skills + agent) goes to --system-prompt, which
@@ -341,12 +368,28 @@ def execute_phase(
 
 
 def run_gate_phase(
-    base: Path | None = None, stack: str | None = None,
+    base: Path | None = None,
+    stack: str | None = None,
+    feature_id: str | None = None,
 ) -> tuple[bool, str]:
-    """Run the gate phase locally (ruff + pytest + secrets)."""
+    """Run the gate phase locally (ruff + pytest + secrets).
+
+    When *feature_id* is provided, the structured report is persisted as
+    ``.devflow/<feature_id>/gate.json`` so a follow-up fixing phase can
+    load the exact failures instead of parsing free-form text.
+    """
+    import json
+
+    from devflow.core.artifacts import write_artifact
     from devflow.integrations.gate import run_gate
 
     report = run_gate(base, stack=stack)
+
+    if feature_id:
+        write_artifact(
+            feature_id, "gate.json", json.dumps(report.to_dict(), indent=2), base,
+        )
+
     lines = []
     for check in report.checks:
         icon = "✓" if check.passed else "✗"

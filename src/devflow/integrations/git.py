@@ -138,6 +138,51 @@ def get_diff_stat() -> str:
     return result.stdout.strip()
 
 
+def get_branch_diff_summary(base_branch: str = "main") -> dict[str, object]:
+    """Summarize changes between current branch and *base_branch*.
+
+    Returns ``{lines_added, lines_removed, files_changed, paths}``. Falls
+    back to zero counters when git is unavailable or the base branch
+    cannot be resolved (e.g. inside test sandboxes without a repo).
+    """
+    cwd = str(Path.cwd())
+    empty: dict[str, object] = {
+        "lines_added": 0,
+        "lines_removed": 0,
+        "files_changed": 0,
+        "paths": [],
+    }
+
+    result = subprocess.run(
+        ["git", "diff", "--numstat", f"{base_branch}...HEAD"],
+        capture_output=True, text=True, cwd=cwd,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return empty
+
+    added = 0
+    removed = 0
+    paths: list[str] = []
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        a, r, path = parts[0], parts[1], parts[2]
+        # Binary files show "-" for counts.
+        if a.isdigit():
+            added += int(a)
+        if r.isdigit():
+            removed += int(r)
+        paths.append(path)
+
+    return {
+        "lines_added": added,
+        "lines_removed": removed,
+        "files_changed": len(paths),
+        "paths": paths,
+    }
+
+
 def push_and_create_pr(feature: Feature, branch: str) -> str | None:
     """Push branch and create a GitHub PR.
 

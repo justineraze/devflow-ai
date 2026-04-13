@@ -260,6 +260,14 @@ def complete_phase(
             break
     save_state(state, base)
 
+    # Persist the phase output as a standalone artifact so downstream
+    # phases can selectively load what they need instead of receiving
+    # the concatenated outputs of every previous phase.
+    if output:
+        from devflow.core.artifacts import save_phase_output
+
+        save_phase_output(feature_id, phase_name, output, base)
+
 
 def fail_phase(
     feature_id: str, phase_name: str, error: str = "", base: Path | None = None,
@@ -304,14 +312,91 @@ def _execute_phase(
 
     if phase.name == "gate":
         state = load_state(base)
-        return run_gate_phase(base, stack=state.stack)
+        return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
     return execute_phase(feature, phase, agent_name)
+
+
+# File/path patterns that must never trigger a model downgrade —
+# security- or money-critical code always warrants the strongest reviewer.
+CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
+    "auth", "secret", "token", "crypto", "payment", "billing", "password",
+)
+
+
+def _persist_files_summary(feature_id: str, base: Path | None = None) -> None:
+    """Write files.json capturing the branch-diff summary for downstream
+    phases (reviewing uses it to decide whether a lighter model suffices)."""
+    import json
+
+    from devflow.core.artifacts import write_artifact
+    from devflow.integrations.git import get_branch_diff_summary
+
+    summary = get_branch_diff_summary()
+    paths = summary.get("paths") or []
+    critical = [
+        p for p in paths
+        if any(pat in p.lower() for pat in CRITICAL_PATH_PATTERNS)
+    ]
+    summary["critical_paths"] = critical
+
+    write_artifact(feature_id, "files.json", json.dumps(summary, indent=2), base)
 
 
 def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | None:
     """Reload feature from state after a phase completes."""
     state = load_state(base)
     return state.get_feature(feature_id)
+
+
+MAX_GATE_AUTO_RETRIES = 1
+
+
+def _setup_gate_retry(
+    feature_id: str, base: Path | None = None,
+) -> bool:
+    """Reset gate+fixing to PENDING for one automatic retry loop.
+
+    Returns True when a retry was scheduled, False when the budget is
+    exhausted (caller should fall back to the normal failure path).
+    """
+    state = load_state(base)
+    feature = state.get_feature(feature_id)
+    if not feature:
+        return False
+
+    attempts = int(feature.metadata.get("gate_retry", 0))
+    if attempts >= MAX_GATE_AUTO_RETRIES:
+        return False
+
+    gate_phase = next((p for p in feature.phases if p.name == "gate"), None)
+    if not gate_phase:
+        return False
+
+    fixing_phase = next((p for p in feature.phases if p.name == "fixing"), None)
+    if fixing_phase is None:
+        # Workflows without a fixing phase (quick/light/standard) get one
+        # injected just before gate so advance_phase picks it up next.
+        fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
+        gate_idx = feature.phases.index(gate_phase)
+        feature.phases.insert(gate_idx, fixing_phase)
+    else:
+        fixing_phase.status = PhaseStatus.PENDING
+        fixing_phase.started_at = None
+        fixing_phase.completed_at = None
+        fixing_phase.output = ""
+        fixing_phase.error = ""
+
+    gate_phase.status = PhaseStatus.PENDING
+    gate_phase.started_at = None
+    gate_phase.completed_at = None
+    gate_phase.output = ""
+    gate_phase.error = ""
+
+    feature.metadata["gate_retry"] = attempts + 1
+    # GATE → FIXING is a valid transition; keeps the state machine honest.
+    _transition_safe(feature, FeatureStatus.FIXING)
+    save_state(state, base)
+    return True
 
 
 # ── Main build loop ───────────────────────────────────────────────────
@@ -459,12 +544,27 @@ def execute_build_loop(
                     console.print("\n[bold]Changements :[/bold]")
                     for line in diff.split("\n"):
                         console.print(f"  {line}")
+                _persist_files_summary(feature.id, base)
 
             # Show gate results.
             if phase.name == "gate" and output:
                 for line in output.split("\n"):
                     console.print(f"  {line}")
         else:
+            if phase.name == "gate":
+                from devflow.core.artifacts import save_phase_output
+
+                save_phase_output(feature.id, "gate", output, base)
+                if _setup_gate_retry(feature.id, base):
+                    console.print(
+                        f" [yellow]✗ gate failed — auto-retrying via "
+                        f"fixing[/yellow] [dim]({_format_duration(elapsed)})[/dim]"
+                    )
+                    for line in output.split("\n")[:10]:
+                        console.print(f"  [dim]{line}[/dim]")
+                    feature = _refresh_feature(feature.id, base) or feature
+                    continue
+
             fail_phase(feature.id, phase.name, output, base)
             console.print(f" [red]✗[/red] [dim]({_format_duration(elapsed)})[/dim]")
             if output:

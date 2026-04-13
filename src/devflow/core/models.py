@@ -112,6 +112,7 @@ class PhaseRecord(BaseModel):
     completed_at: datetime | None = None
     output: str = ""
     error: str = ""
+    model: str | None = None
 
     def start(self) -> None:
         """Mark this phase as in progress."""
@@ -191,6 +192,7 @@ class PhaseDefinition(BaseModel):
     description: str = ""
     required: bool = True
     timeout: int = 300
+    model: str | None = None
 
 
 class WorkflowDefinition(BaseModel):

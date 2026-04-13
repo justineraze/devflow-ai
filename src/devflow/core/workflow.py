@@ -110,7 +110,7 @@ def create_feature(
         raise ValueError(f"Feature {feature_id!r} already exists")
 
     workflow = load_workflow(workflow_name, workflows_dir)
-    phases = [PhaseRecord(name=p.name) for p in workflow.phases]
+    phases = [PhaseRecord(name=p.name, model=p.model) for p in workflow.phases]
 
     feature = Feature(
         id=feature_id,
