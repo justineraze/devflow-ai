@@ -93,34 +93,33 @@ def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def build_prompt(
-    feature: Feature,
-    phase: PhaseRecord,
-    agent_name: str,
-) -> str:
-    """Construct the full prompt sent to Claude Code for a phase.
+def build_system_prompt(phase_name: str, agent_name: str) -> str:
+    """Build the stable part of the prompt (skills + agent role).
 
-    Section order (most stable → most transient):
-      1. Skills — discipline rules for this phase
-      2. Agent — role-specific instructions
-      3. Task — current feature, workflow, phase
-      4. Previous phase outputs — context chain
-      5. Feedback — only when resuming with user feedback
-      6. Phase instructions — what to produce for this phase
+    This content depends only on the phase type and agent, not on the
+    specific feature. Passing it via `--system-prompt` lets Anthropic
+    cache it across calls, reducing cost significantly.
     """
     sections = []
 
-    # 1. Skills (discipline) come first — they shape how the agent behaves.
-    skills = _load_skills_for_phase(phase.name)
+    skills = _load_skills_for_phase(phase_name)
     if skills:
         sections.append(f"# Skills (discipline rules)\n\n{skills}")
 
-    # 2. Agent (role) comes next.
     agent_instructions = _load_agent_prompt(agent_name)
     if agent_instructions:
         sections.append(f"# Agent role\n\n{agent_instructions}")
 
-    # 3. Current task.
+    return "\n\n---\n\n".join(sections)
+
+
+def build_user_prompt(feature: Feature, phase: PhaseRecord) -> str:
+    """Build the variable part of the prompt (task + context + feedback).
+
+    Changes on every call — not worth caching. Passed via stdin.
+    """
+    sections = []
+
     sections.append(f"""# Current task
 
 Feature: {feature.id}
@@ -129,12 +128,10 @@ Workflow: {feature.workflow}
 Current phase: {phase.name}
 Feature status: {feature.status.value}""")
 
-    # 4. Previous phase outputs.
     previous_context = _build_phase_context(feature, phase)
     if previous_context:
         sections.append(f"# Context from previous phases\n\n{previous_context}")
 
-    # 5. Feedback injection for plan revision.
     feedback = feature.metadata.get("feedback")
     if feedback and phase.name == "planning":
         sections.append(
@@ -145,12 +142,28 @@ Feature status: {feature.status.value}""")
             "Don't repeat the unchanged parts; focus on the requested changes."
         )
 
-    # 6. Phase-specific instructions.
     phase_instructions = _get_phase_instructions(phase.name)
     if phase_instructions:
         sections.append(phase_instructions)
 
     return "\n\n---\n\n".join(sections)
+
+
+def build_prompt(
+    feature: Feature,
+    phase: PhaseRecord,
+    agent_name: str,
+) -> str:
+    """Construct the full prompt as a single string.
+
+    Backwards-compatible facade. For execution, prefer splitting into
+    build_system_prompt() + build_user_prompt() so the stable part
+    can be cached via --system-prompt.
+    """
+    system = build_system_prompt(phase.name, agent_name)
+    user = build_user_prompt(feature, phase)
+    parts = [p for p in (system, user) if p]
+    return "\n\n---\n\n".join(parts)
 
 
 def _get_phase_instructions(phase_name: str) -> str:
@@ -225,25 +238,36 @@ def execute_phase(
         parse_event,
     )
 
-    prompt = build_prompt(feature, phase, agent_name)
+    system_prompt = build_system_prompt(phase.name, agent_name)
+    user_prompt = build_user_prompt(feature, phase)
+    cwd = str(Path.cwd())
+
+    # Stable content (skills + agent) goes to --system-prompt, which
+    # Anthropic caches automatically → big cost savings across phases.
+    # Variable content (task + context) goes via stdin.
+    # NOTE: --bare would also save ~30k tokens of hooks/auto-memory but
+    # breaks OAuth auth (requires ANTHROPIC_API_KEY). Skipped for now.
+    cmd = [
+        "claude", "-p", "-",
+        "--permission-mode", "acceptEdits",
+        "--output-format", "stream-json",
+        "--verbose",
+    ]
+    if system_prompt:
+        cmd.extend(["--system-prompt", system_prompt])
 
     try:
         proc = subprocess.Popen(
-            [
-                "claude", "-p", "-",
-                "--permission-mode", "acceptEdits",
-                "--output-format", "stream-json",
-                "--verbose",
-            ],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=str(Path.cwd()),
+            cwd=cwd,
         )
 
-        # Send prompt and close stdin.
-        proc.stdin.write(prompt)
+        # Send user prompt and close stdin.
+        proc.stdin.write(user_prompt)
         proc.stdin.close()
 
         metrics = PhaseMetrics()
@@ -266,9 +290,13 @@ def execute_phase(
 
         # Display token + cost summary for the phase.
         if metrics.input_tokens or metrics.output_tokens:
+            cache_note = (
+                f" (cache: {format_tokens(metrics.cache_read)})"
+                if metrics.cache_read else ""
+            )
             console.print(
                 f"  [dim]→ {tool_count} tools | "
-                f"{format_tokens(metrics.input_tokens)} in / "
+                f"{format_tokens(metrics.input_tokens)} in{cache_note} / "
                 f"{format_tokens(metrics.output_tokens)} out | "
                 f"{format_cost(metrics.cost_usd)}[/dim]"
             )
