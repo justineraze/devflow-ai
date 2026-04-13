@@ -11,33 +11,62 @@ from devflow.models import Feature
 
 console = Console()
 
-# Max length for PR titles (Conventional Commits best practice).
-_PR_TITLE_MAX_LEN = 70
+# Max length for PR titles and commit summaries (Conventional Commits best practice).
+_MAX_LEN = 70
+
+
+def _commit_prefix(feature: Feature) -> str:
+    """Return the Conventional Commits prefix for a feature.
+
+    ``fix:`` for the quick workflow (bug fixes), ``feat:`` otherwise.
+    """
+    return "fix" if feature.workflow == "quick" else "feat"
+
+
+def _normalize_description(description: str) -> str:
+    """Capitalize the first letter and strip trailing punctuation."""
+    desc = description.strip().rstrip(".!?")
+    if desc:
+        desc = desc[0].upper() + desc[1:]
+    return desc
+
+
+def _truncate_at_word(text: str, max_len: int, min_prefix: int = 0) -> str:
+    """Truncate text at the last word boundary within max_len."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > min_prefix:
+        truncated = truncated[:last_space]
+    return truncated
+
+
+def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
+    """Build a standardized Conventional Commits message for a feature.
+
+    Format:
+        feat: Add caching layer                 (no suffix — used for PR title)
+        feat: Add caching layer — implementing  (with suffix — intermediate commits)
+
+    Args:
+        feature: The feature this commit is for.
+        suffix: Optional qualifier (e.g. "implementing", "fixing",
+                "leftover changes"). Appended after an em-dash.
+    """
+    prefix = _commit_prefix(feature)
+    desc = _normalize_description(feature.description)
+    base = f"{prefix}: {desc}"
+
+    if suffix:
+        base = f"{base} — {suffix}"
+
+    return _truncate_at_word(base, _MAX_LEN, min_prefix=len(prefix) + 2)
 
 
 def build_pr_title(feature: Feature) -> str:
-    """Build a Conventional Commits PR title from a feature.
-
-    Uses ``fix:`` prefix for the quick workflow (bug fixes), ``feat:``
-    otherwise. Capitalizes the description and truncates cleanly.
-    """
-    prefix = "fix" if feature.workflow == "quick" else "feat"
-    desc = feature.description.strip().rstrip(".!?")
-
-    # Capitalize first letter, keep the rest as-is (preserve acronyms).
-    if desc:
-        desc = desc[0].upper() + desc[1:]
-
-    title = f"{prefix}: {desc}"
-    if len(title) <= _PR_TITLE_MAX_LEN:
-        return title
-
-    # Truncate to last complete word within limit.
-    truncated = title[:_PR_TITLE_MAX_LEN]
-    last_space = truncated.rfind(" ")
-    if last_space > len(prefix) + 2:
-        truncated = truncated[:last_space]
-    return truncated
+    """Build a Conventional Commits PR title (no suffix)."""
+    return build_commit_message(feature)
 
 
 def create_branch(feature_id: str) -> str:
@@ -118,8 +147,7 @@ def push_and_create_pr(feature: Feature, branch: str) -> str | None:
     cwd = str(Path.cwd())
 
     # Safety net: commit anything left uncommitted.
-    prefix = "fix" if feature.workflow == "quick" else "feat"
-    commit_changes(f"{prefix}: {feature.description[:60]} (remaining changes)")
+    commit_changes(build_commit_message(feature, suffix="leftover changes"))
 
     if not has_commits_ahead():
         console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")

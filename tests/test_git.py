@@ -2,7 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
-from devflow.git import build_pr_title, commit_changes, has_commits_ahead
+from devflow.git import (
+    build_commit_message,
+    build_pr_title,
+    commit_changes,
+    has_commits_ahead,
+)
 from devflow.models import Feature, FeatureStatus
 
 
@@ -42,6 +47,42 @@ class TestBuildPrTitle:
             workflow="standard",
         )
         assert build_pr_title(feature) == "feat: Add OAuth support"
+
+
+class TestBuildCommitMessage:
+    def test_no_suffix_matches_pr_title(self) -> None:
+        feature = Feature(
+            id="f-001", description="Add user auth", workflow="standard",
+        )
+        assert build_commit_message(feature) == "feat: Add user auth"
+
+    def test_with_phase_suffix(self) -> None:
+        feature = Feature(
+            id="f-001", description="Add user auth", workflow="standard",
+        )
+        msg = build_commit_message(feature, suffix="implementing")
+        assert msg == "feat: Add user auth — implementing"
+
+    def test_with_leftover_suffix(self) -> None:
+        feature = Feature(
+            id="f-001", description="Add user auth", workflow="standard",
+        )
+        msg = build_commit_message(feature, suffix="leftover changes")
+        assert msg == "feat: Add user auth — leftover changes"
+
+    def test_quick_workflow_uses_fix_prefix(self) -> None:
+        feature = Feature(
+            id="f-001", description="broken login", workflow="quick",
+        )
+        msg = build_commit_message(feature, suffix="implementing")
+        assert msg == "fix: Broken login — implementing"
+
+    def test_truncates_at_word_boundary(self) -> None:
+        long = "Add something very long indeed going past the limit"
+        feature = Feature(id="f-001", description=long, workflow="standard")
+        msg = build_commit_message(feature, suffix="implementing")
+        assert len(msg) <= 70
+        assert not msg.endswith(" ")
 
 
 class TestCommitChanges:
