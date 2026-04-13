@@ -182,6 +182,17 @@ def version() -> None:
 
 
 @app.command()
+def about() -> None:
+    """Show author, repository URL, and license."""
+    from devflow import __author__, __license__, __repo_url__, __version__
+
+    console.print(f"devflow {__version__}")
+    console.print(f"Author:  {__author__}")
+    console.print(f"Repo:    {__repo_url__}")
+    console.print(f"License: {__license__}")
+
+
+@app.command()
 def init() -> None:
     """Initialize devflow in the current project."""
     from pathlib import Path
