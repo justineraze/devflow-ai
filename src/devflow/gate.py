@@ -204,11 +204,18 @@ def scan_secrets(base: Path | None = None) -> CheckResult:
     return CheckResult(name="secrets", passed=True, message="No secrets detected")
 
 
-def run_gate(base: Path | None = None) -> GateReport:
-    """Run all quality gate checks and return the report."""
+def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
+    """Run all quality gate checks and return the report.
+
+    Args:
+        base: Project root directory (defaults to cwd).
+        stack: Tech stack name (e.g. "python", "typescript", "php").
+            Determines which lint/test tools to run. Defaults to "python".
+    """
+    cwd = base or Path.cwd()
     report = GateReport()
-    report.add(run_ruff(base))
-    report.add(run_pytest(base))
+    for name, cmd, timeout, parse_output in _checks_for_stack(stack):
+        report.add(_run_command_check(name, cmd, cwd, timeout, parse_output))
     report.add(scan_secrets(base))
     return report
 
