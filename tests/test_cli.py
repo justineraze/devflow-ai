@@ -21,6 +21,26 @@ class TestVersionCommand:
         assert f"devflow {__version__}" in result.output
 
 
+class TestAboutCommand:
+    def test_command_is_registered(self) -> None:
+        result = runner.invoke(app, ["about", "--help"])
+        assert result.exit_code == 0
+        assert "Show author, repository URL, and license" in result.output
+
+    def test_shows_metadata(self) -> None:
+        result = runner.invoke(app, ["about"])
+        assert result.exit_code == 0
+        assert "Justine Raze" in result.output
+        assert "github.com/JustineRaze/devflow-ai" in result.output
+        assert "MIT" in result.output
+
+    def test_shows_version(self) -> None:
+        from devflow import __version__
+
+        result = runner.invoke(app, ["about"])
+        assert f"devflow {__version__}" in result.output
+
+
 class TestRetryCommand:
     def test_command_is_registered(self) -> None:
         result = runner.invoke(app, ["retry", "--help"])
