@@ -9,6 +9,8 @@ from devflow.models import Feature, FeatureStatus, PhaseRecord
 from devflow.runner import (
     _build_phase_context,
     _find_agent_file,
+    _find_skill_file,
+    _load_skills_for_phase,
     build_prompt,
     execute_phase,
     run_gate_phase,
@@ -167,3 +169,36 @@ class TestRunGatePhase:
         success, output = run_gate_phase(tmp_path)
         assert isinstance(success, bool)
         assert isinstance(output, str)
+
+
+class TestSkillInjection:
+    def test_finds_bundled_context_discipline(self) -> None:
+        path = _find_skill_file("context-discipline")
+        assert path is not None
+        assert path.name == "context-discipline.md"
+
+    def test_returns_none_for_missing_skill(self) -> None:
+        assert _find_skill_file("nonexistent-skill-xyz") is None
+
+    def test_implementing_phase_loads_relevant_skills(self) -> None:
+        content = _load_skills_for_phase("implementing")
+        assert "Context Discipline" in content
+        assert "Incremental Build" in content
+        assert "Refactor First" in content
+
+    def test_planning_phase_loads_relevant_skills(self) -> None:
+        content = _load_skills_for_phase("planning")
+        assert "Context Discipline" in content
+        assert "Planning Rigor" in content
+
+    def test_unknown_phase_only_loads_always_on(self) -> None:
+        content = _load_skills_for_phase("unknown-phase")
+        assert "Context Discipline" in content
+
+    def test_build_prompt_includes_skills_section(
+        self, sample_feature: Feature,
+    ) -> None:
+        phase = sample_feature.phases[1]
+        prompt = build_prompt(sample_feature, phase, "developer")
+        assert "Skills (discipline rules)" in prompt
+        assert "Context Discipline" in prompt
