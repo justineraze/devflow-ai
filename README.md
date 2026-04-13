@@ -35,6 +35,55 @@ devflow status                  # see what's in progress
 
 ---
 
+## How a build looks
+
+```
+$ devflow build "Add caching layer"
+
+devflow build — Add caching layer
+feat-add-caching-layer-0413 | workflow: standard | 4 phases
+branch: feat/feat-add-caching-layer-0413
+
+Phase 1/4: planning... ✓ (1m12s)
+
+╭─── Plan proposé ─────────────────────────────────────────╮
+│ Plan: feat-add-caching-layer-0413                        │
+│ Scope: new-feature, medium complexity                    │
+│ Affected files: 3                                        │
+│ Steps: 6                                                 │
+│ ...                                                      │
+╰──────────────────────────────────────────────────────────╯
+
+Lancer l'implémentation ? [Y/n] y
+
+Phase 2/4: implementing...
+  📖 Read: models.py
+  ✏️ Edit: cache.py
+  ⚡ Bash: pytest tests/test_cache.py
+  ⚡ Bash: git commit -m "feat: add Cache class"
+  → 8 tools | 5.2k in / 1.8k out | 18¢
+ ✓ (2m34s)
+
+Phase 3/4: reviewing... ✓ (48s)
+Phase 4/4: gate... ✓ (1s)
+  ✓ ruff: No lint issues  ✓ pytest: 174 passed  ✓ secrets: clean
+
+✓ Feature complete [4/4]
+PR: https://github.com/you/repo/pull/42
+```
+
+The plan-first flow lets you review and approve before code is touched.
+If the plan needs tweaks, refuse with `n` and resume with feedback:
+
+```bash
+devflow build "use Redis instead of in-memory" --resume feat-add-caching-layer-0413
+```
+
+Each phase shows live tool usage and token cost. Auto-commit after each
+implementation slice. PR created automatically with the plan as description.
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -149,12 +198,19 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 
 ## Skills
 
-| Skill | Purpose |
-|-------|---------|
-| **build** | Orchestrates the feature build loop through the state machine |
-| **check** | Quality gate checklist (automated + behavioral) |
-| **gsd** | Fresh context per phase, atomic commits, verify-after-change |
-| **rtk** | Token compression: targeted reads, filtered output, skip known-good |
+8 skills injected into prompts based on the phase. Skills encode discipline
+(how the agent should behave) separately from role (agent .md files).
+
+| Skill | Injected on | Purpose |
+|-------|-------------|---------|
+| **context-discipline** | every phase | Strict rules to prevent over-exploration and token waste |
+| **planning-rigor** | planning, architecture | Rigorous plans with named files, tests, quality audit |
+| **refactor-first** | planning, implementing, reviewing | Refactor dirty code instead of shipping patches |
+| **incremental-build** | implementing, fixing | Thin vertical slices, commit per step, verify-then-next |
+| **tdd-discipline** | implementing, gate | Tests alongside code, not after |
+| **code-review** | reviewing, plan_review | 5-pass review catching patches and quality issues |
+| **build** | devflow-specific | How the build loop orchestrates phases |
+| **check** | devflow-specific | Quality gate checklist |
 
 ---
 
@@ -163,15 +219,19 @@ Each agent has deep behavioral instructions with code examples, anti-patterns, o
 | Command | Description |
 |---------|-------------|
 | `devflow doctor` | Check installation health (Python, Claude, gh, agents) |
-| `devflow install` | Sync agents and skills to `~/.claude/` |
-| `devflow update` | Update agents and skills to latest |
+| `devflow version` / `devflow --about` | Show version / author / repo info |
+| `devflow install` / `devflow update` | Sync agents and skills to `~/.claude/` |
 | `devflow init` | Detect stack + initialize `.devflow/` |
 | `devflow build "..."` | Build a feature (default: standard workflow) |
 | `devflow build "feedback" --resume feat-001` | Resume with feedback on the plan |
+| `devflow retry feat-001` | Retry the last failed phase without feedback |
 | `devflow fix "..."` | Fix a bug (quick workflow) |
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
 | `devflow status` | Show all tracked features |
 | `devflow status feat-001` | Show details for one feature |
+| `devflow status --json` | Output features as JSON |
+| `devflow log` | Show feature history (status, duration, date) |
+| `devflow log feat-001` | Detailed log for one feature with phase timings |
 
 ---
 

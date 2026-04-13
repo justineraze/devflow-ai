@@ -331,6 +331,7 @@ def execute_build_loop(
     6. Create PR on success
     """
     from devflow.git import (
+        build_commit_message,
         commit_changes,
         create_branch,
         get_diff_stat,
@@ -449,8 +450,7 @@ def execute_build_loop(
 
             # Auto-commit after code-changing phases.
             if phase.name in ("implementing", "fixing"):
-                prefix = "fix" if feature.workflow == "quick" else "feat"
-                msg = f"{prefix}: {phase.name} — {feature.description[:60]}"
+                msg = build_commit_message(feature, suffix=phase.name)
                 if commit_changes(msg):
                     console.print("  [dim]Auto-committed changes[/dim]")
                 diff = get_diff_stat()
