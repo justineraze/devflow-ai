@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 from rich.console import Console
 from rich.panel import Panel
@@ -63,26 +64,46 @@ class GateReport:
         self.checks.append(check)
 
 
-# Type alias for a check definition: (name, cmd, timeout, parse_output).
-CheckDef = tuple[str, list[str], int, Callable[[int, str], tuple[str, str]] | None]
+# Type alias for an output parser: (returncode, stdout) -> (message, details).
+ParseOutput = Callable[[int, str], tuple[str, str]]
+
+
+class CheckDef(NamedTuple):
+    """Definition of a quality gate check (lint, test, etc.)."""
+
+    name: str
+    cmd: list[str]
+    timeout: int = 60
+    parse_output: ParseOutput | None = None
+
+
+def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
+    """Extract the pytest summary line from stdout."""
+    last_line = stdout.strip().split("\n")[-1] if stdout.strip() else ""
+    if returncode == 0:
+        return last_line, ""
+    return last_line or "Tests failed", stdout[:2000]
+
 
 STACK_CHECKS: dict[str, list[CheckDef]] = {
     "python": [
-        ("ruff", ["ruff", "check", "src/", "tests/"], 60, None),
-        ("pytest", ["python", "-m", "pytest", "tests/", "-q", "--tb=short"], 120, None),
+        CheckDef("ruff", ["ruff", "check", "src/", "tests/"]),
+        CheckDef(
+            "pytest",
+            ["python", "-m", "pytest", "tests/", "-q", "--tb=short"],
+            timeout=120,
+            parse_output=_parse_pytest,
+        ),
     ],
     "typescript": [
-        ("biome", ["npx", "biome", "check", "."], 60, None),
-        ("vitest", ["npx", "vitest", "run", "--reporter=verbose"], 120, None),
+        CheckDef("biome", ["npx", "biome", "check", "."]),
+        CheckDef("vitest", ["npx", "vitest", "run", "--reporter=verbose"], timeout=120),
     ],
     "php": [
-        ("pint", ["./vendor/bin/pint", "--test"], 60, None),
-        ("pest", ["./vendor/bin/pest", "--compact"], 120, None),
+        CheckDef("pint", ["./vendor/bin/pint", "--test"]),
+        CheckDef("pest", ["./vendor/bin/pest", "--compact"], timeout=120),
     ],
 }
-
-# Pytest checks use a custom parser — patch it into the registry.
-# Done after _parse_pytest is defined (see below).
 
 
 def _checks_for_stack(stack: str | None) -> list[CheckDef]:
@@ -95,7 +116,7 @@ def _run_command_check(
     cmd: list[str],
     cwd: Path,
     timeout: int = 60,
-    parse_output: Callable[[int, str], tuple[str, str]] | None = None,
+    parse_output: ParseOutput | None = None,
 ) -> CheckResult:
     """Run an external tool and return a CheckResult.
 
@@ -126,48 +147,29 @@ def _run_command_check(
 
     if parse_output is not None:
         message, details = parse_output(result.returncode, result.stdout)
+    elif result.returncode == 0:
+        message, details = "No issues", ""
     else:
-        if result.returncode == 0:
-            message, details = "No issues", ""
-        else:
-            message = f"{result.stdout.count(chr(10))} issues found"
-            details = result.stdout[:2000]
+        message = f"{result.stdout.count(chr(10))} issues found"
+        details = result.stdout[:2000]
 
     passed = result.returncode == 0
     return CheckResult(name=name, passed=passed, message=message, details=details)
 
 
-def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
-    """Extract the pytest summary line from stdout."""
-    last_line = stdout.strip().split("\n")[-1] if stdout.strip() else ""
-    if returncode == 0:
-        return last_line, ""
-    return last_line or "Tests failed", stdout[:2000]
-
-
-# Patch pytest's custom parser into the registry now that _parse_pytest is defined.
-STACK_CHECKS["python"][1] = (
-    "pytest", ["python", "-m", "pytest", "tests/", "-q", "--tb=short"], 120, _parse_pytest,
-)
-
-
 def run_ruff(base: Path | None = None) -> CheckResult:
-    """Run ruff linter on the project."""
+    """Run ruff linter (kept for back-compat — prefer run_gate)."""
+    check = STACK_CHECKS["python"][0]
     return _run_command_check(
-        name="ruff",
-        cmd=["ruff", "check", "src/", "tests/"],
-        cwd=base or Path.cwd(),
+        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
     )
 
 
 def run_pytest(base: Path | None = None) -> CheckResult:
-    """Run pytest on the project."""
+    """Run pytest (kept for back-compat — prefer run_gate)."""
+    check = STACK_CHECKS["python"][1]
     return _run_command_check(
-        name="pytest",
-        cmd=["python", "-m", "pytest", "tests/", "-q", "--tb=short"],
-        cwd=base or Path.cwd(),
-        timeout=120,
-        parse_output=_parse_pytest,
+        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
     )
 
 
@@ -214,8 +216,10 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
     """
     cwd = base or Path.cwd()
     report = GateReport()
-    for name, cmd, timeout, parse_output in _checks_for_stack(stack):
-        report.add(_run_command_check(name, cmd, cwd, timeout, parse_output))
+    for check in _checks_for_stack(stack):
+        report.add(_run_command_check(
+            check.name, check.cmd, cwd, check.timeout, check.parse_output,
+        ))
     report.add(scan_secrets(base))
     return report
 
