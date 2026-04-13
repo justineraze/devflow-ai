@@ -25,16 +25,23 @@ That's it. If a file isn't in this list, you don't need it.
 
 ### 2. Forbidden operations
 
-These operations are **never justified** during a phase:
+These operations are **never justified** during a phase. Do not Read them,
+do not Glob them, do not `ls` them, do not check their existence — treat
+them as if they do not exist:
 
-- **Reading `.devflow/state.json`** — this is devflow's internal state, not
-  source code. It tells you nothing about how to implement a feature.
-- **Running `python3 -c "..."` to parse files or inspect state** — if you need
-  to understand code, read it. Ad-hoc one-liners are token sinks.
-- **`cat`-ing large files via Bash** — use the Read tool with line ranges.
+- **Anything in `.devflow/`** — this directory is devflow's internal state.
+  No file in it will help you implement a feature. Do not Read, Glob, `cat`,
+  `ls`, or `stat` anything inside it. Ever. Not even to "check if it exists".
+- **`python3 -c "..."` for parsing or inspection** — if you need to understand
+  code, read it directly. Ad-hoc Python one-liners are token sinks and a
+  code smell.
+- **`cat`-ing files via Bash** — use the Read tool with line ranges.
 - **`find` / `ls` on the whole project** — use Glob with a specific pattern.
-- **Reading README / CLAUDE.md mid-phase** — rules files are loaded at the
+- **Re-reading README / CLAUDE.md mid-phase** — rules files are loaded at the
   start. Don't re-read them.
+
+If you feel the urge to "just check something in state.json to understand the
+context", that urge is wrong. The plan is your context. The file is not.
 
 ### 3. Targeted reads
 
