@@ -40,12 +40,18 @@ SKIP_DIRS: set[str] = {
 
 @dataclass
 class CheckResult:
-    """Result of a single quality gate check."""
+    """Result of a single quality gate check.
+
+    A check that could not run (tool missing, etc.) is reported with
+    ``skipped=True`` instead of being silently marked as passed.
+    Skipped checks are surfaced in the report but do not fail the gate.
+    """
 
     name: str
     passed: bool
     message: str = ""
     details: str = ""
+    skipped: bool = False
 
 
 @dataclass
@@ -56,8 +62,13 @@ class GateReport:
 
     @property
     def passed(self) -> bool:
-        """Return True if all checks passed."""
-        return all(c.passed for c in self.checks)
+        """Return True when every non-skipped check passed."""
+        return all(c.passed for c in self.checks if not c.skipped)
+
+    @property
+    def has_skipped(self) -> bool:
+        """True when at least one check was skipped (e.g. tool missing)."""
+        return any(c.skipped for c in self.checks)
 
     def add(self, check: CheckResult) -> None:
         """Add a check result."""
@@ -67,10 +78,12 @@ class GateReport:
         """Serialize the report for persistence and agent consumption."""
         return {
             "passed": self.passed,
+            "has_skipped": self.has_skipped,
             "checks": [
                 {
                     "name": c.name,
                     "passed": c.passed,
+                    "skipped": c.skipped,
                     "message": c.message,
                     "details": c.details,
                 }
@@ -156,7 +169,12 @@ def _run_command_check(
             timeout=timeout,
         )
     except FileNotFoundError:
-        return CheckResult(name=name, passed=True, message=f"{name} not found — skipped")
+        return CheckResult(
+            name=name,
+            passed=False,
+            skipped=True,
+            message=f"{name} not found in PATH",
+        )
     except subprocess.TimeoutExpired:
         return CheckResult(name=name, passed=False, message=f"{name} timed out")
 
@@ -241,27 +259,47 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
 
 
 def render_gate_report(report: GateReport) -> None:
-    """Render the quality gate as a Rich panel with per-check details."""
+    """Render the quality gate as a Rich panel with per-check details.
+
+    Three states per check:
+    - passed → green ✓
+    - skipped (tool missing, etc.) → yellow ⚠ (does not fail the gate)
+    - failed → red ✗
+    """
     body = Text()
     for idx, check in enumerate(report.checks):
-        icon = "✓" if check.passed else "✗"
-        icon_style = "green bold" if check.passed else "red bold"
-        name_style = "white" if check.passed else "red"
+        if check.skipped:
+            icon, icon_style, name_style, msg_style = (
+                "⚠", "yellow bold", "yellow", "yellow",
+            )
+        elif check.passed:
+            icon, icon_style, name_style, msg_style = (
+                "✓", "green bold", "white", "dim",
+            )
+        else:
+            icon, icon_style, name_style, msg_style = (
+                "✗", "red bold", "red", "red",
+            )
 
         if idx:
             body.append("\n")
         body.append(f"  {icon}  ", style=icon_style)
         body.append(check.name.ljust(10), style=f"bold {name_style}")
-        body.append(check.message, style="dim" if check.passed else name_style)
+        body.append(check.message, style=msg_style)
 
-        if not check.passed and check.details:
+        if not check.passed and not check.skipped and check.details:
             for detail in check.details.split("\n")[:8]:
                 if detail.strip():
                     body.append(f"\n       {detail[:200]}", style="dim red")
 
-    verdict = "PASSED" if report.passed else "FAILED"
-    verdict_style = "reverse green bold" if report.passed else "reverse red bold"
-    border = "green" if report.passed else "red"
+    if not report.passed:
+        verdict, verdict_style, border = "FAILED", "reverse red bold", "red"
+    elif report.has_skipped:
+        verdict, verdict_style, border = (
+            "PASSED (with skipped)", "reverse yellow bold", "yellow",
+        )
+    else:
+        verdict, verdict_style, border = "PASSED", "reverse green bold", "green"
 
     console.print(Panel(
         body,

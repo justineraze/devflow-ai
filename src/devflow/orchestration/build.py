@@ -579,6 +579,7 @@ def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
         CheckResult(
             name=c.get("name", "?"),
             passed=bool(c.get("passed", False)),
+            skipped=bool(c.get("skipped", False)),
             message=c.get("message", ""),
             details=c.get("details", ""),
         )

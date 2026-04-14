@@ -24,6 +24,7 @@ class TestToDict:
         assert data["checks"][0] == {
             "name": "ruff",
             "passed": False,
+            "skipped": False,
             "message": "2 issues",
             "details": "E501 line too long",
         }

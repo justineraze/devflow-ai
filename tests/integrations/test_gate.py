@@ -38,6 +38,26 @@ class TestGateReport:
         report.add(CheckResult(name="b", passed=False))
         assert report.passed is False
 
+    def test_skipped_check_does_not_fail_the_gate(self) -> None:
+        report = GateReport()
+        report.add(CheckResult(name="a", passed=True))
+        report.add(CheckResult(name="b", passed=False, skipped=True))
+        assert report.passed is True
+        assert report.has_skipped is True
+
+    def test_failed_check_with_skipped_check_still_fails(self) -> None:
+        report = GateReport()
+        report.add(CheckResult(name="a", passed=False))
+        report.add(CheckResult(name="b", passed=False, skipped=True))
+        assert report.passed is False
+        assert report.has_skipped is True
+
+    def test_no_skipped_when_all_run(self) -> None:
+        report = GateReport()
+        report.add(CheckResult(name="a", passed=True))
+        report.add(CheckResult(name="b", passed=True))
+        assert report.has_skipped is False
+
     def test_empty_report_passes(self) -> None:
         report = GateReport()
         assert report.passed is True
@@ -67,9 +87,9 @@ class TestRunCommandCheck:
     @patch("devflow.integrations.gate.subprocess.run", side_effect=FileNotFoundError)
     def test_missing_tool_skipped(self, _mock: patch, tmp_path: Path) -> None:
         result = _run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
-        assert result.passed is True
+        assert result.skipped is True
+        assert result.passed is False
         assert "not found" in result.message
-        assert "skipped" in result.message
 
     @patch(
         "devflow.integrations.gate.subprocess.run",
