@@ -216,6 +216,7 @@ devflow fix "Fix timezone bug"    # quick workflow
 | `devflow retry feat-001` | Retry the last failed phase |
 | `devflow fix "..."` | Quick fix (no planning phase) |
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
+| `devflow sync [--dry-run] [--keep-artifacts]` | Post-merge cleanup: switch main, prune gone branches, archive done features |
 | `devflow status [feat-001]` | Show tracked features or one feature detail |
 | `devflow log [feat-001]` | Feature history with phase timings |
 

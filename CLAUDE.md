@@ -63,6 +63,7 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
     devflow retry feat-001           → relancer la dernière phase failed
     devflow fix "..."                → workflow quick (implement + gate)
     devflow check                    → quality gate locale
+    devflow sync [--dry-run] [--keep-artifacts]  → post-merge cleanup (switch main, prune branches, archive done features)
     devflow status [--json] [feat-001]  → état courant
     devflow log [feat-001]           → historique avec durées
 

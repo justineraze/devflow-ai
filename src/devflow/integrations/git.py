@@ -219,6 +219,75 @@ def push_and_create_pr(feature: Feature, branch: str) -> str | None:
     return None
 
 
+def is_worktree_dirty(cwd: Path | None = None) -> bool:
+    """Return True if the working tree has uncommitted changes."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=str(cwd or Path.cwd()),
+    )
+    return bool(result.stdout.strip())
+
+
+def switch_and_pull_main(main_branch: str = "main", cwd: Path | None = None) -> None:
+    """Switch to *main_branch* and fast-forward pull."""
+    root = str(cwd or Path.cwd())
+    subprocess.run(
+        ["git", "switch", main_branch],
+        capture_output=True, text=True, cwd=root,
+    )
+    subprocess.run(
+        ["git", "pull", "--ff-only"],
+        capture_output=True, text=True, cwd=root,
+    )
+
+
+def fetch_prune(cwd: Path | None = None) -> None:
+    """Fetch from origin and prune stale remote-tracking branches."""
+    subprocess.run(
+        ["git", "fetch", "-p"],
+        capture_output=True, text=True, cwd=str(cwd or Path.cwd()),
+    )
+
+
+def get_gone_branches(cwd: Path | None = None) -> list[str]:
+    """Return local branch names whose upstream remote has been deleted.
+
+    Parses ``git branch -vv`` looking for ``[<remote>/<branch>: gone]``.
+    Returns an empty list if git is unavailable or there are no gone branches.
+    """
+    import re
+
+    result = subprocess.run(
+        ["git", "branch", "-vv"],
+        capture_output=True, text=True, cwd=str(cwd or Path.cwd()),
+    )
+    if result.returncode != 0:
+        return []
+
+    gone: list[str] = []
+    for line in result.stdout.splitlines():
+        # Strip leading "* " or "  ".
+        stripped = line.lstrip("* ").lstrip()
+        # Branch name is the first token.
+        parts = stripped.split()
+        if not parts:
+            continue
+        branch_name = parts[0]
+        # Look for the [gone] marker anywhere in the line.
+        if re.search(r"\[.*: gone\]", line):
+            gone.append(branch_name)
+    return gone
+
+
+def delete_branch(name: str, cwd: Path | None = None) -> bool:
+    """Force-delete a local branch. Returns True on success."""
+    result = subprocess.run(
+        ["git", "branch", "-D", name],
+        capture_output=True, text=True, cwd=str(cwd or Path.cwd()),
+    )
+    return result.returncode == 0
+
+
 def _build_pr_body(feature: Feature) -> str:
     """Build the PR description from phase outputs."""
     parts = ["## Summary", "", feature.description, ""]

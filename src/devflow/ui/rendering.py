@@ -279,6 +279,66 @@ def _render_phase_timeline(feature: Feature, totals: BuildTotals) -> Table:
     return grid
 
 
+def render_sync_summary(result: object) -> None:
+    """Render a Rich panel summarising the outcome of ``devflow sync``.
+
+    Accepts a :class:`~devflow.orchestration.sync.SyncResult` but typed as
+    ``object`` to avoid a circular import at module load time.
+    """
+    from devflow.orchestration.sync import SyncResult
+
+    assert isinstance(result, SyncResult)  # noqa: S101 — internal guard
+
+    prefix = "[yellow]dry-run[/yellow] " if result.dry_run else ""
+
+    grid = Table.grid(expand=False, padding=(0, 2))
+    grid.add_column(justify="right", style="dim")
+    grid.add_column()
+
+    # Branches row.
+    branch_text = Text()
+    if result.branches_deleted:
+        branch_text.append(str(len(result.branches_deleted)), style="bold red")
+        branch_text.append(" deleted", style="dim")
+        branch_text.append(f"  ({', '.join(result.branches_deleted)})", style="dim")
+    else:
+        branch_text.append("none", style="dim")
+    grid.add_row("Branches", branch_text)
+
+    # Features row.
+    feat_text = Text()
+    if result.features_archived:
+        feat_text.append(str(len(result.features_archived)), style="bold green")
+        feat_text.append(" archived", style="dim")
+        feat_text.append(f"  ({', '.join(result.features_archived)})", style="dim")
+    else:
+        feat_text.append("none", style="dim")
+    grid.add_row("Features archived", feat_text)
+
+    # Current branch.
+    cb_text = Text(result.current_branch or "—", style="cyan")
+    grid.add_row("Current branch", cb_text)
+
+    rows: list = [grid]
+
+    if result.dry_run and result.actions:
+        rows.append(Text())
+        rows.append(Text("Actions that would run:", style="yellow dim"))
+        for action in result.actions:
+            rows.append(Text(f"  • {action}", style="dim"))
+
+    title_style = "reverse yellow bold" if result.dry_run else "reverse green bold"
+    title_label = "⏵ Sync (dry-run)" if result.dry_run else "✓ Sync complete"
+
+    console.print()
+    console.print(Panel(
+        Group(*rows),
+        title=Text(f" {prefix}{title_label} ", style=title_style),
+        border_style="yellow" if result.dry_run else "green",
+        padding=(1, 2),
+    ))
+
+
 def _fmt_duration(seconds: float | None) -> str:
     if seconds is None:
         return "—"
