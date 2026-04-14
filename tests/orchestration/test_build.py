@@ -19,6 +19,9 @@ from devflow.orchestration.build import (
     start_build,
     start_fix,
 )
+from devflow.orchestration.stream import PhaseMetrics
+
+_PHASE_OK = (True, "done", PhaseMetrics())
 
 
 @pytest.fixture
@@ -206,7 +209,7 @@ class TestGetPhaseAgent:
 class TestAutoCommitAfterPhase:
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")
-    @patch("devflow.orchestration.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_OK)
     @patch("devflow.integrations.git.create_branch", return_value="feat/test")
     @patch("devflow.integrations.git.push_and_create_pr", return_value="https://github.com/pr/1")
     def test_commit_called_after_implementing(
@@ -222,7 +225,7 @@ class TestAutoCommitAfterPhase:
 
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")
-    @patch("devflow.orchestration.build._execute_phase", return_value=(True, "done"))
+    @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_OK)
     @patch("devflow.integrations.git.create_branch", return_value="feat/test")
     @patch("devflow.integrations.git.push_and_create_pr", return_value="https://github.com/pr/1")
     def test_commit_not_called_for_gate(

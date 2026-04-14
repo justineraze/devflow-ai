@@ -258,18 +258,31 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
 
 
 def render_gate_report(report: GateReport) -> None:
-    """Display the quality gate report using Rich."""
-    lines = Text()
-    for check in report.checks:
+    """Render the quality gate as a Rich panel with per-check details."""
+    body = Text()
+    for idx, check in enumerate(report.checks):
         icon = "✓" if check.passed else "✗"
-        style = "green" if check.passed else "red"
-        lines.append(f"  {icon} ", style=style)
-        lines.append(f"{check.name}: ", style="bold")
-        lines.append(f"{check.message}\n", style=style)
-        if check.details:
-            lines.append(f"    {check.details[:500]}\n", style="dim")
+        icon_style = "green bold" if check.passed else "red bold"
+        name_style = "white" if check.passed else "red"
+
+        if idx:
+            body.append("\n")
+        body.append(f"  {icon}  ", style=icon_style)
+        body.append(check.name.ljust(10), style=f"bold {name_style}")
+        body.append(check.message, style="dim" if check.passed else name_style)
+
+        if not check.passed and check.details:
+            for detail in check.details.split("\n")[:8]:
+                if detail.strip():
+                    body.append(f"\n       {detail[:200]}", style="dim red")
 
     verdict = "PASSED" if report.passed else "FAILED"
+    verdict_style = "reverse green bold" if report.passed else "reverse red bold"
     border = "green" if report.passed else "red"
 
-    console.print(Panel(lines, title=f"Quality Gate — {verdict}", border_style=border))
+    console.print(Panel(
+        body,
+        title=Text(f" Gate — {verdict} ", style=verdict_style),
+        border_style=border,
+        padding=(1, 2),
+    ))

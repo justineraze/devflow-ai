@@ -306,8 +306,12 @@ def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
 
 def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
-) -> tuple[bool, str]:
-    """Execute a single phase via Claude Code or local gate."""
+):
+    """Execute a single phase via Claude Code or local gate.
+
+    Returns ``(success, output, metrics)`` — metrics is a blank
+    PhaseMetrics for the gate phase (no model cost).
+    """
     from devflow.orchestration.runner import execute_phase, run_gate_phase
 
     if phase.name == "gate":
@@ -424,13 +428,22 @@ def execute_build_loop(
         push_and_create_pr,
         switch_branch,
     )
+    from devflow.orchestration.model_routing import resolve_model
+    from devflow.ui.rendering import (
+        BuildTotals,
+        render_build_banner,
+        render_build_summary,
+        render_phase_auto_retry,
+        render_phase_failure,
+        render_phase_header,
+        render_phase_success,
+    )
 
     total = len(feature.phases)
     is_resuming = feedback is not None
-
-    # ── Header ──
-    console.print(f"\n[bold cyan]devflow build[/bold cyan] — {feature.description}")
-    console.print(f"[dim]{feature.id} | workflow: {feature.workflow} | {total} phases[/dim]")
+    state = load_state(base)
+    stack = state.stack
+    totals = BuildTotals()
 
     # ── Branch ──
     branch = f"feat/{feature.id}"
@@ -441,11 +454,12 @@ def execute_build_loop(
         feature.metadata["feedback"] = feedback
         save_state(state, base)
         switch_branch(branch)
-        console.print(f"[dim]branch: {branch} (resumed)[/dim]")
-        console.print(f"[dim]feedback: {feedback}[/dim]\n")
     else:
         branch = create_branch(feature.id)
-        console.print(f"[dim]branch: {branch}[/dim]\n")
+
+    render_build_banner(feature, branch, stack)
+    if is_resuming:
+        console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
 
     # ── STEP 1: Planning phases ──
     plan_output = ""
@@ -472,21 +486,19 @@ def execute_build_loop(
                 save_state(state, base)
             break
 
-        console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]")
+        render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
         start = time.monotonic()
-        success, output = _execute_phase(feature, phase, agent_name, base)
+        success, output, metrics = _execute_phase(feature, phase, agent_name, base)
         elapsed = time.monotonic() - start
 
         if not success:
             fail_phase(feature.id, phase.name, output, base)
-            console.print(f"[red]✗ {phase.name} failed ({_format_duration(elapsed)})[/red]")
-            if output:
-                for line in output.split("\n")[:5]:
-                    console.print(f"  [dim]{line}[/dim]")
+            render_phase_failure(phase.name, elapsed, output)
             return False
 
         complete_phase(feature.id, phase.name, output, base)
-        console.print(f"[green]✓ {phase.name}[/green] [dim]({_format_duration(elapsed)})[/dim]")
+        render_phase_success(phase.name, elapsed, metrics)
+        totals.add(phase.name, metrics, elapsed)
 
         if phase.name == "planning":
             plan_output = output
@@ -525,66 +537,85 @@ def execute_build_loop(
         phase_num = done_count + 1
         agent_name = _get_phase_agent(feature, phase.name, base)
 
-        console.print(f"[dim]Phase {phase_num}/{total}: {phase.name}...[/dim]", end="")
+        render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
         start = time.monotonic()
-        success, output = _execute_phase(feature, phase, agent_name, base)
+        success, output, metrics = _execute_phase(feature, phase, agent_name, base)
         elapsed = time.monotonic() - start
 
         if success:
             complete_phase(feature.id, phase.name, output, base)
-            console.print(f" [green]✓[/green] [dim]({_format_duration(elapsed)})[/dim]")
 
-            # Auto-commit after code-changing phases.
+            if phase.name == "gate":
+                _render_gate_panel(feature.id, base)
+            else:
+                render_phase_success(phase.name, elapsed, metrics)
+            totals.add(phase.name, metrics, elapsed)
+
             if phase.name in ("implementing", "fixing"):
                 msg = build_commit_message(feature, suffix=phase.name)
                 if commit_changes(msg):
-                    console.print("  [dim]Auto-committed changes[/dim]")
+                    console.print("  [dim]💾 auto-committed changes[/dim]")
                 diff = get_diff_stat()
                 if diff:
-                    console.print("\n[bold]Changements :[/bold]")
-                    for line in diff.split("\n"):
-                        console.print(f"  {line}")
+                    console.print("[dim]" + "\n".join(
+                        f"  {line}" for line in diff.split("\n")
+                    ) + "[/dim]\n")
                 _persist_files_summary(feature.id, base)
-
-            # Show gate results.
-            if phase.name == "gate" and output:
-                for line in output.split("\n"):
-                    console.print(f"  {line}")
         else:
             if phase.name == "gate":
                 from devflow.core.artifacts import save_phase_output
 
                 save_phase_output(feature.id, "gate", output, base)
                 if _setup_gate_retry(feature.id, base):
-                    console.print(
-                        f" [yellow]✗ gate failed — auto-retrying via "
-                        f"fixing[/yellow] [dim]({_format_duration(elapsed)})[/dim]"
-                    )
-                    for line in output.split("\n")[:10]:
-                        console.print(f"  [dim]{line}[/dim]")
+                    _render_gate_panel(feature.id, base)
+                    render_phase_auto_retry(phase.name, elapsed, "")
                     feature = _refresh_feature(feature.id, base) or feature
                     continue
 
             fail_phase(feature.id, phase.name, output, base)
-            console.print(f" [red]✗[/red] [dim]({_format_duration(elapsed)})[/dim]")
-            if output:
-                for line in output.split("\n")[:5]:
-                    console.print(f"  [dim]{line}[/dim]")
+            render_phase_failure(phase.name, elapsed, output)
             return False
 
         feature = _refresh_feature(feature.id, base) or feature
 
     # ── STEP 4: Create PR ──
-    console.print(f"\n[bold green]✓ Feature complete[/bold green] [{total}/{total}]")
-    console.print("[dim]Creating PR...[/dim]")
+    console.print("[dim]Creating PR…[/dim]")
 
     state = load_state(base)
-    final = state.get_feature(feature.id)
-    if final:
-        pr_url = push_and_create_pr(final, branch)
-        if pr_url:
-            console.print(f"\n[bold green]PR:[/bold green] {pr_url}")
-        else:
-            console.print("[yellow]PR creation failed — push manually.[/yellow]")
+    final = state.get_feature(feature.id) or feature
+    pr_url = push_and_create_pr(final, branch) if final else None
+
+    render_build_summary(final, totals, pr_url, branch)
+    if pr_url is None:
+        console.print(
+            "[yellow]PR creation failed — push manually.[/yellow]\n",
+        )
 
     return True
+
+
+def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
+    """Load gate.json from artifacts and render it as a Rich panel."""
+    import json
+
+    from devflow.core.artifacts import read_artifact
+    from devflow.integrations.gate import CheckResult, GateReport, render_gate_report
+
+    raw = read_artifact(feature_id, "gate.json", base)
+    if not raw:
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+
+    report = GateReport(checks=[
+        CheckResult(
+            name=c.get("name", "?"),
+            passed=bool(c.get("passed", False)),
+            message=c.get("message", ""),
+            details=c.get("details", ""),
+        )
+        for c in data.get("checks", [])
+    ])
+    render_gate_report(report)
