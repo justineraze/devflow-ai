@@ -2,13 +2,50 @@
 
 from unittest.mock import MagicMock, patch
 
-from devflow.core.models import Feature, FeatureStatus
+from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseName, PhaseStatus
 from devflow.integrations.git import (
     build_commit_message,
     build_pr_title,
     commit_changes,
+    compose_pr_body,
+    compose_pr_title,
     has_commits_ahead,
 )
+
+
+class TestComposePrTitle:
+    def test_short_title_no_ellipsis(self) -> None:
+        """Short description fits within _MAX_LEN — no ellipsis appended."""
+        result = compose_pr_title("feat", "Add auth")
+        assert result == "feat: Add auth"
+        assert "…" not in result
+
+    def test_long_title_word_boundary_with_ellipsis(self) -> None:
+        """Long description truncated at last word boundary, ellipsis appended, len ≤ 70."""
+        long_desc = "Add a very long feature description that goes on and on and exceeds the limit easily"
+        result = compose_pr_title("feat", long_desc)
+        assert len(result) <= 70
+        assert result.endswith("…")
+        # The character just before ellipsis must not be a space (word boundary).
+        assert result[-2] != " "
+
+    def test_preserves_full_description_when_short(self) -> None:
+        """Exact short description is preserved verbatim (capitalized)."""
+        result = compose_pr_title("fix", "broken login redirect")
+        assert result == "fix: Broken login redirect"
+
+    def test_with_suffix_short(self) -> None:
+        """Suffix appended with em-dash when result fits within _MAX_LEN."""
+        result = compose_pr_title("feat", "Add auth", suffix="implementing")
+        assert result == "feat: Add auth — implementing"
+        assert "…" not in result
+
+    def test_with_suffix_truncated(self) -> None:
+        """Long title + suffix still respects _MAX_LEN with ellipsis."""
+        long_desc = "Add something very long indeed going past the limit completely"
+        result = compose_pr_title("feat", long_desc, suffix="implementing")
+        assert len(result) <= 70
+        assert result.endswith("…")
 
 
 class TestBuildPrTitle:
@@ -151,3 +188,126 @@ class TestPushAndCreatePr:
         pr_args = pr_call[0][0]
         title_idx = pr_args.index("--title") + 1
         assert pr_args[title_idx] == "feat: Add auth"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for compose_pr_body tests
+# ---------------------------------------------------------------------------
+
+_SHORT_DESC = "Add user authentication support"
+_LONG_DESC = (
+    "Add user authentication support with OAuth2. "
+    "This involves integrating the third-party identity provider, "
+    "updating the session middleware, adding the callback routes, "
+    "and writing the integration tests to verify the full login flow "
+    "end-to-end including token refresh and logout scenarios."
+)
+
+
+def _make_feature(
+    desc: str = _SHORT_DESC,
+    metadata: dict | None = None,
+    phases: list[PhaseRecord] | None = None,
+) -> Feature:
+    return Feature(
+        id="f-001",
+        description=desc,
+        workflow="standard",
+        metadata=metadata or {},
+        phases=phases or [],
+    )
+
+
+def _done_phase(name: PhaseName, output: str) -> PhaseRecord:
+    return PhaseRecord(name=name, status=PhaseStatus.DONE, output=output)
+
+
+class TestComposePrBody:
+    def test_uses_pr_summary_metadata(self) -> None:
+        """pr_summary metadata takes priority over description."""
+        feature = _make_feature(
+            desc="Some raw verbose prompt text that goes on forever.",
+            metadata={"pr_summary": "Add OAuth2 login with token refresh."},
+        )
+        body = compose_pr_body(feature)
+        assert "Add OAuth2 login with token refresh." in body
+        assert "Some raw verbose prompt text" not in body
+
+    def test_no_context_section_when_metadata_present(self) -> None:
+        """When pr_summary metadata is set, no ## Context section is added."""
+        feature = _make_feature(desc=_LONG_DESC, metadata={"pr_summary": "Short summary."})
+        body = compose_pr_body(feature)
+        assert "## Context" not in body
+
+    def test_derives_summary_from_first_sentence(self) -> None:
+        """Without metadata, summary is the first sentence of the description."""
+        multi_sentence = "Add caching layer. This reduces DB load. Also improves latency."
+        feature = _make_feature(desc=multi_sentence)
+        body = compose_pr_body(feature)
+        # Only the first sentence in Summary.
+        assert "## Summary" in body
+        assert "Add caching layer." in body
+        # Second sentence must not appear in Summary (it may appear in Context).
+        lines = body.split("\n")
+        summary_idx = lines.index("## Summary")
+        # The summary paragraph follows directly; second sentence is not right after it.
+        summary_paragraph = lines[summary_idx + 2]  # blank line then content
+        assert "This reduces DB load" not in summary_paragraph
+
+    def test_context_section_for_long_descriptions(self) -> None:
+        """Long descriptions (> 240 chars) get a ## Context section."""
+        assert len(_LONG_DESC) > 240  # sanity check
+        feature = _make_feature(desc=_LONG_DESC)
+        body = compose_pr_body(feature)
+        assert "## Context" in body
+        assert _LONG_DESC in body
+
+    def test_no_context_for_short_descriptions(self) -> None:
+        """Short descriptions (≤ 240 chars) produce no ## Context section."""
+        assert len(_SHORT_DESC) <= 240  # sanity check
+        feature = _make_feature(desc=_SHORT_DESC)
+        body = compose_pr_body(feature)
+        assert "## Context" not in body
+
+    def test_renders_plan_section(self) -> None:
+        """A completed planning phase output appears under ## Plan."""
+        planning_output = "## Plan\n\nStep 1: scaffold\nStep 2: implement"
+        feature = _make_feature(
+            phases=[_done_phase(PhaseName.PLANNING, planning_output)],
+        )
+        body = compose_pr_body(feature)
+        assert "## Plan" in body
+        assert planning_output in body
+
+    def test_renders_gate_section(self) -> None:
+        """A completed gate phase output appears under ## Quality gate."""
+        gate_output = "ruff: OK\npytest: 42 passed"
+        feature = _make_feature(
+            phases=[_done_phase(PhaseName.GATE, gate_output)],
+        )
+        body = compose_pr_body(feature)
+        assert "## Quality gate" in body
+        assert gate_output in body
+
+    def test_renders_plan_and_gate_sections(self) -> None:
+        """Both Plan and Quality gate sections rendered when both phases done."""
+        planning_output = "Step 1: do the thing"
+        gate_output = "All checks passed"
+        feature = _make_feature(
+            phases=[
+                _done_phase(PhaseName.PLANNING, planning_output),
+                _done_phase(PhaseName.GATE, gate_output),
+            ],
+        )
+        body = compose_pr_body(feature)
+        assert "## Plan" in body
+        assert planning_output in body
+        assert "## Quality gate" in body
+        assert gate_output in body
+
+    def test_footer_always_present(self) -> None:
+        """devflow-ai footer link is always appended."""
+        feature = _make_feature()
+        body = compose_pr_body(feature)
+        assert "devflow-ai" in body
+        assert "---" in body

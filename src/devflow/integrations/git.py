@@ -39,6 +39,33 @@ def _truncate_at_word(text: str, max_len: int, min_prefix: int = 0) -> str:
     return truncated
 
 
+def compose_pr_title(
+    prefix: str, description: str, suffix: str | None = None
+) -> str:
+    """Build a Conventional Commits title, truncated at a word boundary.
+
+    Appends '…' when the title is truncated, guaranteeing a final length ≤
+    ``_MAX_LEN``.
+
+    Args:
+        prefix: Conventional Commits type without colon (e.g. ``"feat"``).
+        description: Human-readable feature description (raw, will be
+            normalized).
+        suffix: Optional qualifier appended after an em-dash (e.g.
+            ``"implementing"``).  ``None`` produces a clean PR title.
+    """
+    desc = _normalize_description(description)
+    base = f"{prefix}: {desc}"
+    if suffix:
+        base = f"{base} — {suffix}"
+
+    if len(base) > _MAX_LEN:
+        # Reserve one character for the ellipsis so the final string ≤ _MAX_LEN.
+        truncated = _truncate_at_word(base, _MAX_LEN - 1, min_prefix=len(prefix) + 2)
+        return truncated + "…"
+    return base
+
+
 def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
     """Build a standardized Conventional Commits message for a feature.
 
@@ -51,14 +78,7 @@ def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
         suffix: Optional qualifier (e.g. "implementing", "fixing",
                 "leftover changes"). Appended after an em-dash.
     """
-    prefix = _commit_prefix(feature)
-    desc = _normalize_description(feature.description)
-    base = f"{prefix}: {desc}"
-
-    if suffix:
-        base = f"{base} — {suffix}"
-
-    return _truncate_at_word(base, _MAX_LEN, min_prefix=len(prefix) + 2)
+    return compose_pr_title(_commit_prefix(feature), feature.description, suffix)
 
 
 def build_pr_title(feature: Feature) -> str:
@@ -288,9 +308,37 @@ def delete_branch(name: str, cwd: Path | None = None) -> bool:
     return result.returncode == 0
 
 
-def _build_pr_body(feature: Feature) -> str:
-    """Build the PR description from phase outputs."""
-    parts = ["## Summary", "", feature.description, ""]
+def compose_pr_body(feature: Feature) -> str:
+    """Build the PR description from feature metadata and phase outputs.
+
+    Summary strategy:
+    - If ``feature.metadata["pr_summary"]`` exists, use it verbatim.
+    - Otherwise derive the summary from the first sentence of
+      ``feature.description`` (split on ``'. '`` or ``'\\n'``), capped at
+      240 chars with word-boundary truncation.
+
+    A ``## Context`` section is appended when the full description exceeds
+    240 chars and no ``pr_summary`` metadata was provided.  The ``## Plan``
+    and ``## Quality gate`` sections are always included when the
+    corresponding phases have completed output.
+    """
+    raw_desc = feature.description
+
+    if pr_summary := feature.metadata.get("pr_summary"):
+        summary = str(pr_summary)
+        add_context = False
+    else:
+        # Derive from the first sentence (whichever delimiter comes first).
+        first_sentence = raw_desc.split(". ")[0].split("\n")[0]
+        if len(first_sentence) > 240:
+            first_sentence = _truncate_at_word(first_sentence, 240)
+        summary = first_sentence
+        add_context = len(raw_desc) > 240
+
+    parts: list[str] = ["## Summary", "", summary, ""]
+
+    if add_context:
+        parts.extend(["## Context", "", raw_desc, ""])
 
     for phase in feature.phases:
         if phase.status != PhaseStatus.DONE or not phase.output:
@@ -303,3 +351,8 @@ def _build_pr_body(feature: Feature) -> str:
     parts.append("---")
     parts.append("Built with [devflow-ai](https://github.com/JustineRaze/devflow-ai)")
     return "\n".join(parts)
+
+
+def _build_pr_body(feature: Feature) -> str:
+    """Build the PR description from phase outputs."""
+    return compose_pr_body(feature)
