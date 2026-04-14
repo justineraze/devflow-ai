@@ -61,6 +61,28 @@ def load_phase_output(
     return read_artifact(feature_id, f"{phase_name}.md", base)
 
 
+def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
+    """Move ``.devflow/<feature_id>/`` to ``.devflow/.archive/<feature_id>/``.
+
+    Creates ``.devflow/.archive/`` if needed.
+    Returns the destination path.
+    Raises ``FileNotFoundError`` if the feature directory does not exist.
+    """
+    from devflow.core.workflow import ensure_devflow_dir
+
+    devflow = ensure_devflow_dir(project_root)
+    src = devflow / feature_id
+    if not src.exists():
+        raise FileNotFoundError(f"Feature dir not found: {src}")
+
+    archive_dir = devflow / ".archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = archive_dir / feature_id
+    src.rename(dest)
+    return dest
+
+
 def context_deps_for(phase_name: str) -> tuple[str, ...]:
     """Return the phase names whose outputs should be injected as context."""
     from devflow.core.phases import UnknownPhase, get_spec

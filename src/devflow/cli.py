@@ -128,6 +128,35 @@ def fix(
 
 
 @app.command()
+def sync(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print actions without mutating anything")
+    ] = False,
+    keep_artifacts: Annotated[
+        bool,
+        typer.Option(
+            "--keep-artifacts",
+            help="Skip archiving .devflow/<feat>/ dirs for merged PRs",
+        ),
+    ] = False,
+) -> None:
+    """Post-merge cleanup: switch main, prune branches, archive done features.
+
+    Refuses to run if the working tree is dirty.
+    """
+    from devflow.orchestration.sync import DirtyWorktreeError, run_sync
+    from devflow.ui.rendering import render_sync_summary
+
+    try:
+        result = run_sync(dry_run=dry_run, keep_artifacts=keep_artifacts)
+    except DirtyWorktreeError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    render_sync_summary(result)
+
+
+@app.command()
 def check() -> None:
     """Run the quality gate (lint, tests, secrets detection)."""
     from devflow.integrations.detect import resolve_stack
