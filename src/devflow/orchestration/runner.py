@@ -15,6 +15,7 @@ from devflow.orchestration.model_routing import (
     PHASE_MODELS,
     resolve_model,
 )
+from devflow.orchestration.stream import PhaseMetrics
 
 console = Console()
 
@@ -270,15 +271,15 @@ def execute_phase(
     feature: Feature,
     phase: PhaseRecord,
     agent_name: str,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, PhaseMetrics]:
     """Execute a phase by calling Claude Code.
 
-    Captures output silently. No timeout — waits for Claude Code to finish.
+    Streams tool invocations to the console as they happen. The final
+    phase-summary chip is rendered by the caller from the returned
+    PhaseMetrics — keeps the runner focused on I/O.
     """
     from devflow.orchestration.stream import (
         PhaseMetrics,
-        format_cost,
-        format_tokens,
         format_tool_line,
         parse_event,
     )
@@ -288,11 +289,6 @@ def execute_phase(
     model = resolve_model(feature, phase)
     cwd = str(Path.cwd())
 
-    # Stable content (skills + agent) goes to --system-prompt, which
-    # Anthropic caches automatically → big cost savings across phases.
-    # Variable content (task + context) goes via stdin.
-    # --model picks the right tier per phase: Opus for deep reasoning,
-    # Sonnet for execution. See PHASE_MODELS.
     cmd = [
         "claude", "-p", "-",
         "--model", model,
@@ -302,8 +298,6 @@ def execute_phase(
     ]
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
-
-    console.print(f"  [dim]model: {model}[/dim]")
 
     try:
         proc = subprocess.Popen(
@@ -315,14 +309,12 @@ def execute_phase(
             cwd=cwd,
         )
 
-        # Send user prompt and close stdin.
         proc.stdin.write(user_prompt)
         proc.stdin.close()
 
         metrics = PhaseMetrics()
         tool_count = 0
 
-        # Stream stdout line by line, showing tool uses live.
         for line in proc.stdout:
             parsed = parse_event(line)
             if not parsed:
@@ -330,58 +322,48 @@ def execute_phase(
             kind, payload = parsed
             if kind == "tool":
                 tool_count += 1
-                console.print(f"  [dim]{format_tool_line(payload)}[/dim]")
+                console.print(f"[dim]{format_tool_line(payload)}[/dim]")
             elif kind == "metrics":
                 metrics = payload
                 metrics.tool_count = tool_count
 
         proc.wait()
 
-        # Display token + cost summary for the phase.
-        if metrics.input_tokens or metrics.output_tokens:
-            cache_note = (
-                f" (cache: {format_tokens(metrics.cache_read)})"
-                if metrics.cache_read else ""
-            )
-            console.print(
-                f"  [dim]→ {tool_count} tools | "
-                f"{format_tokens(metrics.input_tokens)} in{cache_note} / "
-                f"{format_tokens(metrics.output_tokens)} out | "
-                f"{format_cost(metrics.cost_usd)}[/dim]"
-            )
-
         if proc.returncode == 0:
-            return True, metrics.final_text or "Phase completed"
+            return True, metrics.final_text or "Phase completed", metrics
         stderr = proc.stderr.read().strip()
-        return False, stderr or metrics.final_text or "Unknown error"
+        return False, stderr or metrics.final_text or "Unknown error", metrics
 
     except FileNotFoundError:
         return False, (
             "Claude Code CLI not found. "
             "Install it: https://docs.anthropic.com/en/docs/claude-code"
-        )
+        ), PhaseMetrics()
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted.[/yellow]")
         with contextlib.suppress(Exception):
             proc.terminate()
-        return False, "Interrupted by user"
+        return False, "Interrupted by user", PhaseMetrics()
 
 
 def run_gate_phase(
     base: Path | None = None,
     stack: str | None = None,
     feature_id: str | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, PhaseMetrics]:
     """Run the gate phase locally (ruff + pytest + secrets).
 
-    When *feature_id* is provided, the structured report is persisted as
-    ``.devflow/<feature_id>/gate.json`` so a follow-up fixing phase can
-    load the exact failures instead of parsing free-form text.
+    When *feature_id* is provided, the structured report is persisted
+    as ``.devflow/<feature_id>/gate.json`` so a follow-up fixing phase
+    can load the exact failures instead of parsing free-form text.
+    Returns ``(passed, summary_text, metrics)`` — metrics is a blank
+    PhaseMetrics since the gate is local and incurs no model cost.
     """
     import json
 
     from devflow.core.artifacts import write_artifact
     from devflow.integrations.gate import run_gate
+    from devflow.orchestration.stream import PhaseMetrics
 
     report = run_gate(base, stack=stack)
 
@@ -398,4 +380,4 @@ def run_gate_phase(
             for detail in check.details.split("\n")[:10]:
                 lines.append(f"    {detail}")
 
-    return report.passed, "\n".join(lines)
+    return report.passed, "\n".join(lines), PhaseMetrics()

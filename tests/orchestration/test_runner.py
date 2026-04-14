@@ -131,7 +131,7 @@ class TestExecutePhase:
             returncode=0, stdout_lines=[result_line],
         )
         phase = sample_feature.phases[1]
-        success, output = execute_phase(sample_feature, phase, "developer")
+        success, output, _metrics = execute_phase(sample_feature, phase, "developer")
         assert success is True
         assert "done" in output
 
@@ -148,7 +148,7 @@ class TestExecutePhase:
             returncode=1, stdout_lines=[], stderr="Error: something broke",
         )
         phase = sample_feature.phases[1]
-        success, output = execute_phase(sample_feature, phase, "developer")
+        success, output, _metrics = execute_phase(sample_feature, phase, "developer")
         assert success is False
         assert "something broke" in output
 
@@ -157,7 +157,7 @@ class TestExecutePhase:
         self, mock_popen: MagicMock, sample_feature: Feature,
     ) -> None:
         phase = sample_feature.phases[1]
-        success, output = execute_phase(sample_feature, phase, "developer")
+        success, output, _metrics = execute_phase(sample_feature, phase, "developer")
         assert success is False
         assert "Claude Code CLI not found" in output
 
@@ -166,7 +166,7 @@ class TestRunGatePhase:
     def test_passes_on_clean_project(self, tmp_path: Path) -> None:
         (tmp_path / "src").mkdir()
         (tmp_path / "tests").mkdir()
-        success, output = run_gate_phase(tmp_path)
+        success, output, _metrics = run_gate_phase(tmp_path)
         assert isinstance(success, bool)
         assert isinstance(output, str)
 

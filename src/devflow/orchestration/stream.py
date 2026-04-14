@@ -124,9 +124,14 @@ def format_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k"
 
 
-def format_tool_line(tool: ToolUse) -> str:
-    """Format a tool use as a short progress line."""
+def format_tool_line(tool: ToolUse, indent: str = "  ") -> str:
+    """Format a tool use as an aligned, indented progress line.
+
+    Layout: ``{indent}{icon}  {NAME:8}  {summary}``. Fixed-width name
+    column keeps summaries aligned across the whole phase log.
+    """
     icon = TOOL_ICONS.get(tool.name, "•")
+    name_col = tool.name.ljust(8)
     if tool.summary:
-        return f"{icon} {tool.name}: {tool.summary}"
-    return f"{icon} {tool.name}"
+        return f"{indent}{icon}  {name_col}  {tool.summary}"
+    return f"{indent}{icon}  {name_col}"
