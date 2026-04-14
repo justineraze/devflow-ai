@@ -10,11 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-console = Console()
+from devflow.ui.console import console
 
 # Patterns that likely indicate leaked secrets.
 _API_KEY_RE = r"(?i)(api[_-]?key|apikey)\s*[:=]\s*['\"][a-zA-Z0-9_\-]{20,}['\"]"
@@ -171,22 +170,6 @@ def _run_command_check(
 
     passed = result.returncode == 0
     return CheckResult(name=name, passed=passed, message=message, details=details)
-
-
-def run_ruff(base: Path | None = None) -> CheckResult:
-    """Run ruff linter (kept for back-compat — prefer run_gate)."""
-    check = STACK_CHECKS["python"][0]
-    return _run_command_check(
-        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
-    )
-
-
-def run_pytest(base: Path | None = None) -> CheckResult:
-    """Run pytest (kept for back-compat — prefer run_gate)."""
-    check = STACK_CHECKS["python"][1]
-    return _run_command_check(
-        check.name, check.cmd, base or Path.cwd(), check.timeout, check.parse_output,
-    )
 
 
 def scan_secrets(base: Path | None = None) -> CheckResult:

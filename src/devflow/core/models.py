@@ -35,36 +35,50 @@ class FeatureStatus(StrEnum):
 
 
 # Valid transitions: current_status -> set of allowed next statuses.
-# "blocked" can be reached from any non-terminal state.
-# "failed" is terminal — no transitions out.
+# Every non-terminal state can also fall into BLOCKED (waiting on user)
+# or FAILED (recoverable via --resume) — listed inline below for one
+# truth-table at a glance, no post-init mutation required.
+_RECOVERY: frozenset[FeatureStatus] = frozenset(
+    {FeatureStatus.BLOCKED, FeatureStatus.FAILED},
+)
 VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
     FeatureStatus.PENDING: {
         FeatureStatus.PLANNING,
         FeatureStatus.IMPLEMENTING,
+        *_RECOVERY,
     },
     # PLANNING can skip plan_review in workflows that don't include it.
     FeatureStatus.PLANNING: {
         FeatureStatus.PLAN_REVIEW,
         FeatureStatus.IMPLEMENTING,
+        *_RECOVERY,
     },
     FeatureStatus.PLAN_REVIEW: {
         FeatureStatus.IMPLEMENTING,
         FeatureStatus.PLANNING,
+        *_RECOVERY,
     },
     # IMPLEMENTING can skip review in light/quick workflows.
     FeatureStatus.IMPLEMENTING: {
         FeatureStatus.REVIEWING,
         FeatureStatus.GATE,
+        *_RECOVERY,
     },
     FeatureStatus.REVIEWING: {
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
+        *_RECOVERY,
     },
     FeatureStatus.FIXING: {
         FeatureStatus.REVIEWING,
         FeatureStatus.GATE,
+        *_RECOVERY,
     },
-    FeatureStatus.GATE: {FeatureStatus.DONE, FeatureStatus.FIXING},
+    FeatureStatus.GATE: {
+        FeatureStatus.DONE,
+        FeatureStatus.FIXING,
+        *_RECOVERY,
+    },
     FeatureStatus.DONE: set(),
     FeatureStatus.BLOCKED: {
         FeatureStatus.PENDING,
@@ -74,6 +88,8 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
         FeatureStatus.REVIEWING,
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
+        FeatureStatus.BLOCKED,
+        FeatureStatus.FAILED,
     },
     # FAILED is recoverable via --resume: can go back to any non-terminal state.
     FeatureStatus.FAILED: {
@@ -86,12 +102,6 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
         FeatureStatus.GATE,
     },
 }
-
-# Any non-terminal state can transition to BLOCKED or FAILED.
-_NON_TERMINAL = {s for s, t in VALID_TRANSITIONS.items() if t or s == FeatureStatus.BLOCKED}
-for _status in _NON_TERMINAL:
-    VALID_TRANSITIONS[_status].add(FeatureStatus.BLOCKED)
-    VALID_TRANSITIONS[_status].add(FeatureStatus.FAILED)
 
 
 class InvalidTransition(Exception):
@@ -124,6 +134,14 @@ class PhaseRecord(BaseModel):
         self.status = PhaseStatus.DONE
         self.completed_at = datetime.now(UTC)
         self.output = output
+
+    def reset(self) -> None:
+        """Return the phase to its pristine PENDING state."""
+        self.status = PhaseStatus.PENDING
+        self.started_at = None
+        self.completed_at = None
+        self.output = ""
+        self.error = ""
 
     def fail(self, error: str = "") -> None:
         """Mark this phase as failed."""

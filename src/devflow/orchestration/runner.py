@@ -6,18 +6,13 @@ import contextlib
 import subprocess
 from pathlib import Path
 
-from rich.console import Console
-
 from devflow.core.artifacts import context_deps_for, load_phase_output
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, PhaseRecord, PhaseStatus
 from devflow.orchestration.model_routing import (
-    DEFAULT_MODEL,
-    PHASE_MODELS,
     resolve_model,
 )
-from devflow.orchestration.stream import PhaseMetrics
-
-console = Console()
+from devflow.ui.console import console
 
 # Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
@@ -40,9 +35,10 @@ PHASE_SKILLS: dict[str, tuple[str, ...]] = {
     "reviewing":    ("code-review", "refactor-first"),
 }
 
-def _model_for_phase(phase_name: str) -> str:
-    """Back-compat shim — returns the default model for *phase_name*."""
-    return PHASE_MODELS.get(phase_name, DEFAULT_MODEL)
+# Hard ceiling for a single Claude phase. 30 minutes covers planning
+# and implementing on large features; anything past that is almost
+# certainly a hung process and we'd rather kill it than freeze the CLI.
+PHASE_TIMEOUT_S: int = 30 * 60
 
 
 def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path | None:
@@ -278,11 +274,7 @@ def execute_phase(
     phase-summary chip is rendered by the caller from the returned
     PhaseMetrics — keeps the runner focused on I/O.
     """
-    from devflow.orchestration.stream import (
-        PhaseMetrics,
-        format_tool_line,
-        parse_event,
-    )
+    from devflow.orchestration.stream import format_tool_line, parse_event
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
@@ -327,7 +319,15 @@ def execute_phase(
                 metrics = payload
                 metrics.tool_count = tool_count
 
-        proc.wait()
+        try:
+            proc.wait(timeout=PHASE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return False, (
+                f"Phase timed out after {PHASE_TIMEOUT_S}s. "
+                "Increase PHASE_TIMEOUT_S or split the feature."
+            ), metrics
 
         if proc.returncode == 0:
             return True, metrics.final_text or "Phase completed", metrics
@@ -362,8 +362,8 @@ def run_gate_phase(
     import json
 
     from devflow.core.artifacts import write_artifact
+    from devflow.core.metrics import PhaseMetrics
     from devflow.integrations.gate import run_gate
-    from devflow.orchestration.stream import PhaseMetrics
 
     report = run_gate(base, stack=stack)
 
