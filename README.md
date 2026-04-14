@@ -1,4 +1,4 @@
-# devflow-ai 🌿
+# devflow-ai
 
 > State machine, quality gate, and cost tracking for Claude Code — so you ship features, not prompts.
 
@@ -34,41 +34,54 @@ You end up managing the process instead of reviewing the output.
 ```
 $ devflow build "Add caching layer"
 
-╔══════════════════════════════════════════════════════════════╗
-║  devflow build — Add caching layer                           ║
-║  feat-add-caching-layer-0413 · standard · 4 phases           ║
-║  branch: feat/feat-add-caching-layer-0413                    ║
-╚══════════════════════════════════════════════════════════════╝
+────────────────────────────────────────────────────────────────────
+Add caching layer
+feat-add-caching-layer-0414  ·  🐍 python  ·  standard  ·  4 phases
+🌿 feat/feat-add-caching-layer-0414
+────────────────────────────────────────────────────────────────────
 
-● Phase 1/4  planning                                  1m 12s ✓
+▶ phase 1/4 · planning    opus
+  📖  Read      src/cache.py
+  ⚡  Bash      git log --oneline -10
+  ✓ planning   55s   2 tools   5 in (cache 51.5k) / 1.6k out   $0.25
 
-╭─── Plan proposé ─────────────────────────────────────────────╮
-│ feat-add-caching-layer-0413                                  │
-│ Scope: new-feature · medium · 3 files · 6 steps             │
-╰──────────────────────────────────────────────────────────────╯
+╭─── Plan proposé ──────────────────────────────────────────────────╮
+│ Scope: new-feature · medium · 3 files · 6 steps                   │
+╰───────────────────────────────────────────────────────────────────╯
 Lancer l'implémentation ? [Y/n] y
 
-● Phase 2/4  implementing                              2m 34s ✓
-  📖 Read    cache.py
-  ✏️  Edit    cache.py  (+87 / -3)
-  ⚡ Bash    pytest tests/test_cache.py  → 12 passed
-  ⚡ Bash    git commit -m "feat: add Cache class"
-  → 8 tools · 5.2k in / 1.8k out · 18¢
+▶ phase 2/4 · implementing    sonnet
+  📖  Read      src/cache.py
+  📝  Edit      src/cache.py
+  ⚡  Bash      pytest tests/test_cache.py
+  ⚡  Bash      git commit -m "feat: add Cache class"
+  ✓ implementing   2m34s   8 tools   5.2k in (cache 18k) / 1.8k out   $0.18
 
-● Phase 3/4  reviewing                                   48s ✓
-● Phase 4/4  gate                                         1s ✓
+▶ phase 3/4 · reviewing    sonnet
+  ⚡  Bash      git diff HEAD~1 -- src/cache.py
+  ✓ reviewing   48s   1 tool   3.1k in (cache 22k) / 0.6k out   $0.21
 
-╭─── Gate ─────────────────────────────────────────────────────╮
-│  ✓ ruff      no lint issues                                  │
-│  ✓ pytest    174 passed                                      │
-│  ✓ secrets   clean                                           │
-╰──────────────────────────────────────────────────────────────╯
+▶ phase 4/4 · gate    sonnet
+╭───────────────────────  Gate — PASSED  ───────────────────────────╮
+│   ✓  ruff      No issues                                          │
+│   ✓  pytest    174 passed                                         │
+│   ✓  secrets   clean                                              │
+╰───────────────────────────────────────────────────────────────────╯
 
-╭─── Summary ──────────────────────────────────────────────────╮
-│  ✓ Feature complete [4/4]   total: 4m 35s                    │
-│  Budget  ████████░░░░░░░░░░░░  38¢ / ~$2 est.               │
-│  PR: https://github.com/you/repo/pull/42                     │
-╰──────────────────────────────────────────────────────────────╯
+╭─────────────────────  ✓ Build complete  ──────────────────────────╮
+│  Duration  4m18s                                                  │
+│      Cost  $0.64                                                  │
+│     Tools  11                                                     │
+│    Tokens  8.3k (cache 91.5k) in · 4.0k out                       │
+│                                                                   │
+│  Cost    █████░░░░░░░░░░░░░░░░░░░  $0.64 / $2.00   32%            │
+│  Context ████████████░░░░░░░░░░░░  91.5k / 200.0k  46%            │
+│                                                                   │
+│  ● planning  ● implementing  ● reviewing  ● gate                  │
+│  55s         2m34s           48s          1s                      │
+│                                                                   │
+│  🔗 https://github.com/you/repo/pull/42                           │
+╰───────────────────────────────────────────────────────────────────╯
 ```
 
 If the plan needs adjustment, refuse and resume with feedback:
@@ -134,10 +147,10 @@ flowchart TB
     ROUTING --> FEATART
     GIT --> GH
 
-    classDef user fill:#f9c,stroke:#333,stroke-width:2px
-    classDef data fill:#ffe082,stroke:#333
-    classDef md fill:#b3e5fc,stroke:#333
-    classDef ext fill:#c8e6c9,stroke:#333
+    classDef user fill:#f9c,stroke:#333,stroke-width:2px,color:#000
+    classDef data fill:#ffe082,stroke:#333,color:#000
+    classDef md fill:#b3e5fc,stroke:#333,color:#000
+    classDef ext fill:#c8e6c9,stroke:#333,color:#000
     class YOU user
     class STATE,FEATART data
     class AGENTS,SKILLS md
