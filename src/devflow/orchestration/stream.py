@@ -20,13 +20,13 @@ __all__ = [
 # Icons for common Claude Code tools.
 TOOL_ICONS: dict[str, str] = {
     "Read": "📖",
-    "Write": "✏️",
-    "Edit": "✏️",
-    "Bash": "⚡",
+    "Write": "📝",
+    "Edit": "📝",
+    "Bash": "💻",
     "Grep": "🔍",
     "Glob": "🔍",
     "Task": "🤖",
-    "TodoWrite": "✅",
+    "TodoWrite": "📋",
     "WebFetch": "🌐",
     "WebSearch": "🌐",
 }
