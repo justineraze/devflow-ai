@@ -9,11 +9,8 @@ import pytest
 
 from devflow.core.artifacts import write_artifact
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord
-from devflow.orchestration.model_routing import (
-    PHASE_MODELS,
-    SMALL_DIFF_THRESHOLD,
-    resolve_model,
-)
+from devflow.core.phases import get_spec
+from devflow.orchestration.model_routing import SMALL_DIFF_THRESHOLD, resolve_model
 
 
 @pytest.fixture
@@ -40,12 +37,13 @@ class TestResolutionOrder:
     def test_default_when_no_override_and_no_artifact(self, project_dir: Path) -> None:
         feature = _make_feature()
         phase = PhaseRecord(name="architecture")
-        assert resolve_model(feature, phase) == PHASE_MODELS["architecture"]
+        assert resolve_model(feature, phase) == get_spec("architecture").model_default
 
-    def test_unknown_phase_falls_back_to_default(self, project_dir: Path) -> None:
-        feature = _make_feature()
-        phase = PhaseRecord(name="unknown")
-        assert resolve_model(feature, phase) == "sonnet"
+    def test_unknown_phase_name_is_rejected_at_construction(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PhaseRecord(name="unknown")
 
 
 class TestFixingSelector:
@@ -74,12 +72,12 @@ class TestFixingSelector:
         ])
         feature = _make_feature()
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == PHASE_MODELS["fixing"]
+        assert resolve_model(feature, phase) == get_spec("fixing").model_default
 
     def test_sonnet_when_no_gate_artifact(self, project_dir: Path) -> None:
         feature = _make_feature()
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == PHASE_MODELS["fixing"]
+        assert resolve_model(feature, phase) == get_spec("fixing").model_default
 
     def test_sonnet_when_no_failing_checks(self, project_dir: Path) -> None:
         self._write_gate("feat-001", project_dir, [
@@ -87,7 +85,7 @@ class TestFixingSelector:
         ])
         feature = _make_feature()
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == PHASE_MODELS["fixing"]
+        assert resolve_model(feature, phase) == get_spec("fixing").model_default
 
 
 class TestReviewingSelector:

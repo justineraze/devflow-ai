@@ -18,18 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from devflow.core.artifacts import read_artifact
-from devflow.core.models import Feature, PhaseRecord
+from devflow.core.models import Feature, PhaseName, PhaseRecord
+from devflow.core.phases import UnknownPhase, get_spec
 
 DEFAULT_MODEL = "sonnet"
-
-PHASE_MODELS: dict[str, str] = {
-    "architecture": "opus",
-    "planning":     "opus",
-    "plan_review":  "sonnet",
-    "implementing": "sonnet",
-    "fixing":       "sonnet",
-    "reviewing":    "opus",
-}
 
 # Gate checks that are cheap, mechanical fixes (lint/format/secret
 # patterns). When *all* failing checks are in this set, Haiku handles
@@ -83,9 +75,9 @@ def _select_for_reviewing(feature_id: str, base: Path | None) -> str | None:
     return None
 
 
-PHASE_SELECTORS: dict[str, Selector] = {
-    "fixing": _select_for_fixing,
-    "reviewing": _select_for_reviewing,
+PHASE_SELECTORS: dict[PhaseName, Selector] = {
+    PhaseName.FIXING: _select_for_fixing,
+    PhaseName.REVIEWING: _select_for_reviewing,
 }
 
 
@@ -104,4 +96,7 @@ def resolve_model(
         if override:
             return override
 
-    return PHASE_MODELS.get(phase.name, DEFAULT_MODEL)
+    try:
+        return get_spec(phase.name).model_default
+    except UnknownPhase:
+        return DEFAULT_MODEL

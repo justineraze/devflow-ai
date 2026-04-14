@@ -9,9 +9,8 @@ from pathlib import Path
 from devflow.core.artifacts import context_deps_for, load_phase_output
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, PhaseRecord, PhaseStatus
-from devflow.orchestration.model_routing import (
-    resolve_model,
-)
+from devflow.core.phases import UnknownPhase, get_spec
+from devflow.orchestration.model_routing import resolve_model
 from devflow.ui.console import console
 
 # Where agents and skills live after `devflow install`.
@@ -24,16 +23,6 @@ BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
 
 # Skills always injected on every phase.
 ALWAYS_ON_SKILLS: tuple[str, ...] = ("context-discipline",)
-
-# Skills injected per phase, on top of ALWAYS_ON_SKILLS.
-PHASE_SKILLS: dict[str, tuple[str, ...]] = {
-    "architecture": ("planning-rigor",),
-    "planning":     ("planning-rigor",),
-    "plan_review":  ("code-review", "planning-rigor"),
-    "implementing": ("incremental-build", "tdd-discipline"),
-    "fixing":       ("incremental-build", "tdd-discipline"),
-    "reviewing":    ("code-review", "refactor-first"),
-}
 
 # Hard ceiling for a single Claude phase. 30 minutes covers planning
 # and implementing on large features; anything past that is almost
@@ -79,7 +68,11 @@ def _load_agent_prompt(agent_name: str) -> str:
 
 def _load_skills_for_phase(phase_name: str) -> str:
     """Load and concatenate skill .md files relevant to a phase."""
-    skill_names = list(ALWAYS_ON_SKILLS) + list(PHASE_SKILLS.get(phase_name, ()))
+    try:
+        phase_skills = get_spec(phase_name).skills
+    except UnknownPhase:
+        phase_skills = ()
+    skill_names = list(ALWAYS_ON_SKILLS) + list(phase_skills)
     sections = []
     for name in skill_names:
         content = _load_md_content(_find_skill_file(name))
@@ -209,58 +202,11 @@ def build_prompt(
 
 
 def _get_phase_instructions(phase_name: str) -> str:
-    """Return specific instructions depending on the phase type."""
-    instructions: dict[str, str] = {
-        "architecture": (
-            "## Instructions\n\n"
-            "Analyze the feature scope and produce architectural decisions.\n"
-            "Output your analysis in the format specified in your agent instructions.\n"
-            "Focus on module boundaries, dependency impact, and data flow."
-        ),
-        "planning": (
-            "## Instructions\n\n"
-            "Create a step-by-step implementation plan for this feature.\n"
-            "Output your plan in the structured format from your agent instructions.\n"
-            "Each step must name the exact file and what to change."
-        ),
-        "plan_review": (
-            "## Instructions\n\n"
-            "Review the plan from the planning phase.\n"
-            "Check for completeness, risks, and missing test coverage.\n"
-            "Output APPROVE or REQUEST_CHANGES with specific feedback."
-        ),
-        "implementing": (
-            "## Instructions\n\n"
-            "Implement the plan step by step.\n"
-            "Follow the plan exactly — one step at a time.\n"
-            "Write tests alongside the code.\n"
-            "Run ruff and pytest after each change.\n\n"
-            "**IMPORTANT — Commits atomiques obligatoires:**\n"
-            "After completing each plan step, you MUST run:\n"
-            "  git add -A && git commit -m 'feat: <short description of step>'\n"
-            "Do NOT batch multiple steps into a single commit.\n"
-            "Each commit = one plan step, verified green (ruff + pytest pass)."
-        ),
-        "reviewing": (
-            "## Instructions\n\n"
-            "Review the implementation changes.\n"
-            "Run: git diff to see all changes made during implementation.\n"
-            "Check against the plan, look for bugs, security issues, and "
-            "convention violations.\n"
-            "Output your review in the structured format from your agent "
-            "instructions."
-        ),
-        "fixing": (
-            "## Instructions\n\n"
-            "Address the review feedback from the reviewing phase.\n"
-            "Fix each issue flagged as critical or warning.\n"
-            "Run tests after each fix.\n\n"
-            "**Commit each fix separately:**\n"
-            "  git add -A && git commit -m 'fix: <short description>'\n"
-            "Do NOT batch multiple fixes into one commit."
-        ),
-    }
-    return instructions.get(phase_name, "")
+    """Return the instructions string for *phase_name*."""
+    try:
+        return get_spec(phase_name).instructions
+    except UnknownPhase:
+        return ""
 
 
 def execute_phase(

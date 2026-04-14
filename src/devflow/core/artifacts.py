@@ -61,20 +61,11 @@ def load_phase_output(
     return read_artifact(feature_id, f"{phase_name}.md", base)
 
 
-# Which previous phases each phase needs as context. Keeping this narrow
-# is the whole point: reviewing doesn't need architecture's exploration
-# output, fixing only needs the review findings, gate needs nothing.
-PHASE_CONTEXT_DEPS: dict[str, tuple[str, ...]] = {
-    "architecture": (),
-    "planning": ("architecture",),
-    "plan_review": ("planning",),
-    "implementing": ("planning",),
-    "reviewing": ("planning",),
-    "fixing": ("reviewing",),
-    "gate": (),
-}
-
-
 def context_deps_for(phase_name: str) -> tuple[str, ...]:
     """Return the phase names whose outputs should be injected as context."""
-    return PHASE_CONTEXT_DEPS.get(phase_name, ())
+    from devflow.core.phases import UnknownPhase, get_spec
+
+    try:
+        return tuple(dep.value for dep in get_spec(phase_name).context_deps)
+    except UnknownPhase:
+        return ()
