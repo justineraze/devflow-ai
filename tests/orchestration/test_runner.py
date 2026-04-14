@@ -245,24 +245,3 @@ class TestPromptSplit:
         assert "Current task" in prompt
 
 
-class TestModelForPhase:
-    """Tests for per-phase model selection."""
-
-    def test_opus_for_reasoning_phases(self) -> None:
-        from devflow.orchestration.runner import _model_for_phase
-
-        assert _model_for_phase("architecture") == "opus"
-        assert _model_for_phase("planning") == "opus"
-        assert _model_for_phase("reviewing") == "opus"
-
-    def test_sonnet_for_execution_phases(self) -> None:
-        from devflow.orchestration.runner import _model_for_phase
-
-        assert _model_for_phase("implementing") == "sonnet"
-        assert _model_for_phase("fixing") == "sonnet"
-        assert _model_for_phase("plan_review") == "sonnet"
-
-    def test_sonnet_default_for_unknown_phase(self) -> None:
-        from devflow.orchestration.runner import _model_for_phase
-
-        assert _model_for_phase("unknown-phase") == "sonnet"

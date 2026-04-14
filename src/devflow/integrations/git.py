@@ -5,11 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from rich.console import Console
-
-from devflow.core.models import Feature
-
-console = Console()
+from devflow.core.models import Feature, PhaseStatus
+from devflow.ui.console import console
 
 # Max length for PR titles and commit summaries (Conventional Commits best practice).
 _MAX_LEN = 70
@@ -227,7 +224,7 @@ def _build_pr_body(feature: Feature) -> str:
     parts = ["## Summary", "", feature.description, ""]
 
     for phase in feature.phases:
-        if phase.status.value != "done" or not phase.output:
+        if phase.status != PhaseStatus.DONE or not phase.output:
             continue
         if phase.name == "planning":
             parts.extend(["## Plan", "", phase.output, ""])

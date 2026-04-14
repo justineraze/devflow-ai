@@ -11,6 +11,7 @@ from devflow.core.models import (
     Feature,
     PhaseDefinition,
     PhaseRecord,
+    PhaseStatus,
     WorkflowDefinition,
     WorkflowState,
 )
@@ -128,7 +129,7 @@ def advance_phase(feature: Feature) -> PhaseRecord | None:
     Returns the started PhaseRecord, or None if all phases are done.
     """
     for phase in feature.phases:
-        if phase.status.value == "pending":
+        if phase.status == PhaseStatus.PENDING:
             phase.start()
             return phase
     return None

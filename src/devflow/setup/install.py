@@ -5,9 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from rich.console import Console
-
-console = Console()
+from devflow.ui.console import console
 
 # Package assets directory (relative to this file).
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"

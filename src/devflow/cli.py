@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
-from rich.console import Console
 
 from devflow.core.track import get_feature, get_state, list_all_features
+from devflow.ui.console import console
 from devflow.ui.display import (
     render_feature_detail,
     render_header,
@@ -21,7 +21,6 @@ app = typer.Typer(
     help="CLI that installs and orchestrates an AI dev environment for Claude Code.",
     no_args_is_help=True,
 )
-console = Console()
 
 
 @app.command()

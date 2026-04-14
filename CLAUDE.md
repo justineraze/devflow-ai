@@ -89,12 +89,13 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
     │   │   ├── install.py              — sync assets vers ~/.claude/
     │   │   └── doctor.py               — checks de santé
     │   └── ui/
-    │       └── display.py              — composants Rich
+    │       ├── display.py              — composants Rich (status, log, listings)
+    │       └── rendering.py            — banner, phase chip, gate panel, summary
     ├── assets/
     │   ├── agents/                     — 9 agents (.md)
     │   └── skills/                     — 8 skills (.md)
     ├── workflows/                      — 4 YAML (quick / light / standard / full)
-    ├── tests/                          — mirror de src/devflow/ (~235 tests)
+    ├── tests/                          — mirror de src/devflow/ (~250 tests)
     └── pyproject.toml
 
 ## Artefacts par feature (.devflow/<feat-id>/)

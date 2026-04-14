@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
-
-console = Console()
+from devflow.ui.console import console
 
 # Status colors for visual feedback.
 STATUS_COLORS: dict[str, str] = {

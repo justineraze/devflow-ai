@@ -6,13 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 from devflow.integrations.gate import CheckResult, GateReport
-
-console = Console()
+from devflow.ui.console import console
 
 # Alias for clarity — doctor uses the same report structure as gate.
 DoctorReport = GateReport

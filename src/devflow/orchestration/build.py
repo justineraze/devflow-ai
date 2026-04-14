@@ -7,10 +7,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.core.workflow import (
     advance_phase,
@@ -19,8 +19,7 @@ from devflow.core.workflow import (
     load_workflow,
     save_state,
 )
-
-console = Console()
+from devflow.ui.console import console
 
 # Map workflow phase names to feature status transitions.
 PHASE_TO_STATUS: dict[str, FeatureStatus] = {
@@ -56,15 +55,6 @@ def _transition_safe(feature: Feature, target: FeatureStatus) -> bool:
         return True
     except Exception:
         return False
-
-
-def _format_duration(seconds: float) -> str:
-    """Format seconds as human-readable duration."""
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    return f"{minutes}m{secs:02d}s"
 
 
 def _get_phase_agent(
@@ -152,10 +142,7 @@ def _recover_failed_feature(feature: Feature) -> None:
     """
     for phase in reversed(feature.phases):
         if phase.status == PhaseStatus.FAILED:
-            phase.status = PhaseStatus.PENDING
-            phase.started_at = None
-            phase.completed_at = None
-            phase.error = ""
+            phase.reset()
 
             # Reset to PENDING, then walk forward through done phases.
             feature.status = FeatureStatus.PENDING
@@ -293,10 +280,7 @@ def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
         return
     for phase in feature.phases:
         if phase.name in ("architecture", "planning", "plan_review"):
-            phase.status = PhaseStatus.PENDING
-            phase.started_at = None
-            phase.completed_at = None
-            phase.output = ""
+            phase.reset()
     feature.status = FeatureStatus.PENDING
     save_state(state, base)
 
@@ -306,7 +290,7 @@ def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
 
 def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
-):
+) -> tuple[bool, str, PhaseMetrics]:
     """Execute a single phase via Claude Code or local gate.
 
     Returns ``(success, output, metrics)`` — metrics is a blank
@@ -384,17 +368,9 @@ def _setup_gate_retry(
         gate_idx = feature.phases.index(gate_phase)
         feature.phases.insert(gate_idx, fixing_phase)
     else:
-        fixing_phase.status = PhaseStatus.PENDING
-        fixing_phase.started_at = None
-        fixing_phase.completed_at = None
-        fixing_phase.output = ""
-        fixing_phase.error = ""
+        fixing_phase.reset()
 
-    gate_phase.status = PhaseStatus.PENDING
-    gate_phase.started_at = None
-    gate_phase.completed_at = None
-    gate_phase.output = ""
-    gate_phase.error = ""
+    gate_phase.reset()
 
     feature.metadata["gate_retry"] = attempts + 1
     # GATE → FIXING is a valid transition; keeps the state machine honest.
@@ -480,8 +456,7 @@ def execute_build_loop(
             if tracked:
                 for p in tracked.phases:
                     if p.name == phase.name and p.status == PhaseStatus.IN_PROGRESS:
-                        p.status = PhaseStatus.PENDING
-                        p.started_at = None
+                        p.reset()
                         break
                 save_state(state, base)
             break
