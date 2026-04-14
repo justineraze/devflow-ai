@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from devflow.orchestration.sync import DirtyWorktreeError, SyncResult, run_sync
-
+from devflow.orchestration.sync import DirtyWorktreeError, run_sync
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -18,13 +18,12 @@ from devflow.orchestration.sync import DirtyWorktreeError, SyncResult, run_sync
 def _make_state(tmp_path: Path, features: list[dict]) -> None:
     """Write a minimal state.json with the given features list."""
     import json
-
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     devflow = tmp_path / ".devflow"
     devflow.mkdir(exist_ok=True)
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     feat_dict = {}
     for f in features:
         fid = f["id"]
@@ -181,9 +180,9 @@ def test_sync_refuses_dirty_worktree(tmp_path: Path) -> None:
         patch("devflow.integrations.git.is_worktree_dirty", return_value=True),
         patch("devflow.integrations.git.switch_and_pull_main") as mock_pull,
         patch("devflow.integrations.git.fetch_prune") as mock_fetch,
+        pytest.raises(DirtyWorktreeError),
     ):
-        with pytest.raises(DirtyWorktreeError):
-            run_sync(project_root=tmp_path)
+        run_sync(project_root=tmp_path)
 
     mock_pull.assert_not_called()
     mock_fetch.assert_not_called()

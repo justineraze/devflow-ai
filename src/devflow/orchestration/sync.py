@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -127,10 +128,9 @@ def run_sync(
                 if dry_run:
                     result.actions.append(f"would archive feature: {feat.id}")
                 else:
-                    try:
+                    # Artifacts may already be gone — still mark archived.
+                    with contextlib.suppress(FileNotFoundError):
                         archive_feature(feat.id, cwd)
-                    except FileNotFoundError:
-                        pass  # Artifacts already gone — still mark archived.
                     feat.metadata["archived"] = True
                     result.actions.append(f"archived feature: {feat.id}")
                 result.features_archived.append(feat.id)
