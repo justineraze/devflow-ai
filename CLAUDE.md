@@ -72,7 +72,9 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
     ├── src/devflow/
     │   ├── cli.py                      — commandes Typer, zéro logique métier
     │   ├── core/                       — état & domaine
-    │   │   ├── models.py               — Pydantic : Feature, WorkflowState, Phase…
+    │   │   ├── models.py               — Pydantic : Feature, PhaseName, PhaseStatus…
+    │   │   ├── phases.py               — registry unifié (PhaseSpec + PHASES)
+    │   │   ├── metrics.py              — DTOs PhaseMetrics / ToolUse
     │   │   ├── workflow.py             — chargement YAML + persistance state.json
     │   │   ├── track.py                — lecture/écriture state (haut niveau)
     │   │   └── artifacts.py            — I/O atomique sur .devflow/<feat-id>/

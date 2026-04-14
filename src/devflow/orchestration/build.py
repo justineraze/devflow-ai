@@ -12,6 +12,7 @@ from rich.panel import Panel
 
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
+from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import (
     advance_phase,
     create_feature,
@@ -20,17 +21,6 @@ from devflow.core.workflow import (
     save_state,
 )
 from devflow.ui.console import console
-
-# Map workflow phase names to feature status transitions.
-PHASE_TO_STATUS: dict[str, FeatureStatus] = {
-    "architecture": FeatureStatus.PLANNING,
-    "planning": FeatureStatus.PLANNING,
-    "plan_review": FeatureStatus.PLAN_REVIEW,
-    "implementing": FeatureStatus.IMPLEMENTING,
-    "reviewing": FeatureStatus.REVIEWING,
-    "fixing": FeatureStatus.FIXING,
-    "gate": FeatureStatus.GATE,
-}
 
 # Stack → specialized developer agent.
 _STACK_AGENT_MAP: dict[str, str] = {
@@ -151,9 +141,7 @@ def _recover_failed_feature(feature: Feature) -> None:
                 if p.name == phase.name:
                     break
                 if p.status == PhaseStatus.DONE:
-                    t = PHASE_TO_STATUS.get(p.name)
-                    if t:
-                        _transition_safe(feature, t)
+                    _transition_safe(feature, get_spec(p.name).feature_status)
             return
 
 
@@ -225,7 +213,10 @@ def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
         save_state(state, base)
         return None
 
-    target_status = PHASE_TO_STATUS.get(phase.name)
+    try:
+        target_status = get_spec(phase.name).feature_status
+    except UnknownPhase:
+        target_status = None
     if target_status and tracked.status != target_status:
         _transition_safe(tracked, target_status)
 

@@ -19,6 +19,18 @@ class PhaseStatus(StrEnum):
     FAILED = "failed"
 
 
+class PhaseName(StrEnum):
+    """Canonical phase identifiers, listed in workflow execution order."""
+
+    ARCHITECTURE = "architecture"
+    PLANNING = "planning"
+    PLAN_REVIEW = "plan_review"
+    IMPLEMENTING = "implementing"
+    REVIEWING = "reviewing"
+    FIXING = "fixing"
+    GATE = "gate"
+
+
 class FeatureStatus(StrEnum):
     """Lifecycle status of a feature."""
 
@@ -116,7 +128,7 @@ class InvalidTransition(Exception):
 class PhaseRecord(BaseModel):
     """Record of a single phase execution within a feature."""
 
-    name: str
+    name: PhaseName
     status: PhaseStatus = PhaseStatus.PENDING
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -205,7 +217,7 @@ class WorkflowState(BaseModel):
 class PhaseDefinition(BaseModel):
     """Definition of a phase in a workflow YAML file."""
 
-    name: str
+    name: PhaseName
     agent: str = ""
     description: str = ""
     required: bool = True
