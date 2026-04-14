@@ -1,86 +1,94 @@
 # devflow-ai
 
-> CLI that installs and orchestrates an AI development environment for Claude Code.
+> State machine, quality gate, and cost tracking for Claude Code — so you ship features, not prompts.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org)
-
-devflow-ai doesn't reinvent Claude Code — it provides what Claude Code can't do natively: **persistent state**, **state machine**, **project tracking**, **automated quality gates**, **artifact-aware context sharing**, and **cost-aware model routing**.
-
----
-
-## Prerequisites
-
-- [Python 3.11+](https://www.python.org)
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `claude` CLI
-- [GitHub CLI](https://cli.github.com/) — `gh` (for PR creation)
-
-```bash
-devflow doctor                  # check your setup
-```
-
-## Quickstart
-
-```bash
-uv tool install devflow-ai      # install globally
-
-devflow install                 # sync agents & skills to ~/.claude/
-devflow init                    # detect stack + initialize project
-devflow build "Add user auth"   # plan → review → implement → PR
-devflow fix "Fix login bug"     # quick fix (no planning phase)
-devflow check                   # run quality gate
-devflow status                  # see what's in progress
-```
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-260%2B-brightgreen.svg)](tests/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 ---
 
-## How a build looks
+## The problem
+
+Claude Code is powerful but stateless. Every session starts from scratch — you re-explain context, manually run quality checks, copy-paste the PR description, and guess what it cost. There is no persistent state between sessions, no automated gate that blocks bad code, no automatic PR generation, and no cost tracking. If the agent breaks partway through, there is no recovery path.
+
+You end up managing the process instead of reviewing the output.
+
+---
+
+## What devflow gives you
+
+- **Persistent state** — features survive crashes, context switches, and new sessions. Resume exactly where you left off with `--resume`.
+- **40–55% cost reduction** — artifact-based context sharing (each phase loads only the artifacts it needs) combined with automatic model routing (Haiku for trivial gate fixes, Sonnet/Opus where it matters).
+- **Parallel quality gate** — ruff, pytest, and secrets scan run in parallel on every build. Gate failure triggers one targeted fix attempt before surfacing to you.
+- **Auto-retry on gate failure** — structured `gate.json` (rule codes, tracebacks, secret matches) is injected into the fixing phase, not free-form text. Fixes are targeted, not guessed.
+- **Plan-first flow** — you review and approve the plan before code is touched. Reject with feedback to steer the plan without losing context.
+- **Automatic PR** — branch created, commits atomic, PR opened via `gh` with the plan as description.
+- **260+ tests** — the engine is tested, not trusted.
+
+---
+
+## Demo
 
 ```
 $ devflow build "Add caching layer"
 
-devflow build — Add caching layer
-feat-add-caching-layer-0413 | workflow: standard | 4 phases
-branch: feat/feat-add-caching-layer-0413
+────────────────────────────────────────────────────────────────────
+Add caching layer
+feat-add-caching-layer-0414  ·  🐍 python  ·  standard  ·  4 phases
+🌿 feat/feat-add-caching-layer-0414
+────────────────────────────────────────────────────────────────────
 
-Phase 1/4: planning... ✓ (1m12s)
+▶ phase 1/4 · planning    opus
+  📖  Read      src/cache.py
+  ⚡  Bash      git log --oneline -10
+  ✓ planning   55s   2 tools   5 in (cache 51.5k) / 1.6k out   $0.25
 
-╭─── Plan proposé ─────────────────────────────────────────╮
-│ Plan: feat-add-caching-layer-0413                        │
-│ Scope: new-feature, medium complexity                    │
-│ Affected files: 3                                        │
-│ Steps: 6                                                 │
-│ ...                                                      │
-╰──────────────────────────────────────────────────────────╯
-
+╭─── Plan proposé ──────────────────────────────────────────────────╮
+│ Scope: new-feature · medium · 3 files · 6 steps                   │
+╰───────────────────────────────────────────────────────────────────╯
 Lancer l'implémentation ? [Y/n] y
 
-Phase 2/4: implementing...
-  📖 Read: models.py
-  ✏️ Edit: cache.py
-  ⚡ Bash: pytest tests/test_cache.py
-  ⚡ Bash: git commit -m "feat: add Cache class"
-  → 8 tools | 5.2k in / 1.8k out | 18¢
- ✓ (2m34s)
+▶ phase 2/4 · implementing    sonnet
+  📖  Read      src/cache.py
+  📝  Edit      src/cache.py
+  ⚡  Bash      pytest tests/test_cache.py
+  ⚡  Bash      git commit -m "feat: add Cache class"
+  ✓ implementing   2m34s   8 tools   5.2k in (cache 18k) / 1.8k out   $0.18
 
-Phase 3/4: reviewing... ✓ (48s)
-Phase 4/4: gate... ✓ (1s)
-  ✓ ruff: No lint issues  ✓ pytest: 174 passed  ✓ secrets: clean
+▶ phase 3/4 · reviewing    sonnet
+  ⚡  Bash      git diff HEAD~1 -- src/cache.py
+  ✓ reviewing   48s   1 tool   3.1k in (cache 22k) / 0.6k out   $0.21
 
-✓ Feature complete [4/4]
-PR: https://github.com/you/repo/pull/42
+▶ phase 4/4 · gate    sonnet
+╭───────────────────────  Gate — PASSED  ───────────────────────────╮
+│   ✓  ruff      No issues                                          │
+│   ✓  pytest    174 passed                                         │
+│   ✓  secrets   clean                                              │
+╰───────────────────────────────────────────────────────────────────╯
+
+╭─────────────────────  ✓ Build complete  ──────────────────────────╮
+│  Duration  4m18s                                                  │
+│      Cost  $0.64                                                  │
+│     Tools  11                                                     │
+│    Tokens  8.3k (cache 91.5k) in · 4.0k out                       │
+│                                                                   │
+│  Cost    █████░░░░░░░░░░░░░░░░░░░  $0.64 / $2.00   32%            │
+│  Context ████████████░░░░░░░░░░░░  91.5k / 200.0k  46%            │
+│                                                                   │
+│  ● planning  ● implementing  ● reviewing  ● gate                  │
+│  55s         2m34s           48s          1s                      │
+│                                                                   │
+│  🔗 https://github.com/you/repo/pull/42                           │
+╰───────────────────────────────────────────────────────────────────╯
 ```
 
-The plan-first flow lets you review and approve before code is touched.
-If the plan needs tweaks, refuse with `n` and resume with feedback:
+If the plan needs adjustment, refuse and resume with feedback:
 
 ```bash
 devflow build "use Redis instead of in-memory" --resume feat-add-caching-layer-0413
 ```
-
-Each phase shows live tool usage and token cost. Auto-commit after each
-implementation slice. PR created automatically with the plan as description.
 
 ---
 
@@ -139,25 +147,31 @@ flowchart TB
     ROUTING --> FEATART
     GIT --> GH
 
-    classDef user fill:#f9c,stroke:#333,stroke-width:2px
-    classDef data fill:#ffe082,stroke:#333
-    classDef md fill:#b3e5fc,stroke:#333
-    classDef ext fill:#c8e6c9,stroke:#333
+    classDef user fill:#f9c,stroke:#333,stroke-width:2px,color:#000
+    classDef data fill:#ffe082,stroke:#333,color:#000
+    classDef md fill:#b3e5fc,stroke:#333,color:#000
+    classDef ext fill:#c8e6c9,stroke:#333,color:#000
     class YOU user
     class STATE,FEATART data
     class AGENTS,SKILLS md
     class CLAUDE,GH ext
 ```
 
-**The split:** Python handles what must be programmatic (state, validation, automation). Markdown handles what must be flexible (agent behavior, instructions, prompts).
+Python handles what must be programmatic — state persistence, validated transitions, gate automation, cost tracking. Markdown handles what must be flexible — agent behavior, skill instructions, phase prompts. Neither leaks into the other.
 
-**Per-feature artifacts.** Every phase output lives on disk under `.devflow/<feat-id>/` — `planning.md`, `reviewing.md`, `gate.json`, `files.json`. Downstream phases load only the artifacts they depend on (selective injection), keeping the user prompt compact and stable enough for prompt caching. No more concatenating every previous phase's output.
+---
+
+## Under the hood
+
+- **State machine with validated transitions** — `InvalidTransition` is raised on any illegal move. State persists to `.devflow/state.json` via atomic tmp + rename before every phase change. `FAILED` is recoverable; `DONE` is the only terminal state.
+- **Prompt caching via `--system-prompt`** — agents and skills are passed as a stable system prompt, not injected into the user turn. Cache hit rate stays high across retries and resumes.
+- **Artifact-based context sharing** — each phase declares its dependencies in `PHASE_CONTEXT_DEPS`. The runner loads exactly those artifacts (e.g. implementing gets `planning.md`; fixing gets `gate.json`). No full history concatenation, no stale context.
+- **Artifact-aware model routing** — `model_routing.py` inspects `gate.json` and `files.json` before selecting a model tier. A fixing phase with only ruff errors routes to Haiku. A reviewing phase touching `auth/` or `crypto/` stays on Opus. Resolution order: YAML override → artifact selector → per-phase default.
+- **Unified `PhaseSpec` registry** — all phases (name, model default, skills, artifact deps, prompt template) are declared once in `phases.py`. Workflows compose phases by name. No per-phase branching scattered across the codebase.
 
 ---
 
 ## Workflows
-
-Four built-in workflows, from fast to thorough:
 
 | Workflow | Phases | Use case |
 |----------|--------|----------|
@@ -168,103 +182,25 @@ Four built-in workflows, from fast to thorough:
 
 ```bash
 devflow build "Add caching layer" --workflow full
-devflow fix "Fix timezone bug"    # uses quick automatically
+devflow fix "Fix timezone bug"    # quick workflow
 ```
-
-### Cost-aware model routing
-
-Each phase picks the cheapest Claude tier that fits the task. Resolution
-order, first hit wins:
-
-1. **YAML override** — set `model: opus` on any phase in a workflow `.yaml`.
-2. **Artifact-aware selector** — inspects `gate.json` or `files.json` and
-   downgrades when the work is trivial.
-3. **Per-phase default** — sensible Opus/Sonnet baseline.
-
-| Phase | Default | Downgrade rule |
-|-------|---------|----------------|
-| `architecture`, `planning` | Opus | — |
-| `reviewing` | Opus | → **Sonnet** if diff < 50 lines and no critical path touched |
-| `fixing` | Sonnet | → **Haiku** if `gate.json` only fails on ruff/biome/pint/secrets |
-| `plan_review`, `implementing` | Sonnet | — |
-| `gate` | (local) | No Claude involved — ruff/pytest/secrets in parallel |
-
-Critical paths (`auth`, `secret`, `token`, `crypto`, `payment`, `billing`, `password`) never trigger a reviewing downgrade. Combined with prompt caching and selective context injection, typical savings are **40-55% per feature** versus running everything on Opus.
-
-### Automatic gate recovery
-
-When the quality gate fails, devflow doesn't kill the build. It reroutes once through a focused fixing phase that receives the **structured** `gate.json` (ruff rule codes, pytest tracebacks, secret matches) instead of free-form text — so the fix is targeted, not guessed. After fixing, gate runs again; if it still fails, the feature moves to `FAILED` and you resume manually.
-
----
-
-## State machine
-
-Every feature follows a lifecycle with validated transitions:
-
-```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> pending
-    pending --> planning : build
-    pending --> implementing : fix
-
-    planning --> plan_review
-    plan_review --> implementing
-    implementing --> reviewing
-    reviewing --> fixing : issues
-    reviewing --> gate : clean
-    fixing --> gate
-    gate --> done : pass
-    gate --> fixing : fail
-    done --> [*]
-
-    note left of pending
-      failed → retry from last phase
-      blocked → waiting on user
-    end note
-```
-
-Invalid transitions raise `InvalidTransition`. State persists to `.devflow/state.json` before every phase change (crash-safe via tmp + rename).
-
----
-
-## Agents
-
-9 specialized agents installed to `~/.claude/agents/`:
-
-| | Agent | Role |
-|-|-------|------|
-| **Planning** | `architect` | System design, module boundaries, dependency graphs |
-| | `planner` | Step-by-step plans with risk assessment |
-| **Implementation** | `developer` | Base rules: git workflow, architecture, error handling |
-| | `developer-python` | Pydantic v2, typing, pytest, crash-safe I/O |
-| | `developer-typescript` | Strict types, Zod, ESM, discriminated unions |
-| | `developer-php` | PHP 8.2+, Laravel patterns, Pest, PHPStan |
-| | `developer-frontend` | React/Next.js, CSS modules, a11y, performance |
-| **Quality** | `reviewer` | 5-pass review: plan, correctness, security, quality, tests |
-| | `tester` | Quality gate, coverage analysis, edge case audit |
-
-Each agent has deep behavioral instructions with code examples, anti-patterns, output formats, and constraints. Not generic prompts — real engineering standards.
 
 ---
 
 ## Skills
 
-8 skills injected into prompts based on the phase. Skills encode discipline
-(how the agent should behave) separately from role (agent .md files).
+8 skills injected into prompts based on the phase:
 
 | Skill | Injected on | Purpose |
 |-------|-------------|---------|
-| **context-discipline** | every phase | Strict rules to prevent over-exploration and token waste |
-| **planning-rigor** | planning, architecture | Rigorous plans with named files, tests, quality audit |
-| **refactor-first** | reviewing | Refactor dirty code instead of shipping patches — scoped here where "patch or refactor?" is actually decided |
-| **incremental-build** | implementing, fixing | Thin vertical slices, commit per step, verify-then-next |
-| **tdd-discipline** | implementing, fixing | Tests alongside code, not after |
-| **code-review** | reviewing, plan_review | 5-pass review catching patches and quality issues |
-| **build** | devflow-specific | How the build loop orchestrates phases |
-| **check** | devflow-specific | Quality gate checklist |
-
-Skills per phase are kept narrow on purpose — each skill adds ~100 lines to the system prompt and fragments the prompt cache.
+| `context-discipline` | every phase | Prevent over-exploration and token waste |
+| `planning-rigor` | planning, architecture | Plans with named files, tests, risk assessment |
+| `incremental-build` | implementing, fixing | Thin vertical slices, commit per step |
+| `tdd-discipline` | implementing, fixing | Tests alongside code, not after |
+| `refactor-first` | reviewing | Refactor dirty code instead of patching |
+| `code-review` | reviewing, plan_review | 5-pass review |
+| `build` | devflow phases | Build loop orchestration rules |
+| `check` | gate | Quality gate checklist |
 
 ---
 
@@ -272,26 +208,35 @@ Skills per phase are kept narrow on purpose — each skill adds ~100 lines to th
 
 | Command | Description |
 |---------|-------------|
-| `devflow doctor` | Check installation health (Python, Claude, gh, agents) |
-| `devflow version` | Show devflow version |
+| `devflow doctor` | Check installation health |
 | `devflow install` / `devflow update` | Sync agents and skills to `~/.claude/` |
 | `devflow init` | Detect stack + initialize `.devflow/` |
-| `devflow build "..."` | Build a feature (default: standard workflow) |
-| `devflow build "feedback" --resume feat-001` | Resume with feedback on the plan |
-| `devflow retry feat-001` | Retry the last failed phase without feedback |
-| `devflow fix "..."` | Fix a bug (quick workflow) |
+| `devflow build "..."` | Build a feature (standard workflow by default) |
+| `devflow build "..." --resume feat-001` | Resume with feedback on the plan |
+| `devflow retry feat-001` | Retry the last failed phase |
+| `devflow fix "..."` | Quick fix (no planning phase) |
 | `devflow check` | Run quality gate (ruff + pytest + secrets) |
-| `devflow status` | Show all tracked features |
-| `devflow status feat-001` | Show details for one feature |
-| `devflow log` | Show feature history (status, duration, date) |
-| `devflow log feat-001` | Detailed log for one feature with phase timings |
+| `devflow status [feat-001]` | Show tracked features or one feature detail |
+| `devflow log [feat-001]` | Feature history with phase timings |
 
 ---
 
-## Contributing
+## Prerequisites
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+- Python 3.11+, [uv](https://docs.astral.sh/uv/)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `claude` CLI
+- [GitHub CLI](https://cli.github.com/) — `gh`
+
+```bash
+uv tool install devflow-ai
+devflow install   # sync agents & skills to ~/.claude/
+devflow doctor    # verify setup
+```
+
+---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Built by [Justine Raze](https://github.com/justineraze).
