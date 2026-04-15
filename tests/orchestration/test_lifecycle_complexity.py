@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -65,16 +65,30 @@ class TestStartBuildAutoWorkflow:
         feature = start_build("test", workflow_name="standard", base=project_dir)
         assert feature.metadata.complexity is None
 
-    def test_auto_workflow_logs_to_console(
-        self, project_dir: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """A message is printed showing the auto-selected workflow and score."""
+    def test_auto_workflow_logs_to_console(self, project_dir: Path) -> None:
+        """A message is printed to console — verified by mocking the console object."""
+        from io import StringIO
+
+        from rich.console import Console
+
+        import devflow.orchestration.lifecycle as lifecycle_mod
+
+        buf = StringIO()
+        fake_console = Console(file=buf, force_terminal=False, no_color=True)
+        original = lifecycle_mod.console
+        lifecycle_mod.console = fake_console
+
         mock_score = ComplexityScore(files_touched=1, integrations=0, security=0, scope=0)
-        with patch(
-            "devflow.orchestration.lifecycle.score_complexity",
-            return_value=mock_score,
-        ):
-            start_build("minor fix", workflow_name=None, base=project_dir)
-        # We can't easily capture Rich console output via capsys,
-        # but we at least verify no exception was raised.
-        # A more thorough test would mock the console object itself.
+        try:
+            with patch(
+                "devflow.orchestration.lifecycle.score_complexity",
+                return_value=mock_score,
+            ):
+                start_build("minor fix", workflow_name=None, base=project_dir)
+        finally:
+            lifecycle_mod.console = original
+
+        output = buf.getvalue()
+        assert "Auto-selected workflow" in output
+        assert "quick" in output
+        assert "1/12" in output
