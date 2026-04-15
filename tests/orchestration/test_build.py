@@ -8,16 +8,20 @@ import pytest
 from devflow.core.models import FeatureStatus, PhaseStatus
 from devflow.core.workflow import load_state, save_state
 from devflow.orchestration.build import (
-    _generate_feature_id,
     _get_phase_agent,
-    complete_phase,
     execute_build_loop,
-    fail_phase,
+)
+from devflow.orchestration.lifecycle import (
+    _generate_feature_id,
     resume_build,
     retry_build,
-    run_phase,
     start_build,
     start_fix,
+)
+from devflow.orchestration.phase_exec import (
+    complete_phase,
+    fail_phase,
+    run_phase,
 )
 from devflow.orchestration.stream import PhaseMetrics
 

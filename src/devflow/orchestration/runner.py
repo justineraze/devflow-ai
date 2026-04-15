@@ -292,38 +292,3 @@ def execute_phase(
         return False, "Interrupted by user", PhaseMetrics()
 
 
-def run_gate_phase(
-    base: Path | None = None,
-    stack: str | None = None,
-    feature_id: str | None = None,
-) -> tuple[bool, str, PhaseMetrics]:
-    """Run the gate phase locally (ruff + pytest + secrets).
-
-    When *feature_id* is provided, the structured report is persisted
-    as ``.devflow/<feature_id>/gate.json`` so a follow-up fixing phase
-    can load the exact failures instead of parsing free-form text.
-    Returns ``(passed, summary_text, metrics)`` — metrics is a blank
-    PhaseMetrics since the gate is local and incurs no model cost.
-    """
-    import json
-
-    from devflow.core.artifacts import write_artifact
-    from devflow.core.metrics import PhaseMetrics
-    from devflow.integrations.gate import run_gate
-
-    report = run_gate(base, stack=stack)
-
-    if feature_id:
-        write_artifact(
-            feature_id, "gate.json", json.dumps(report.to_dict(), indent=2), base,
-        )
-
-    lines = []
-    for check in report.checks:
-        icon = "✓" if check.passed else "✗"
-        lines.append(f"{icon} {check.name}: {check.message}")
-        if not check.passed and check.details:
-            for detail in check.details.split("\n")[:10]:
-                lines.append(f"    {detail}")
-
-    return report.passed, "\n".join(lines), PhaseMetrics()

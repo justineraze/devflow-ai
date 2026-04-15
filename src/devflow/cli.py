@@ -81,7 +81,8 @@ def build(
     When resuming with --resume, the description becomes feedback
     on the previous plan (e.g. "no framework detection, just languages").
     """
-    from devflow.orchestration.build import execute_build_loop, resume_build, start_build
+    from devflow.orchestration.build import execute_build_loop
+    from devflow.orchestration.lifecycle import resume_build, start_build
 
     if resume:
         feature = resume_build(resume)
@@ -103,7 +104,8 @@ def retry(
     feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
 ) -> None:
     """Retry a failed feature from its last failed phase."""
-    from devflow.orchestration.build import execute_build_loop, retry_build
+    from devflow.orchestration.build import execute_build_loop
+    from devflow.orchestration.lifecycle import retry_build
 
     feature = retry_build(feature_id)
     if not feature:
@@ -119,7 +121,8 @@ def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
-    from devflow.orchestration.build import execute_build_loop, start_fix
+    from devflow.orchestration.build import execute_build_loop
+    from devflow.orchestration.lifecycle import start_fix
 
     feature = start_fix(description)
     success = execute_build_loop(feature)
