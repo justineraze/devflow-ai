@@ -48,6 +48,9 @@ testpaths = ["tests"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/devflow"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"assets" = "assets"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",

@@ -3,17 +3,38 @@
 from __future__ import annotations
 
 import shutil
+import stat
 from pathlib import Path
 
 from devflow.ui.console import console
 
+
+def _find_assets_dir() -> Path:
+    """Find the assets directory, supporting both editable and wheel installs.
+
+    In editable installs: src/devflow/setup/install.py → parent^4 == repo root
+    In wheel installs: site-packages/devflow/setup/install.py → assets at parent^3
+    """
+    here = Path(__file__).resolve()
+    # Try parent^4 first (editable install), then parent^3 (wheel install)
+    for up in (4, 3):
+        candidate = here.parents[up - 1] / "assets"
+        if candidate.is_dir():
+            return candidate
+    # Fallback to parent^3 if neither is found (development default)
+    return here.parents[3] / "assets"
+
+
 # Package assets directory (relative to this file).
-ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"
+ASSETS_DIR = _find_assets_dir()
 
 # Default Claude Code directories.
 CLAUDE_DIR = Path.home() / ".claude"
 AGENTS_DIR = CLAUDE_DIR / "agents"
 SKILLS_DIR = CLAUDE_DIR / "skills"
+HOOKS_DIR = CLAUDE_DIR / "hooks"
+SETTINGS_FILE = CLAUDE_DIR / "settings.json"
+HOOK_SCRIPT_NAME = "devflow-post-compact.sh"
 
 
 def _sync_directory(
@@ -63,13 +84,65 @@ def install_skills(
     return _sync_directory(src, dst, "skills")
 
 
+def install_hook(
+    source: Path | None = None,
+    settings_file: Path | None = None,
+    hooks_dir: Path | None = None,
+) -> str:
+    """Install the PostCompact hook script and register it in settings.json.
+
+    Copies ``assets/hooks/devflow-post-compact.sh`` to ``hooks_dir``, sets the
+    executable bit, then upserts a ``PostCompact`` entry in ``settings_file``
+    matching by command path (idempotent — no duplicate entries).
+
+    Returns the installed script filename.
+    """
+    from devflow.setup._settings import load_settings, write_settings_atomic
+
+    src = (source or ASSETS_DIR) / "hooks" / HOOK_SCRIPT_NAME
+    dst_dir = hooks_dir or HOOKS_DIR
+    dst = dst_dir / HOOK_SCRIPT_NAME
+    cfg = settings_file or SETTINGS_FILE
+
+    # Copy script.
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    # Ensure it is executable (owner + group + other).
+    current = dst.stat().st_mode
+    dst.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Merge PostCompact entry into settings.json.
+    data, err = load_settings(cfg)
+    if err:
+        raise RuntimeError(
+            f"Refusing to rewrite settings.json: {err}. "
+            "Fix the JSON manually, then re-run `devflow install`."
+        )
+    hook_command = str(dst.resolve())
+
+    hooks_section: dict = data.setdefault("hooks", {})
+    post_compact: list = hooks_section.setdefault("PostCompact", [])
+
+    # Upsert: only add if not already present (match by command path).
+    already_registered = any(
+        entry.get("command") == hook_command
+        for entry in post_compact
+        if isinstance(entry, dict)
+    )
+    if not already_registered:
+        post_compact.append({"type": "command", "command": hook_command})
+
+    write_settings_atomic(cfg, data)
+    return HOOK_SCRIPT_NAME
+
+
 def install_all(
     assets_dir: Path | None = None,
     claude_dir: Path | None = None,
 ) -> dict[str, list[str]]:
-    """Install all agents and skills.
+    """Install all agents, skills and the PostCompact hook.
 
-    Returns dict with 'agents' and 'skills' keys listing installed files.
+    Returns dict with 'agents', 'skills', and 'hook' keys listing installed files.
     """
     base = assets_dir or ASSETS_DIR
     claude = claude_dir or CLAUDE_DIR
@@ -77,6 +150,7 @@ def install_all(
     return {
         "agents": install_agents(base, claude / "agents"),
         "skills": install_skills(base, claude / "skills"),
+        "hook": [install_hook(base, claude / "settings.json", claude / "hooks")],
     }
 
 

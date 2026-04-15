@@ -133,7 +133,7 @@ def check_claude_default_model() -> CheckResult:
     general interactive ``claude`` usage outside devflow. Warn when
     the global default is Opus (expensive).
     """
-    import json
+    from devflow.setup._settings import load_settings
 
     settings = Path.home() / ".claude" / "settings.json"
     if not settings.exists():
@@ -143,13 +143,12 @@ def check_claude_default_model() -> CheckResult:
             message="no settings.json — uses Claude Code default",
         )
 
-    try:
-        data = json.loads(settings.read_text())
-    except json.JSONDecodeError as exc:
+    data, err = load_settings(settings)
+    if err:
         return CheckResult(
             name="claude model",
             passed=False,
-            message=f"invalid settings.json: {exc}",
+            message=f"invalid settings.json: {err}",
         )
 
     model = data.get("model", "")
@@ -177,6 +176,64 @@ def check_claude_default_model() -> CheckResult:
     )
 
 
+def check_hook_installed(
+    settings_file: Path | None = None,
+    hooks_dir: Path | None = None,
+) -> CheckResult:
+    """Check that the PostCompact hook is installed and registered.
+
+    Fails if:
+    - the hook script is missing from ``hooks_dir``, or
+    - settings.json is missing / unreadable / lacks the PostCompact entry.
+    """
+    from devflow.setup._settings import load_settings
+    from devflow.setup.install import HOOK_SCRIPT_NAME, HOOKS_DIR, SETTINGS_FILE
+
+    hooks = hooks_dir or HOOKS_DIR
+    cfg = settings_file or SETTINGS_FILE
+
+    hook_path = hooks / HOOK_SCRIPT_NAME
+    if not hook_path.exists():
+        return CheckResult(
+            name="hook",
+            passed=False,
+            message=f"{HOOK_SCRIPT_NAME} not found — run: devflow install",
+        )
+
+    data, err = load_settings(cfg)
+    if err:
+        return CheckResult(
+            name="hook",
+            passed=False,
+            message=f"settings.json unreadable: {err}",
+        )
+    if not cfg.exists():
+        return CheckResult(
+            name="hook",
+            passed=False,
+            message="settings.json missing — run: devflow install",
+        )
+
+    hook_command = str(hook_path.resolve())
+    post_compact = data.get("hooks", {}).get("PostCompact", [])
+    registered = any(
+        isinstance(entry, dict) and entry.get("command") == hook_command
+        for entry in post_compact
+    )
+    if not registered:
+        return CheckResult(
+            name="hook",
+            passed=False,
+            message="PostCompact entry missing in settings.json — run: devflow install",
+        )
+
+    return CheckResult(
+        name="hook",
+        passed=True,
+        message=f"PostCompact → {HOOK_SCRIPT_NAME}",
+    )
+
+
 def run_doctor(base: Path | None = None) -> DoctorReport:
     """Run all diagnostic checks and return the report."""
     report = DoctorReport()
@@ -186,6 +243,7 @@ def run_doctor(base: Path | None = None) -> DoctorReport:
     report.add(check_claude_default_model())
     report.add(check_agents_synced())
     report.add(check_skills_synced())
+    report.add(check_hook_installed())
     report.add(check_devflow_init(base))
     return report
 
