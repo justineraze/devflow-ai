@@ -179,10 +179,10 @@ class TestRunGatePhase:
 
 
 class TestSkillInjection:
-    def test_finds_bundled_context_discipline(self) -> None:
-        path = _find_skill_file("context-discipline")
+    def test_finds_bundled_context_skill(self) -> None:
+        path = _find_skill_file("devflow-context")
         assert path is not None
-        assert path.name == "context-discipline.md"
+        assert path.name == "devflow-context.md"
 
     def test_returns_none_for_missing_skill(self) -> None:
         assert _find_skill_file("nonexistent-skill-xyz") is None
@@ -192,7 +192,7 @@ class TestSkillInjection:
         assert "Context Discipline" in content
         assert "Incremental Build" in content
         assert "TDD" in content
-        # refactor-first is scoped to reviewing only — not here.
+        # devflow-refactor is scoped to reviewing only — not here.
         assert "Refactor First" not in content
 
     def test_reviewing_phase_keeps_refactor_first(self) -> None:

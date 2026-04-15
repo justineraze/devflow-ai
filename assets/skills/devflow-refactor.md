@@ -1,5 +1,5 @@
 ---
-name: refactor-first
+name: devflow-refactor
 description: Quality-first discipline — refactor when code is dirty, don't ship patches. Applies to planning, implementing, and reviewing phases.
 ---
 

@@ -90,3 +90,19 @@ class TestAccessors:
 
     def test_is_known_phase_false_for_unregistered(self) -> None:
         assert is_known_phase("nope") is False
+
+
+class TestPhaseSkills:
+    """Skills must be wired to the right phases."""
+
+    def test_fixing_includes_debug(self) -> None:
+        assert "devflow-debug" in get_spec(PhaseName.FIXING).skills
+
+    def test_implementing_does_not_include_debug(self) -> None:
+        # devflow-debug is for fixing only — not general implementation.
+        assert "devflow-debug" not in get_spec(PhaseName.IMPLEMENTING).skills
+
+    def test_fixing_retains_incremental_and_tdd(self) -> None:
+        skills = get_spec(PhaseName.FIXING).skills
+        assert "devflow-incremental" in skills
+        assert "devflow-tdd" in skills

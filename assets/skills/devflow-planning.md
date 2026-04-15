@@ -1,5 +1,5 @@
 ---
-name: planning-rigor
+name: devflow-planning
 description: Produces rigorous implementation plans with concrete steps, quality audit, and risk assessment. For the planning and architecture phases.
 ---
 

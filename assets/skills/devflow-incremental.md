@@ -1,5 +1,5 @@
 ---
-name: incremental-build
+name: devflow-incremental
 description: Execution discipline for building features incrementally — thin vertical slices, commit per step, verify before continuing. For the implementing and fixing phases.
 ---
 
@@ -21,6 +21,8 @@ For every step in the plan:
   3. Test          Run the test(s) this step names.
         ↓
   4. Verify        ruff passes on the file. All tests green.
+                 Re-read the plan step: does the code actually do what was asked?
+                 If not, fix before committing — green tests ≠ correct behaviour.
         ↓
   5. Commit        git add -A && git commit -m "..."
         ↓

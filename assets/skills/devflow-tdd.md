@@ -1,5 +1,5 @@
 ---
-name: tdd-discipline
+name: devflow-tdd
 description: Test-driven mindset — tests are written as part of each implementation step, not after. Proves behavior, not implementation. For the implementing and gate phases.
 ---
 

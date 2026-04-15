@@ -24,7 +24,7 @@ BUNDLED_AGENTS_DIR = _PROJECT_ROOT / "assets" / "agents"
 BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
 
 # Skills always injected on every phase.
-ALWAYS_ON_SKILLS: tuple[str, ...] = ("context-discipline",)
+ALWAYS_ON_SKILLS: tuple[str, ...] = ("devflow-context",)
 
 # Hard ceiling for a single Claude phase. 30 minutes covers planning
 # and implementing on large features; anything past that is almost

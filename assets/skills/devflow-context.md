@@ -1,5 +1,5 @@
 ---
-name: context-discipline
+name: devflow-context
 description: Strict rules for loading only the context needed for the current phase. Applies to every phase.
 ---
 

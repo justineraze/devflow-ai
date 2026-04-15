@@ -1,5 +1,5 @@
 ---
-name: code-review
+name: devflow-review
 description: Review discipline — catches bugs, patches-masquerading-as-features, and quality issues before the quality gate. For the reviewing phase.
 ---
 
