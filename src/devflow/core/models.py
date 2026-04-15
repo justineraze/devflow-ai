@@ -19,16 +19,16 @@ _WORKFLOW_THRESHOLDS: list[tuple[int, str]] = [
 class ComplexityScore(BaseModel):
     """Complexity score for a feature across four dimensions (each 0–3)."""
 
-    files_touched: int = 0
+    files_touched: int = Field(default=0, ge=0, le=3)
     """Number of files expected to be modified (heuristic, 0–3)."""
 
-    integrations: int = 0
+    integrations: int = Field(default=0, ge=0, le=3)
     """External systems involved: API, DB, webhook, OAuth… (0–3)."""
 
-    security: int = 0
+    security: int = Field(default=0, ge=0, le=3)
     """Security-sensitive surface area: auth, tokens, crypto… (0–3)."""
 
-    scope: int = 0
+    scope: int = Field(default=0, ge=0, le=3)
     """Breadth of the change: tweak vs. new module vs. rewrite (0–3)."""
 
     @computed_field  # type: ignore[prop-decorator]
