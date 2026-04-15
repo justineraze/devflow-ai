@@ -28,6 +28,9 @@ def status(
     feature_id: Annotated[
         str | None, typer.Argument(help="Feature ID for detailed view")
     ] = None,
+    archived: Annotated[
+        bool, typer.Option("--archived", help="Include archived features")
+    ] = False,
 ) -> None:
     """Show the status of tracked features."""
     render_header(subtitle="Feature status")
@@ -40,7 +43,7 @@ def status(
         render_feature_detail(feat)
     else:
         state = get_state()
-        render_status_table(state)
+        render_status_table(state, include_archived=archived)
 
 
 @app.command()

@@ -136,7 +136,7 @@ def test_sync_archives_merged_features(tmp_path: Path) -> None:
     # metadata.archived=true persisted in state.
     from devflow.core.workflow import load_state
     state = load_state(tmp_path)
-    assert state.features["f-002"].metadata.get("archived") is True
+    assert state.features["f-002"].metadata.archived is True
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ def test_sync_skips_non_merged_pr(tmp_path: Path) -> None:
 
     from devflow.core.workflow import load_state
     state = load_state(tmp_path)
-    assert not state.features["f-003"].metadata.get("archived")
+    assert not state.features["f-003"].metadata.archived
 
 
 # ---------------------------------------------------------------------------

@@ -41,10 +41,23 @@ def render_header(title: str = "devflow-ai", subtitle: str = "") -> None:
     console.print(Panel(content, border_style="cyan", padding=(0, 2)))
 
 
-def render_status_table(state: WorkflowState) -> None:
-    """Render a table showing all features and their current status."""
-    if not state.features:
-        console.print("[dim]No features tracked yet.[/dim]")
+def render_status_table(
+    state: WorkflowState, include_archived: bool = False,
+) -> None:
+    """Render a table showing features and their current status.
+
+    Archived features (post-sync) are hidden by default.
+    Pass ``include_archived=True`` to show them.
+    """
+    visible = [
+        f for f in state.features.values()
+        if include_archived or not f.metadata.archived
+    ]
+    if not visible:
+        msg = "[dim]No features tracked yet.[/dim]"
+        if not include_archived and state.features:
+            msg = "[dim]No active features. Use --archived to show archived ones.[/dim]"
+        console.print(msg)
         return
 
     table = Table(title="Features", border_style="dim")
@@ -55,7 +68,7 @@ def render_status_table(state: WorkflowState) -> None:
     table.add_column("Phase")
     table.add_column("Updated")
 
-    for feature in state.features.values():
+    for feature in visible:
         style = status_style(feature.status.value)
         phase_info = _current_phase_info(feature)
         table.add_row(

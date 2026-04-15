@@ -16,21 +16,12 @@ from devflow.orchestration.lifecycle import _transition_safe
 
 
 def _walk_to_done(feature: Feature) -> None:
-    """Walk the state machine from the current state through to DONE.
+    """Transition the feature to DONE after all phases complete.
 
-    Tries each intermediate state that can reach DONE, silently
-    skipping invalid transitions.
+    Every non-terminal state has DONE as a valid transition (enforced in
+    VALID_TRANSITIONS), so a single targeted call is sufficient.
     """
-    path = [
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-    ]
-    for target in path:
-        if feature.status == target:
-            continue
-        _transition_safe(feature, target)
+    _transition_safe(feature, FeatureStatus.DONE)
 
 
 def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:

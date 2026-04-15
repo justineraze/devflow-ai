@@ -167,7 +167,7 @@ Feature status: {feature.status.value}""")
                 f"```json\n{gate_json}\n```"
             )
 
-    feedback = feature.metadata.get("feedback")
+    feedback = feature.metadata.feedback
     if feedback and phase.name == "planning":
         sections.append(
             "# User feedback on previous plan\n\n"

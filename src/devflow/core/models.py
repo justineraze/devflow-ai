@@ -4,9 +4,24 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class FeatureMetadata(BaseModel):
+    """Typed metadata carried by a Feature throughout its lifecycle."""
+
+    feedback: str | None = None
+    """User feedback on the previous plan (re-planning flow)."""
+
+    gate_retry: int = 0
+    """Number of automatic gate→fixing→gate retry cycles consumed."""
+
+    archived: bool = False
+    """True after devflow sync archives a merged feature."""
+
+    model_config = {"extra": "allow"}
+    """Allow unknown keys so old state.json files deserialise without error."""
 
 
 class PhaseStatus(StrEnum):
@@ -79,11 +94,13 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
     FeatureStatus.REVIEWING: {
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
+        FeatureStatus.DONE,
         *_RECOVERY,
     },
     FeatureStatus.FIXING: {
         FeatureStatus.REVIEWING,
         FeatureStatus.GATE,
+        FeatureStatus.DONE,
         *_RECOVERY,
     },
     FeatureStatus.GATE: {
@@ -172,7 +189,7 @@ class Feature(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     phases: list[PhaseRecord] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: FeatureMetadata = Field(default_factory=FeatureMetadata)
 
     def transition_to(self, target: FeatureStatus) -> None:
         """Transition to a new status, raising InvalidTransition if not allowed."""
