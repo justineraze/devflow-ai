@@ -1,5 +1,7 @@
 """Tests for devflow.setup.doctor — installation diagnostic checks."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
@@ -8,6 +10,7 @@ from devflow.setup.doctor import (
     check_agents_synced,
     check_cli_available,
     check_devflow_init,
+    check_hook_installed,
     check_python_version,
     check_skills_synced,
     run_doctor,
@@ -150,6 +153,65 @@ class TestCheckClaudeDefaultModel:
         assert "invalid" in result.message.lower()
 
 
+class TestCheckHookInstalled:
+    def _make_hook_and_settings(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Return (hooks_dir, settings_file) with hook registered."""
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hook = hooks_dir / "devflow-post-compact.sh"
+        hook.write_text("#!/usr/bin/env bash\n")
+        settings = tmp_path / "settings.json"
+        entry = {"type": "command", "command": str(hook.resolve())}
+        settings.write_text(json.dumps({"hooks": {"PostCompact": [entry]}}))
+        return hooks_dir, settings
+
+    def test_passes_when_script_and_entry_present(self, tmp_path: Path) -> None:
+        hooks_dir, settings = self._make_hook_and_settings(tmp_path)
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is True
+        assert "PostCompact" in result.message
+
+    def test_fails_when_script_missing(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"hooks": {"PostCompact": []}}))
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is False
+        assert "devflow install" in result.message
+
+    def test_fails_when_settings_missing(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hook = hooks_dir / "devflow-post-compact.sh"
+        hook.write_text("#!/usr/bin/env bash\n")
+        settings = tmp_path / "settings.json"  # does not exist
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is False
+        assert "devflow install" in result.message
+
+    def test_fails_when_entry_missing_from_settings(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hook = hooks_dir / "devflow-post-compact.sh"
+        hook.write_text("#!/usr/bin/env bash\n")
+        settings = tmp_path / "settings.json"
+        settings.write_text(json.dumps({"model": "sonnet"}))
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is False
+
+    def test_fails_when_settings_json_malformed(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hook = hooks_dir / "devflow-post-compact.sh"
+        hook.write_text("#!/usr/bin/env bash\n")
+        settings = tmp_path / "settings.json"
+        settings.write_text("{bad json!!!")
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is False
+        assert "unreadable" in result.message
+
+
 class TestRunDoctor:
     def test_returns_report_with_all_checks(self, tmp_path: Path) -> None:
         report = run_doctor(base=tmp_path)
@@ -161,8 +223,9 @@ class TestRunDoctor:
         assert "claude model" in names
         assert "agents" in names
         assert "skills" in names
+        assert "hook" in names
         assert "init" in names
-        assert len(report.checks) == 7
+        assert len(report.checks) == 8
 
     def test_empty_report_alias(self) -> None:
         report = DoctorReport()
