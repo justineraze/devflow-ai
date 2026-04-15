@@ -109,8 +109,7 @@ class TestPhaseSpinner:
         mock_live.is_started = True
         mock_live_cls.return_value = mock_live
 
-        with pytest.raises(ValueError):
-            with PhaseSpinner("fixing"):
-                raise ValueError("boom")
+        with pytest.raises(ValueError), PhaseSpinner("fixing"):
+            raise ValueError("boom")
 
         mock_live.stop.assert_called_once()
