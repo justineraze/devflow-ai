@@ -23,6 +23,18 @@ from devflow.core.phases import UnknownPhase, get_spec
 
 DEFAULT_MODEL = "sonnet"
 
+# Stack → specialized developer agent.
+STACK_AGENT_MAP: dict[str, str] = {
+    "python": "developer-python",
+    "typescript": "developer-typescript",
+    "php": "developer-php",
+}
+
+
+def agent_for_stack(stack: str | None) -> str | None:
+    """Return the specialized developer agent for *stack*, or None."""
+    return STACK_AGENT_MAP.get(stack or "") or None
+
 # Gate checks that are cheap, mechanical fixes (lint/format/secret
 # patterns). When *all* failing checks are in this set, Haiku handles
 # the fix perfectly and costs ~10× less than Sonnet.

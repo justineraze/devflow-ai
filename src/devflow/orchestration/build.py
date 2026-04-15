@@ -1,50 +1,35 @@
-"""Build and fix orchestration — state machine, phases, confirmation flow."""
+"""Build loop — executes a feature through its phases end-to-end.
+
+Responsible for one thing: running the plan-first confirmation flow,
+coordinating phase execution, and creating the PR on success.
+
+Feature lifecycle (create/resume/retry) → lifecycle.py
+Phase state machine (run/complete/fail) → phase_exec.py
+Model selection                          → model_routing.py
+Gate execution                           → integrations/gate.py
+"""
 
 from __future__ import annotations
 
-import re
+import json
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 from rich.markdown import Markdown
 from rich.panel import Panel
 
+from devflow.core.artifacts import read_artifact, save_phase_output, write_artifact
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
-from devflow.core.phases import UnknownPhase, get_spec
-from devflow.core.workflow import (
-    advance_phase,
-    create_feature,
-    load_state,
-    load_workflow,
-    save_state,
+from devflow.core.workflow import load_state, load_workflow, save_state
+from devflow.orchestration.lifecycle import _transition_safe
+from devflow.orchestration.phase_exec import (
+    complete_phase,
+    fail_phase,
+    reset_planning_phases,
+    run_phase,
 )
 from devflow.ui.console import console
-
-# Stack → specialized developer agent.
-_STACK_AGENT_MAP: dict[str, str] = {
-    "python": "developer-python",
-    "typescript": "developer-typescript",
-    "php": "developer-php",
-}
-
-
-def _generate_feature_id(description: str) -> str:
-    """Generate a short feature ID from description."""
-    words = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower()).split()
-    slug = "-".join(words[:3])
-    timestamp = datetime.now(UTC).strftime("%m%d")
-    return f"feat-{slug}-{timestamp}" if slug else f"feat-{timestamp}"
-
-
-def _transition_safe(feature: Feature, target: FeatureStatus) -> bool:
-    """Attempt a state transition, returning True if successful."""
-    try:
-        feature.transition_to(target)
-        return True
-    except Exception:
-        return False
 
 
 def _get_phase_agent(
@@ -52,7 +37,9 @@ def _get_phase_agent(
     phase_name: str,
     base: Path | None = None,
 ) -> str:
-    """Get the agent name for a phase, with stack-aware override."""
+    """Return the agent name for a phase, with stack-aware override."""
+    from devflow.orchestration.model_routing import agent_for_stack
+
     agent = "developer"
     try:
         wf = load_workflow(feature.workflow)
@@ -65,249 +52,21 @@ def _get_phase_agent(
 
     if agent == "developer":
         state = load_state(base)
-        if state.stack and state.stack in _STACK_AGENT_MAP:
-            agent = _STACK_AGENT_MAP[state.stack]
+        specialized = agent_for_stack(state.stack)
+        if specialized:
+            agent = specialized
 
     return agent
 
 
-# ── Feature lifecycle ──────────────────────────────────────────────────
-
-
-def start_build(
-    description: str,
-    workflow_name: str = "standard",
-    base: Path | None = None,
-) -> Feature:
-    """Start a new feature build."""
-    state = load_state(base)
-    feature_id = _generate_feature_id(description)
-
-    counter = 1
-    original_id = feature_id
-    while feature_id in state.features:
-        counter += 1
-        feature_id = f"{original_id}-{counter}"
-
-    feature = create_feature(state, feature_id, description, workflow_name)
-    save_state(state, base)
-    return feature
-
-
-def resume_build(
-    feature_id: str,
-    base: Path | None = None,
-) -> Feature | None:
-    """Resume an existing feature build.
-
-    If the feature is failed, resets the failed phase to pending
-    so it can be retried.
-    """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-
-    if not feature:
-        console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-        return None
-    if feature.is_terminal:
-        console.print(
-            f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
-        )
-        return None
-
-    # Recover from failed: reset the failed phase to pending.
-    if feature.status == FeatureStatus.FAILED:
-        _recover_failed_feature(feature)
-        save_state(state, base)
-        console.print(f"[cyan]Recovering {feature_id} from failed state.[/cyan]")
-
-    return feature
-
-
-def _recover_failed_feature(feature: Feature) -> None:
-    """Reset a failed feature so it can be retried.
-
-    Finds the last failed phase, resets it to pending, and sets
-    the feature status to the appropriate state for that phase.
-    """
-    for phase in reversed(feature.phases):
-        if phase.status == PhaseStatus.FAILED:
-            phase.reset()
-
-            # Reset to PENDING, then walk forward through done phases.
-            feature.status = FeatureStatus.PENDING
-            # Walk forward to the state just before the failed phase.
-            for p in feature.phases:
-                if p.name == phase.name:
-                    break
-                if p.status == PhaseStatus.DONE:
-                    _transition_safe(feature, get_spec(p.name).feature_status)
-            return
-
-
-def retry_build(
-    feature_id: str,
-    base: Path | None = None,
-) -> Feature | None:
-    """Retry a failed feature by resetting the failed phase.
-
-    Unlike resume_build, this is strictly for FAILED features
-    and skips any feedback/re-planning flow.
-    """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-
-    if not feature:
-        console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-        return None
-
-    if feature.status != FeatureStatus.FAILED:
-        console.print(
-            f"[yellow]Feature {feature_id!r} is {feature.status.value}, not failed.[/yellow]"
-        )
-        return None
-
-    _recover_failed_feature(feature)
-    save_state(state, base)
-    console.print(f"[cyan]Retrying {feature_id} — reset failed phase to pending.[/cyan]")
-    return feature
-
-
-def start_fix(description: str, base: Path | None = None) -> Feature:
-    """Start a bug fix using the quick workflow (no planning phase)."""
-    return start_build(description, workflow_name="quick", base=base)
-
-
-# ── Phase management ───────────────────────────────────────────────────
-
-
-def _walk_to_done(feature: Feature) -> None:
-    """Walk the state machine from the current state through to DONE.
-
-    Tries each intermediate state that can reach DONE, silently
-    skipping invalid transitions.
-    """
-    path = [
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-    ]
-    for target in path:
-        if feature.status == target:
-            continue
-        _transition_safe(feature, target)
-
-
-def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
-    """Advance to the next phase, update state machine, persist."""
-    state = load_state(base)
-    tracked = state.get_feature(feature.id)
-    if not tracked:
-        return None
-
-    phase = advance_phase(tracked)
-    if not phase:
-        # All phases done — walk the state machine forward to DONE.
-        _walk_to_done(tracked)
-        save_state(state, base)
-        return None
-
-    try:
-        target_status = get_spec(phase.name).feature_status
-    except UnknownPhase:
-        target_status = None
-    if target_status and tracked.status != target_status:
-        _transition_safe(tracked, target_status)
-
-    save_state(state, base)
-    return phase
-
-
-def complete_phase(
-    feature_id: str, phase_name: str, output: str = "", base: Path | None = None,
-) -> None:
-    """Mark a phase as completed and persist state."""
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return
-    for phase in feature.phases:
-        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
-            phase.complete(output)
-            break
-    save_state(state, base)
-
-    # Persist the phase output as a standalone artifact so downstream
-    # phases can selectively load what they need instead of receiving
-    # the concatenated outputs of every previous phase.
-    if output:
-        from devflow.core.artifacts import save_phase_output
-
-        save_phase_output(feature_id, phase_name, output, base)
-
-
-def fail_phase(
-    feature_id: str, phase_name: str, error: str = "", base: Path | None = None,
-) -> None:
-    """Mark a phase as failed and persist state."""
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return
-    for phase in feature.phases:
-        if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
-            phase.fail(error)
-            break
-    _transition_safe(feature, FeatureStatus.FAILED)
-    save_state(state, base)
-
-
-def _reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
-    """Reset planning phases back to pending for re-planning with feedback."""
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return
-    for phase in feature.phases:
-        if phase.name in ("architecture", "planning", "plan_review"):
-            phase.reset()
-    feature.status = FeatureStatus.PENDING
-    save_state(state, base)
-
-
-# ── Execution helpers ──────────────────────────────────────────────────
-
-
-def _execute_phase(
-    feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
-) -> tuple[bool, str, PhaseMetrics]:
-    """Execute a single phase via Claude Code or local gate.
-
-    Returns ``(success, output, metrics)`` — metrics is a blank
-    PhaseMetrics for the gate phase (no model cost).
-    """
-    from devflow.orchestration.runner import execute_phase, run_gate_phase
-
-    if phase.name == "gate":
-        state = load_state(base)
-        return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
-    return execute_phase(feature, phase, agent_name)
-
-
-# File/path patterns that must never trigger a model downgrade —
-# security- or money-critical code always warrants the strongest reviewer.
+# File/path patterns that must never trigger a model downgrade.
 CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
     "auth", "secret", "token", "crypto", "payment", "billing", "password",
 )
 
 
 def _persist_files_summary(feature_id: str, base: Path | None = None) -> None:
-    """Write files.json capturing the branch-diff summary for downstream
-    phases (reviewing uses it to decide whether a lighter model suffices)."""
-    import json
-
-    from devflow.core.artifacts import write_artifact
+    """Write files.json capturing the branch-diff summary for downstream phases."""
     from devflow.integrations.git import get_branch_diff_summary
 
     summary = get_branch_diff_summary()
@@ -317,7 +76,6 @@ def _persist_files_summary(feature_id: str, base: Path | None = None) -> None:
         if any(pat in p.lower() for pat in CRITICAL_PATH_PATTERNS)
     ]
     summary["critical_paths"] = critical
-
     write_artifact(feature_id, "files.json", json.dumps(summary, indent=2), base)
 
 
@@ -330,9 +88,7 @@ def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | Non
 MAX_GATE_AUTO_RETRIES = 1
 
 
-def _setup_gate_retry(
-    feature_id: str, base: Path | None = None,
-) -> bool:
+def _setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
     """Reset gate+fixing to PENDING for one automatic retry loop.
 
     Returns True when a retry was scheduled, False when the budget is
@@ -353,8 +109,6 @@ def _setup_gate_retry(
 
     fixing_phase = next((p for p in feature.phases if p.name == "fixing"), None)
     if fixing_phase is None:
-        # Workflows without a fixing phase (quick/light/standard) get one
-        # injected just before gate so advance_phase picks it up next.
         fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
         gate_idx = feature.phases.index(gate_phase)
         feature.phases.insert(gate_idx, fixing_phase)
@@ -362,15 +116,48 @@ def _setup_gate_retry(
         fixing_phase.reset()
 
     gate_phase.reset()
-
     feature.metadata["gate_retry"] = attempts + 1
-    # GATE → FIXING is a valid transition; keeps the state machine honest.
     _transition_safe(feature, FeatureStatus.FIXING)
     save_state(state, base)
     return True
 
 
-# ── Main build loop ───────────────────────────────────────────────────
+def _execute_phase(
+    feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
+) -> tuple[bool, str, PhaseMetrics]:
+    """Execute a single phase via Claude Code or local gate."""
+    from devflow.integrations.gate import run_gate_phase
+    from devflow.orchestration.runner import execute_phase
+
+    if phase.name == "gate":
+        state = load_state(base)
+        return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
+    return execute_phase(feature, phase, agent_name)
+
+
+def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
+    """Load gate.json from artifacts and render it as a Rich panel."""
+    from devflow.integrations.gate import CheckResult, GateReport, render_gate_report
+
+    raw = read_artifact(feature_id, "gate.json", base)
+    if not raw:
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+
+    report = GateReport(checks=[
+        CheckResult(
+            name=c.get("name", "?"),
+            passed=bool(c.get("passed", False)),
+            skipped=bool(c.get("skipped", False)),
+            message=c.get("message", ""),
+            details=c.get("details", ""),
+        )
+        for c in data.get("checks", [])
+    ])
+    render_gate_report(report)
 
 
 def execute_build_loop(
@@ -415,7 +202,7 @@ def execute_build_loop(
     # ── Branch ──
     branch = f"feat/{feature.id}"
     if is_resuming:
-        _reset_planning_phases(feature.id, base)
+        reset_planning_phases(feature.id, base)
         state = load_state(base)
         feature = state.get_feature(feature.id) or feature
         feature.metadata["feedback"] = feedback
@@ -529,8 +316,6 @@ def execute_build_loop(
                 _persist_files_summary(feature.id, base)
         else:
             if phase.name == "gate":
-                from devflow.core.artifacts import save_phase_output
-
                 save_phase_output(feature.id, "gate", output, base)
                 if _setup_gate_retry(feature.id, base):
                     _render_gate_panel(feature.id, base)
@@ -553,36 +338,6 @@ def execute_build_loop(
 
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
-        console.print(
-            "[yellow]PR creation failed — push manually.[/yellow]\n",
-        )
+        console.print("[yellow]PR creation failed — push manually.[/yellow]\n")
 
     return True
-
-
-def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
-    """Load gate.json from artifacts and render it as a Rich panel."""
-    import json
-
-    from devflow.core.artifacts import read_artifact
-    from devflow.integrations.gate import CheckResult, GateReport, render_gate_report
-
-    raw = read_artifact(feature_id, "gate.json", base)
-    if not raw:
-        return
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return
-
-    report = GateReport(checks=[
-        CheckResult(
-            name=c.get("name", "?"),
-            passed=bool(c.get("passed", False)),
-            skipped=bool(c.get("skipped", False)),
-            message=c.get("message", ""),
-            details=c.get("details", ""),
-        )
-        for c in data.get("checks", [])
-    ])
-    render_gate_report(report)

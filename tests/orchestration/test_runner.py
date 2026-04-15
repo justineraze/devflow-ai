@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord
+from devflow.integrations.gate import run_gate_phase
 from devflow.orchestration.runner import (
     _build_phase_context,
     _find_agent_file,
@@ -13,7 +14,6 @@ from devflow.orchestration.runner import (
     _load_skills_for_phase,
     build_prompt,
     execute_phase,
-    run_gate_phase,
 )
 
 
