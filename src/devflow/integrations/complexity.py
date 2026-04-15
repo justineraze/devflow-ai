@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from devflow.core.models import ComplexityScore
-from devflow.integrations.detect import IGNORED_DIRS, _walk
+from devflow.integrations.detect import _walk
 
 # Security-sensitive path/term patterns (shared with orchestration.build).
 CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
