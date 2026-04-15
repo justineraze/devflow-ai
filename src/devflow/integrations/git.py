@@ -53,7 +53,9 @@ def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
         suffix: Optional qualifier (e.g. "implementing", "fixing",
                 "leftover changes"). Appended after an em-dash.
     """
-    prefix = _commit_prefix(feature)
+    type_ = _commit_prefix(feature)
+    scope = feature.metadata.scope
+    prefix = f"{type_}({scope})" if scope else type_
     desc = _normalize_description(feature.description)
     base = f"{prefix}: {desc}"
 
@@ -68,13 +70,23 @@ def build_pr_title(feature: Feature) -> str:
     return build_commit_message(feature)
 
 
+def branch_name(feature_id: str) -> str:
+    """Return the git branch name for a feature ID.
+
+    Strips the redundant ``feat-`` prefix from the ID so we get
+    ``feat/add-caching-0415`` instead of ``feat/feat-add-caching-0415``.
+    """
+    slug = feature_id.removeprefix("feat-")
+    return f"feat/{slug}"
+
+
 def create_branch(feature_id: str) -> str:
     """Create and checkout a git branch for the feature.
 
     If the branch already exists, switches to it instead.
     Returns the branch name.
     """
-    branch = f"feat/{feature_id}"
+    branch = branch_name(feature_id)
     cwd = str(Path.cwd())
 
     result = subprocess.run(

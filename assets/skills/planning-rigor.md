@@ -78,6 +78,7 @@ padded ones.
 - Type: [new-feature | extension | refactor | bugfix]
 - Complexity: [low | medium | high]
 - Estimated steps: N
+- Module: [the primary Python module touched — e.g. runner, gate, lifecycle, git, cli]
 
 ### Affected files
 | File | Action | What changes |

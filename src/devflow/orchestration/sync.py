@@ -36,10 +36,12 @@ def _current_branch(cwd: Path) -> str:
 def _pr_is_merged(feature_id: str, cwd: Path) -> bool:
     """Return True if the PR associated with *feature_id* is merged.
 
-    Uses ``gh pr view`` on the ``feat/<feature_id>`` branch.
+    Uses ``gh pr view`` on the feature's branch.
     Returns False when the branch has no PR or the PR is not merged.
     """
-    branch = f"feat/{feature_id}"
+    from devflow.integrations.git import branch_name
+
+    branch = branch_name(feature_id)
     result = subprocess.run(
         ["gh", "pr", "view", branch, "--json", "state", "--jq", ".state"],
         capture_output=True, text=True, cwd=str(cwd),

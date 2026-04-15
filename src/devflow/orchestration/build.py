@@ -85,6 +85,20 @@ def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | Non
     return state.get_feature(feature_id)
 
 
+def _parse_plan_module(plan_output: str) -> str | None:
+    """Extract the module name from the plan's ### Scope section.
+
+    Looks for: ``- Module: <module>``
+    Returns the first word of the value, or None if the line is absent.
+    """
+    import re
+
+    match = re.search(r"^\s*-\s+Module:\s+(\S+)", plan_output, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
 MAX_GATE_AUTO_RETRIES = 1
 
 
@@ -175,6 +189,7 @@ def execute_build_loop(
     6. Create PR on success
     """
     from devflow.integrations.git import (
+        branch_name,
         build_commit_message,
         commit_changes,
         create_branch,
@@ -200,7 +215,7 @@ def execute_build_loop(
     totals = BuildTotals()
 
     # ── Branch ──
-    branch = f"feat/{feature.id}"
+    branch = branch_name(feature.id)
     if is_resuming:
         reset_planning_phases(feature.id, base)
         state = load_state(base)
@@ -255,6 +270,13 @@ def execute_build_loop(
 
         if phase.name == "planning":
             plan_output = output
+            module = _parse_plan_module(output)
+            if module:
+                state = load_state(base)
+                feat = state.get_feature(feature.id)
+                if feat:
+                    feat.metadata.scope = module
+                    save_state(state, base)
 
         feature = _refresh_feature(feature.id, base) or feature
 
