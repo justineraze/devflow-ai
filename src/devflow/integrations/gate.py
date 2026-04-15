@@ -188,13 +188,18 @@ def _run_command_check(
     except subprocess.TimeoutExpired:
         return CheckResult(name=name, passed=False, message=f"{name} timed out")
 
+    # When a tool writes its error only to stderr (e.g. "No module named pytest"
+    # during collection), stdout is empty and details would silently disappear.
+    # Fall back to stderr so the caller always sees a useful error message.
+    output = result.stdout if result.stdout else result.stderr
+
     if parse_output is not None:
-        message, details = parse_output(result.returncode, result.stdout)
+        message, details = parse_output(result.returncode, output)
     elif result.returncode == 0:
         message, details = "No issues", ""
     else:
-        message = f"{result.stdout.count(chr(10))} issues found"
-        details = result.stdout[:2000]
+        message = f"{output.count(chr(10))} issues found"
+        details = output[:2000]
 
     passed = result.returncode == 0
     return CheckResult(name=name, passed=passed, message=message, details=details)
