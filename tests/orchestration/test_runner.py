@@ -18,11 +18,18 @@ from devflow.orchestration.runner import (
 
 
 @pytest.fixture
-def sample_feature() -> Feature:
-    """Feature with some completed phases for context testing."""
+def sample_feature(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Feature:
+    """Feature with some completed phases — artifact written to isolated tmp dir."""
+    from devflow.core.artifacts import save_phase_output
+
+    monkeypatch.chdir(tmp_path)
+
+    plan_output = "## Plan\n1. Create models\n2. Add tests"
+    save_phase_output("feat-test-001", "planning", plan_output)
+
     planning = PhaseRecord(name="planning")
     planning.start()
-    planning.complete(output="## Plan\n1. Create models\n2. Add tests")
+    planning.complete()
 
     implementing = PhaseRecord(name="implementing")
 

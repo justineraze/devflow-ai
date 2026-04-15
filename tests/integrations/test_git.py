@@ -1,10 +1,9 @@
 """Tests for devflow.integrations.git — git operations."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from pathlib import Path
 
 from devflow.core.models import Feature, FeatureStatus
 from devflow.integrations.git import (

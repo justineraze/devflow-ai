@@ -81,11 +81,13 @@ class TestSelectiveInjection:
     """_build_phase_context must only include the declared dependencies."""
 
     def _make_feature(self, phases: list[tuple[str, str]]) -> Feature:
-        """Build a Feature with DONE phases carrying in-memory output."""
-        records = [
-            PhaseRecord(name=name, status=PhaseStatus.DONE, output=output)
-            for name, output in phases
-        ]
+        """Build a Feature with DONE phases — artifacts written to cwd/.devflow/."""
+        records = []
+        for name, output in phases:
+            record = PhaseRecord(name=name, status=PhaseStatus.DONE)
+            records.append(record)
+            if output:
+                save_phase_output("feat-001", name, output)
         return Feature(
             id="feat-001",
             description="test",
@@ -118,11 +120,12 @@ class TestSelectiveInjection:
         self, project_dir: Path,
     ) -> None:
         """Artifacts on disk win — they are the canonical, fresh version."""
-        save_phase_output("feat-001", "planning", "DISK PLAN")
         feature = self._make_feature([
             ("architecture", "ARCH"),
             ("planning", "MEMORY PLAN"),
         ])
+        # Overwrite with a fresher version — this is what the reader should see.
+        save_phase_output("feat-001", "planning", "DISK PLAN")
         phase = PhaseRecord(name="reviewing")
 
         ctx = _build_phase_context(feature, phase)
@@ -130,15 +133,17 @@ class TestSelectiveInjection:
         assert "DISK PLAN" in ctx
         assert "MEMORY PLAN" not in ctx
 
-    def test_falls_back_to_memory_when_disk_missing(
+    def test_empty_context_when_artifact_missing(
         self, project_dir: Path,
     ) -> None:
-        feature = self._make_feature([
-            ("architecture", "ARCH OUTPUT"),
-            ("planning", "MEMORY PLAN"),
-        ])
+        """No artifact on disk → empty context. In-memory output is not a fallback."""
+        records = [PhaseRecord(name="planning", status=PhaseStatus.DONE)]
+        feature = Feature(
+            id="feat-001", description="test",
+            status=FeatureStatus.IMPLEMENTING, phases=records,
+        )
         phase = PhaseRecord(name="reviewing")
 
         ctx = _build_phase_context(feature, phase)
 
-        assert "MEMORY PLAN" in ctx
+        assert ctx == ""
