@@ -1,0 +1,21 @@
+name: light
+description: Lightweight workflow — plan, implement, gate. No review phase.
+
+phases:
+  - name: planning
+    agent: planner
+    description: Create a brief implementation plan
+    required: true
+    timeout: 600
+
+  - name: implementing
+    agent: developer
+    description: Implement according to plan
+    required: true
+    timeout: 900
+
+  - name: gate
+    agent: tester
+    description: Run quality gate
+    required: true
+    timeout: 300
