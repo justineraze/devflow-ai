@@ -210,14 +210,19 @@ def execute_phase(
     feature: Feature,
     phase: PhaseRecord,
     agent_name: str,
+    verbose: bool = False,
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a phase by calling Claude Code.
 
-    Streams tool invocations to the console as they happen. The final
-    phase-summary chip is rendered by the caller from the returned
+    In default mode, shows a Rich spinner updated with the last tool action.
+    With ``verbose=True``, streams every tool line to the console instead
+    (matches the original behaviour, useful for debugging).
+
+    The final phase-summary chip is rendered by the caller from the returned
     PhaseMetrics — keeps the runner focused on I/O.
     """
     from devflow.orchestration.stream import format_tool_line, parse_event
+    from devflow.ui.spinner import PhaseSpinner
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
@@ -257,17 +262,27 @@ def execute_phase(
         metrics = PhaseMetrics()
         tool_count = 0
 
-        for line in proc.stdout:
-            parsed = parse_event(line)
-            if not parsed:
-                continue
-            kind, payload = parsed
-            if kind == "tool":
-                tool_count += 1
-                console.print(f"[dim]{format_tool_line(payload)}[/dim]")
-            elif kind == "metrics":
-                metrics = payload
-                metrics.tool_count = tool_count
+        with PhaseSpinner(phase.name) as spinner:
+            for line in proc.stdout:
+                parsed = parse_event(line)
+                if not parsed:
+                    continue
+                kind, payload = parsed
+                if kind == "tool":
+                    tool_count += 1
+                    tool_line = format_tool_line(payload)
+                    if verbose:
+                        spinner.stop()
+                        console.print(f"[dim]{tool_line}[/dim]")
+                    else:
+                        # Extract tool name + short summary for the spinner.
+                        parts = tool_line.split(None, 2)
+                        tool_name = parts[1] if len(parts) > 1 else "tool"
+                        summary = parts[2] if len(parts) > 2 else ""
+                        spinner.update(tool_name, summary)
+                elif kind == "metrics":
+                    metrics = payload
+                    metrics.tool_count = tool_count
 
         try:
             proc.wait(timeout=PHASE_TIMEOUT_S)

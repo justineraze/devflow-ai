@@ -212,7 +212,9 @@ def render_build_summary(
         rows.append(_budget_row("Cost    ", _bar(ratio), format_cost(totals.cost_usd),
                                 f"/ {format_cost(cost_budget)}", f"{int(ratio * 100)}%"))
 
-    total_tokens = totals.input_tokens + totals.cache_read
+    # input_tokens is the actual tokens billed — cache_read is a breakdown
+    # detail already included in that count, not an additive component.
+    total_tokens = totals.input_tokens
     ctx_ratio = total_tokens / context_budget if context_budget else 0
     rows.append(_budget_row("Context ", _bar(ctx_ratio),
                             format_tokens(total_tokens),

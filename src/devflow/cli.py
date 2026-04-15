@@ -75,6 +75,9 @@ def build(
     workflow: Annotated[
         str, typer.Option("--workflow", "-w", help="Workflow to use")
     ] = "standard",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
+    ] = False,
 ) -> None:
     """Build a feature end-to-end using the AI workflow.
 
@@ -97,7 +100,7 @@ def build(
     if not feature:
         raise typer.Exit(1)
 
-    success = execute_build_loop(feature, feedback=feedback)
+    success = execute_build_loop(feature, feedback=feedback, verbose=verbose)
     if not success:
         raise typer.Exit(1)
 
@@ -105,6 +108,9 @@ def build(
 @app.command()
 def retry(
     feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
+    ] = False,
 ) -> None:
     """Retry a failed feature from its last failed phase."""
     from devflow.orchestration.build import execute_build_loop
@@ -114,7 +120,7 @@ def retry(
     if not feature:
         raise typer.Exit(1)
 
-    success = execute_build_loop(feature)
+    success = execute_build_loop(feature, verbose=verbose)
     if not success:
         raise typer.Exit(1)
 
@@ -122,13 +128,16 @@ def retry(
 @app.command()
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
+    ] = False,
 ) -> None:
     """Fix a bug using a lightweight workflow (no planning phase)."""
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import start_fix
 
     feature = start_fix(description)
-    success = execute_build_loop(feature)
+    success = execute_build_loop(feature, verbose=verbose)
     if not success:
         raise typer.Exit(1)
 

@@ -137,7 +137,8 @@ def _setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
 
 
 def _execute_phase(
-    feature: Feature, phase: PhaseRecord, agent_name: str, base: Path | None = None,
+    feature: Feature, phase: PhaseRecord, agent_name: str,
+    base: Path | None = None, verbose: bool = False,
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a single phase via Claude Code or local gate."""
     from devflow.integrations.gate import run_gate_phase
@@ -146,7 +147,7 @@ def _execute_phase(
     if phase.name == "gate":
         state = load_state(base)
         return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
-    return execute_phase(feature, phase, agent_name)
+    return execute_phase(feature, phase, agent_name, verbose=verbose)
 
 
 def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
@@ -178,6 +179,7 @@ def execute_build_loop(
     feature: Feature,
     feedback: str | None = None,
     base: Path | None = None,
+    verbose: bool = False,
 ) -> bool:
     """Run a feature build with plan-first confirmation flow.
 
@@ -256,7 +258,7 @@ def execute_build_loop(
 
         render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
         start = time.monotonic()
-        success, output, metrics = _execute_phase(feature, phase, agent_name, base)
+        success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
 
         if not success:
@@ -314,7 +316,7 @@ def execute_build_loop(
 
         render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
         start = time.monotonic()
-        success, output, metrics = _execute_phase(feature, phase, agent_name, base)
+        success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
 
         if success:
