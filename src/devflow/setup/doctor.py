@@ -133,7 +133,7 @@ def check_claude_default_model() -> CheckResult:
     general interactive ``claude`` usage outside devflow. Warn when
     the global default is Opus (expensive).
     """
-    import json
+    from devflow.setup._settings import load_settings
 
     settings = Path.home() / ".claude" / "settings.json"
     if not settings.exists():
@@ -143,13 +143,12 @@ def check_claude_default_model() -> CheckResult:
             message="no settings.json — uses Claude Code default",
         )
 
-    try:
-        data = json.loads(settings.read_text())
-    except json.JSONDecodeError as exc:
+    data, err = load_settings(settings)
+    if err:
         return CheckResult(
             name="claude model",
             passed=False,
-            message=f"invalid settings.json: {exc}",
+            message=f"invalid settings.json: {err}",
         )
 
     model = data.get("model", "")
