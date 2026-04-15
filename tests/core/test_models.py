@@ -4,13 +4,78 @@
 import pytest
 
 from devflow.core.models import (
+    ComplexityScore,
     Feature,
+    FeatureMetadata,
     FeatureStatus,
     InvalidTransition,
     PhaseRecord,
     PhaseStatus,
     WorkflowState,
 )
+
+
+class TestComplexityScore:
+    def test_total_is_sum_of_dimensions(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=2, security=0, scope=1)
+        assert score.total == 4
+
+    def test_all_zeros_gives_total_zero(self) -> None:
+        score = ComplexityScore()
+        assert score.total == 0
+
+    def test_max_score_is_twelve(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=3, scope=3)
+        assert score.total == 12
+
+    def test_workflow_quick_at_zero(self) -> None:
+        score = ComplexityScore()
+        assert score.workflow == "quick"
+
+    def test_workflow_quick_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=1, security=0, scope=0)
+        assert score.total == 2
+        assert score.workflow == "quick"
+
+    def test_workflow_light(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=1, security=1, scope=0)
+        assert score.total == 3
+        assert score.workflow == "light"
+
+    def test_workflow_light_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=1, security=1, scope=1)
+        assert score.total == 5
+        assert score.workflow == "light"
+
+    def test_workflow_standard(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=2, security=1, scope=1)
+        assert score.total == 6
+        assert score.workflow == "standard"
+
+    def test_workflow_standard_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=2, security=2, scope=2)
+        assert score.total == 8
+        assert score.workflow == "standard"
+
+    def test_workflow_full(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=2, scope=1)
+        assert score.total == 9
+        assert score.workflow == "full"
+
+    def test_workflow_full_at_max(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=3, scope=3)
+        assert score.total == 12
+        assert score.workflow == "full"
+
+    def test_complexity_stored_in_feature_metadata(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=0, security=0, scope=1)
+        meta = FeatureMetadata(complexity=score)
+        assert meta.complexity is not None
+        assert meta.complexity.workflow == "light"
+
+    def test_feature_metadata_complexity_defaults_none(self) -> None:
+        meta = FeatureMetadata()
+        assert meta.complexity is None
 
 
 class TestPhaseRecord:

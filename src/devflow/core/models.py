@@ -5,7 +5,45 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+# Workflow selection thresholds for ComplexityScore.total (0–12).
+_WORKFLOW_THRESHOLDS: list[tuple[int, str]] = [
+    (2, "quick"),
+    (5, "light"),
+    (8, "standard"),
+    (12, "full"),
+]
+
+
+class ComplexityScore(BaseModel):
+    """Complexity score for a feature across four dimensions (each 0–3)."""
+
+    files_touched: int = 0
+    """Number of files expected to be modified (heuristic, 0–3)."""
+
+    integrations: int = 0
+    """External systems involved: API, DB, webhook, OAuth… (0–3)."""
+
+    security: int = 0
+    """Security-sensitive surface area: auth, tokens, crypto… (0–3)."""
+
+    scope: int = 0
+    """Breadth of the change: tweak vs. new module vs. rewrite (0–3)."""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total(self) -> int:
+        """Sum of all four dimension scores (0–12)."""
+        return self.files_touched + self.integrations + self.security + self.scope
+
+    @property
+    def workflow(self) -> str:
+        """Map total score to a workflow name."""
+        for threshold, name in _WORKFLOW_THRESHOLDS:
+            if self.total <= threshold:
+                return name
+        return "full"
 
 
 class FeatureMetadata(BaseModel):
@@ -23,6 +61,9 @@ class FeatureMetadata(BaseModel):
     scope: str | None = None
     """Primary module touched (e.g. 'runner', 'gate'). Parsed from the plan's
     Module: line — used as the Conventional Commits scope in commit messages."""
+
+    complexity: ComplexityScore | None = None
+    """Complexity score computed at feature creation (auto-select workflow)."""
 
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""

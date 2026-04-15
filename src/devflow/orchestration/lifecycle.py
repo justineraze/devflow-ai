@@ -14,6 +14,7 @@ from pathlib import Path
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus
 from devflow.core.phases import get_spec
 from devflow.core.workflow import create_feature, load_state, save_state
+from devflow.integrations.complexity import score_complexity
 from devflow.ui.console import console
 
 
@@ -36,10 +37,16 @@ def _transition_safe(feature: Feature, target: FeatureStatus) -> bool:
 
 def start_build(
     description: str,
-    workflow_name: str = "standard",
+    workflow_name: str | None = None,
     base: Path | None = None,
 ) -> Feature:
-    """Start a new feature build."""
+    """Start a new feature build.
+
+    When *workflow_name* is ``None``, the workflow is auto-selected by scoring
+    the feature description and project structure via :func:`score_complexity`.
+    The resulting :class:`~devflow.core.models.ComplexityScore` is stored in
+    ``feature.metadata.complexity`` for display in ``devflow status``.
+    """
     state = load_state(base)
     feature_id = _generate_feature_id(description)
 
@@ -49,7 +56,22 @@ def start_build(
         counter += 1
         feature_id = f"{original_id}-{counter}"
 
+    complexity = None
+    if workflow_name is None:
+        complexity = score_complexity(description, base)
+        workflow_name = complexity.workflow
+        console.print(
+            f"[dim]Auto-selected workflow:[/dim] [bold]{workflow_name}[/bold] "
+            f"[dim](score {complexity.total}/12 — "
+            f"files:{complexity.files_touched} "
+            f"integrations:{complexity.integrations} "
+            f"security:{complexity.security} "
+            f"scope:{complexity.scope})[/dim]"
+        )
+
     feature = create_feature(state, feature_id, description, workflow_name)
+    if complexity is not None:
+        feature.metadata.complexity = complexity
     save_state(state, base)
     return feature
 

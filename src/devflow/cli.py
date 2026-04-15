@@ -73,8 +73,8 @@ def build(
         str | None, typer.Option("--resume", help="Resume a feature by ID")
     ] = None,
     workflow: Annotated[
-        str, typer.Option("--workflow", "-w", help="Workflow to use")
-    ] = "standard",
+        str | None, typer.Option("--workflow", "-w", help="Workflow to use (default: auto-detect)")
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,

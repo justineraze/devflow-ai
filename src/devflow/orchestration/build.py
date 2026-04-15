@@ -29,6 +29,7 @@ from devflow.orchestration.phase_exec import (
     reset_planning_phases,
     run_phase,
 )
+from devflow.integrations.complexity import CRITICAL_PATH_PATTERNS
 from devflow.ui.console import console
 
 
@@ -58,11 +59,6 @@ def _get_phase_agent(
 
     return agent
 
-
-# File/path patterns that must never trigger a model downgrade.
-CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
-    "auth", "secret", "token", "crypto", "payment", "billing", "password",
-)
 
 
 def _persist_files_summary(feature_id: str, base: Path | None = None) -> None:
