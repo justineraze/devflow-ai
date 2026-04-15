@@ -211,6 +211,17 @@ class TestCheckHookInstalled:
         assert result.passed is False
         assert "unreadable" in result.message
 
+    def test_fails_with_correct_message_when_settings_empty(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        hook = hooks_dir / "devflow-post-compact.sh"
+        hook.write_text("#!/usr/bin/env bash\n")
+        settings = tmp_path / "settings.json"
+        settings.write_text("{}")  # exists but empty — not "missing"
+        result = check_hook_installed(settings, hooks_dir)
+        assert result.passed is False
+        assert "missing" not in result.message.lower() or "settings.json missing" not in result.message
+
 
 class TestRunDoctor:
     def test_returns_report_with_all_checks(self, tmp_path: Path) -> None:

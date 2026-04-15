@@ -207,7 +207,7 @@ def check_hook_installed(
             passed=False,
             message=f"settings.json unreadable: {err}",
         )
-    if not data:
+    if not cfg.exists():
         return CheckResult(
             name="hook",
             passed=False,
