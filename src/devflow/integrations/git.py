@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -255,8 +256,6 @@ def get_gone_branches(cwd: Path | None = None) -> list[str]:
     Parses ``git branch -vv`` looking for ``[<remote>/<branch>: gone]``.
     Returns an empty list if git is unavailable or there are no gone branches.
     """
-    import re
-
     result = subprocess.run(
         ["git", "branch", "-vv"],
         capture_output=True, text=True, cwd=str(cwd or Path.cwd()),
@@ -288,16 +287,73 @@ def delete_branch(name: str, cwd: Path | None = None) -> bool:
     return result.returncode == 0
 
 
+def _parse_plan_summary(plan_output: str) -> str:
+    """Extract the one-line summary from the plan header.
+
+    Looks for: ``## Plan: <id> — <summary>``
+    Supports em-dash (—), en-dash (–), and regular hyphen (-).
+    Returns the summary text, or "" if the header is absent.
+    """
+    match = re.search(r"^##\s+Plan:[^\n]*[—–\-]\s*(.+)$", plan_output, re.MULTILINE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _parse_plan_changes(plan_output: str, max_items: int = 5) -> str:
+    """Extract implementation steps as markdown bullets.
+
+    Finds ``### Implementation steps`` and reformats numbered items as
+    ``- `` bullets, stripping ``Test: …`` tails (implementation detail,
+    not relevant in a PR body).  Returns "" if the section is absent.
+    """
+    section_match = re.search(
+        r"###\s+Implementation steps\s*\n(.*?)(?=\n###|\Z)",
+        plan_output,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not section_match:
+        return ""
+
+    bullets: list[str] = []
+    for line in section_match.group(1).splitlines():
+        item_match = re.match(r"^\s*\d+\.\s+(.+)", line)
+        if not item_match:
+            continue
+        text = item_match.group(1).strip()
+        # Drop "Test: ..." tail — it clutters the PR body.
+        text = re.sub(r"\.\s+Test:.*$", "", text, flags=re.IGNORECASE).rstrip(".")
+        bullets.append(f"- {text}")
+        if len(bullets) >= max_items:
+            break
+
+    return "\n".join(bullets)
+
+
 def _build_pr_body(feature: Feature) -> str:
-    """Build the PR description from phase outputs."""
-    parts = ["## Summary", "", feature.description, ""]
+    """Build the PR description from planning and gate phase outputs.
+
+    Summary and Changes are extracted from the planner's structured output.
+    Falls back to ``feature.description`` when the planning phase is absent
+    (quick/fix workflows) or produced no parseable header.
+    """
+    plan_output = next(
+        (p.output for p in feature.phases if p.name == "planning" and p.output),
+        "",
+    )
+
+    summary = _parse_plan_summary(plan_output) if plan_output else ""
+    changes = _parse_plan_changes(plan_output) if plan_output else ""
+
+    parts = ["## Summary", ""]
+    parts.append(summary or feature.description)
+    parts.append("")
+
+    if changes:
+        parts.extend(["## Changes", "", changes, ""])
 
     for phase in feature.phases:
-        if phase.status != PhaseStatus.DONE or not phase.output:
-            continue
-        if phase.name == "planning":
-            parts.extend(["## Plan", "", phase.output, ""])
-        elif phase.name == "gate":
+        if phase.name == "gate" and phase.status == PhaseStatus.DONE and phase.output:
             parts.extend(["## Quality gate", "", phase.output, ""])
 
     parts.append("---")
