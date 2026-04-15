@@ -6,7 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
-from devflow.core.models import Feature, PhaseStatus
+from devflow.core.artifacts import load_phase_output
+from devflow.core.models import Feature
 from devflow.ui.console import console
 
 # Max length for PR titles and commit summaries (Conventional Commits best practice).
@@ -331,16 +332,13 @@ def _parse_plan_changes(plan_output: str, max_items: int = 5) -> str:
 
 
 def _build_pr_body(feature: Feature) -> str:
-    """Build the PR description from planning and gate phase outputs.
+    """Build the PR description from planning and gate phase artifacts.
 
     Summary and Changes are extracted from the planner's structured output.
     Falls back to ``feature.description`` when the planning phase is absent
     (quick/fix workflows) or produced no parseable header.
     """
-    plan_output = next(
-        (p.output for p in feature.phases if p.name == "planning" and p.output),
-        "",
-    )
+    plan_output = load_phase_output(feature.id, "planning") or ""
 
     summary = _parse_plan_summary(plan_output) if plan_output else ""
     changes = _parse_plan_changes(plan_output) if plan_output else ""
@@ -352,9 +350,9 @@ def _build_pr_body(feature: Feature) -> str:
     if changes:
         parts.extend(["## Changes", "", changes, ""])
 
-    for phase in feature.phases:
-        if phase.name == "gate" and phase.status == PhaseStatus.DONE and phase.output:
-            parts.extend(["## Quality gate", "", phase.output, ""])
+    gate_output = load_phase_output(feature.id, "gate") or ""
+    if gate_output:
+        parts.extend(["## Quality gate", "", gate_output, ""])
 
     parts.append("---")
     parts.append("Built with [devflow-ai](https://github.com/JustineRaze/devflow-ai)")

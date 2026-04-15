@@ -163,13 +163,18 @@ class TestRunPhase:
 
 class TestCompletePhase:
     def test_marks_phase_done(self, project_dir: Path) -> None:
+        from devflow.core.artifacts import load_phase_output
+
         feature = start_build("test", "standard", project_dir)
         run_phase(feature, project_dir)
         complete_phase(feature.id, "planning", "plan complete", project_dir)
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         assert tracked.phases[0].status == PhaseStatus.DONE
-        assert tracked.phases[0].output == "plan complete"
+        # output is cleared from state.json to avoid duplication
+        assert tracked.phases[0].output == ""
+        # but the content is safely stored as an artifact
+        assert load_phase_output(feature.id, "planning", project_dir) == "plan complete"
 
 
 class TestFailPhase:
