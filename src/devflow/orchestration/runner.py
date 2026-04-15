@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output
@@ -222,6 +224,12 @@ def execute_phase(
     model = resolve_model(feature, phase)
     cwd = str(Path.cwd())
 
+    # Prepend the active virtualenv's bin dir so the agent can run ruff,
+    # pytest, devflow, etc. without PATH issues.
+    venv_bin = str(Path(sys.executable).parent)
+    agent_env = os.environ.copy()
+    agent_env["PATH"] = f"{venv_bin}{os.pathsep}{agent_env.get('PATH', '')}"
+
     cmd = [
         "claude", "-p", "-",
         "--model", model,
@@ -240,6 +248,7 @@ def execute_phase(
             stderr=subprocess.PIPE,
             text=True,
             cwd=cwd,
+            env=agent_env,
         )
 
         proc.stdin.write(user_prompt)
