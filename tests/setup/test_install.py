@@ -8,11 +8,24 @@ from pathlib import Path
 
 import pytest
 
-from devflow.setup.install import install_agents, install_all, install_hook, install_skills
+from devflow.setup.install import ASSETS_DIR, install_agents, install_all, install_hook, install_skills
 
 HOOK_SCRIPT = (
     Path(__file__).resolve().parent.parent.parent / "assets" / "hooks" / "devflow-post-compact.sh"
 )
+
+
+class TestAssetsDirResolution:
+    def test_assets_dir_exists(self) -> None:
+        """ASSETS_DIR should be found and should be a directory."""
+        assert ASSETS_DIR.exists()
+        assert ASSETS_DIR.is_dir()
+
+    def test_assets_dir_contains_hook_script(self) -> None:
+        """ASSETS_DIR should contain the devflow-post-compact.sh hook script."""
+        hook_script = ASSETS_DIR / "hooks" / "devflow-post-compact.sh"
+        assert hook_script.exists(), f"Hook script not found at {hook_script}"
+        assert hook_script.is_file()
 
 
 def _create_assets(tmp_path: Path) -> Path:

@@ -8,8 +8,25 @@ from pathlib import Path
 
 from devflow.ui.console import console
 
+
+def _find_assets_dir() -> Path:
+    """Find the assets directory, supporting both editable and wheel installs.
+
+    In editable installs: src/devflow/setup/install.py → parent^4 == repo root
+    In wheel installs: site-packages/devflow/setup/install.py → assets at parent^3
+    """
+    here = Path(__file__).resolve()
+    # Try parent^4 first (editable install), then parent^3 (wheel install)
+    for up in (4, 3):
+        candidate = here.parents[up - 1] / "assets"
+        if candidate.is_dir():
+            return candidate
+    # Fallback to parent^3 if neither is found (development default)
+    return here.parents[3] / "assets"
+
+
 # Package assets directory (relative to this file).
-ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"
+ASSETS_DIR = _find_assets_dir()
 
 # Default Claude Code directories.
 CLAUDE_DIR = Path.home() / ".claude"
