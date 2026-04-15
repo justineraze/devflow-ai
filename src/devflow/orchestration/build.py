@@ -99,7 +99,7 @@ def _setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
     if not feature:
         return False
 
-    attempts = int(feature.metadata.get("gate_retry", 0))
+    attempts = feature.metadata.gate_retry
     if attempts >= MAX_GATE_AUTO_RETRIES:
         return False
 
@@ -116,7 +116,7 @@ def _setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
         fixing_phase.reset()
 
     gate_phase.reset()
-    feature.metadata["gate_retry"] = attempts + 1
+    feature.metadata.gate_retry = attempts + 1
     _transition_safe(feature, FeatureStatus.FIXING)
     save_state(state, base)
     return True
@@ -205,7 +205,7 @@ def execute_build_loop(
         reset_planning_phases(feature.id, base)
         state = load_state(base)
         feature = state.get_feature(feature.id) or feature
-        feature.metadata["feedback"] = feedback
+        feature.metadata.feedback = feedback
         save_state(state, base)
         switch_branch(branch)
     else:

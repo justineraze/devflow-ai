@@ -121,7 +121,7 @@ def run_sync(
         from devflow.core.models import FeatureStatus
         done_features = [
             f for f in state.features.values()
-            if f.status == FeatureStatus.DONE and not f.metadata.get("archived")
+            if f.status == FeatureStatus.DONE and not f.metadata.archived
         ]
         for feat in done_features:
             if _pr_is_merged(feat.id, cwd):
@@ -131,7 +131,7 @@ def run_sync(
                     # Artifacts may already be gone — still mark archived.
                     with contextlib.suppress(FileNotFoundError):
                         archive_feature(feat.id, cwd)
-                    feat.metadata["archived"] = True
+                    feat.metadata.archived = True
                     result.actions.append(f"archived feature: {feat.id}")
                 result.features_archived.append(feat.id)
 

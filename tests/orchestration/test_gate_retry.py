@@ -67,7 +67,7 @@ class TestSetupGateRetry:
         gate = next(p for p in feature.phases if p.name == "gate")
         assert fixing.status == PhaseStatus.PENDING
         assert gate.status == PhaseStatus.PENDING
-        assert feature.metadata["gate_retry"] == 1
+        assert feature.metadata.gate_retry == 1
         assert feature.status == FeatureStatus.FIXING
 
     def test_resets_existing_fixing_phase(self, project_dir: Path) -> None:
@@ -85,7 +85,7 @@ class TestSetupGateRetry:
 
     def test_refuses_second_retry(self, project_dir: Path) -> None:
         feature = _make_feature_with_gate(project_dir, with_fixing=False)
-        feature.metadata["gate_retry"] = MAX_GATE_AUTO_RETRIES
+        feature.metadata.gate_retry = MAX_GATE_AUTO_RETRIES
         state = WorkflowState(features={feature.id: feature})
         save_state(state, project_dir)
 
