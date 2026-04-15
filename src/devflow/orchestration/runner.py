@@ -262,7 +262,12 @@ def execute_phase(
         metrics = PhaseMetrics()
         tool_count = 0
 
-        with PhaseSpinner(phase.name) as spinner:
+        # verbose=True: stream every tool line (original behaviour).
+        # verbose=False (default): spinner updated in-place with last action.
+        spinner_ctx = (
+            contextlib.nullcontext(None) if verbose else PhaseSpinner(phase.name)
+        )
+        with spinner_ctx as spinner:
             for line in proc.stdout:
                 parsed = parse_event(line)
                 if not parsed:
@@ -272,14 +277,13 @@ def execute_phase(
                     tool_count += 1
                     tool_line = format_tool_line(payload)
                     if verbose:
-                        spinner.stop()
                         console.print(f"[dim]{tool_line}[/dim]")
-                    else:
-                        # Extract tool name + short summary for the spinner.
+                    elif spinner is not None:
                         parts = tool_line.split(None, 2)
-                        tool_name = parts[1] if len(parts) > 1 else "tool"
-                        summary = parts[2] if len(parts) > 2 else ""
-                        spinner.update(tool_name, summary)
+                        spinner.update(
+                            parts[1] if len(parts) > 1 else "tool",
+                            parts[2] if len(parts) > 2 else "",
+                        )
                 elif kind == "metrics":
                     metrics = payload
                     metrics.tool_count = tool_count
