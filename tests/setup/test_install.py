@@ -6,6 +6,8 @@ import json
 import stat
 from pathlib import Path
 
+import pytest
+
 from devflow.setup.install import install_agents, install_all, install_hook, install_skills
 
 HOOK_SCRIPT = (
@@ -144,6 +146,18 @@ class TestInstallHook:
         settings = tmp_path / "claude" / "settings.json"
         name = install_hook(assets, settings, hooks_dir)
         assert name == "devflow-post-compact.sh"
+
+    def test_raises_on_malformed_settings_json(self, tmp_path: Path) -> None:
+        """install_hook should refuse to overwrite malformed settings.json."""
+        assets = _create_assets(tmp_path)
+        hooks_dir = tmp_path / "claude" / "hooks"
+        settings = tmp_path / "claude" / "settings.json"
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        # Write invalid JSON
+        settings.write_text("{invalid json")
+
+        with pytest.raises(RuntimeError, match="Refusing to rewrite settings.json"):
+            install_hook(assets, settings, hooks_dir)
 
 
 class TestInstallAll:

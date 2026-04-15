@@ -95,7 +95,12 @@ def install_hook(
     dst.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     # Merge PostCompact entry into settings.json.
-    data, _err = load_settings(cfg)
+    data, err = load_settings(cfg)
+    if err:
+        raise RuntimeError(
+            f"Refusing to rewrite settings.json: {err}. "
+            "Fix the JSON manually, then re-run `devflow install`."
+        )
     hook_command = str(dst.resolve())
 
     hooks_section: dict = data.setdefault("hooks", {})
