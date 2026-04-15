@@ -20,6 +20,10 @@ class FeatureMetadata(BaseModel):
     archived: bool = False
     """True after devflow sync archives a merged feature."""
 
+    scope: str | None = None
+    """Primary module touched (e.g. 'runner', 'gate'). Parsed from the plan's
+    Module: line — used as the Conventional Commits scope in commit messages."""
+
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""
 

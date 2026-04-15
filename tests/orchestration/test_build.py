@@ -9,6 +9,7 @@ from devflow.core.models import FeatureStatus, PhaseStatus
 from devflow.core.workflow import load_state, save_state
 from devflow.orchestration.build import (
     _get_phase_agent,
+    _parse_plan_module,
     execute_build_loop,
 )
 from devflow.orchestration.lifecycle import (
@@ -31,6 +32,23 @@ _PHASE_OK = (True, "done", PhaseMetrics())
 @pytest.fixture
 def project_dir(tmp_path: Path) -> Path:
     return tmp_path
+
+
+class TestParsePlanModule:
+    def test_extracts_module_name(self) -> None:
+        plan = "### Scope\n- Type: extension\n- Module: runner\n"
+        assert _parse_plan_module(plan) == "runner"
+
+    def test_returns_none_when_absent(self) -> None:
+        plan = "### Scope\n- Type: extension\n- Complexity: low\n"
+        assert _parse_plan_module(plan) is None
+
+    def test_ignores_extra_words_after_module(self) -> None:
+        plan = "- Module: gate (parallel execution)\n"
+        assert _parse_plan_module(plan) == "gate"
+
+    def test_empty_string_returns_none(self) -> None:
+        assert _parse_plan_module("") is None
 
 
 class TestGenerateFeatureId:

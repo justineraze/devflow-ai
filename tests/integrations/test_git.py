@@ -5,11 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devflow.core.models import Feature, FeatureStatus
+from devflow.core.models import Feature, FeatureMetadata, FeatureStatus
 from devflow.integrations.git import (
     _build_pr_body,
     _parse_plan_changes,
     _parse_plan_summary,
+    branch_name,
     build_commit_message,
     build_pr_title,
     commit_changes,
@@ -90,6 +91,35 @@ class TestBuildCommitMessage:
         assert len(msg) <= 70
         assert not msg.endswith(" ")
 
+    def test_with_scope(self) -> None:
+        feature = Feature(
+            id="f-001", description="Add caching layer", workflow="standard",
+            metadata=FeatureMetadata(scope="runner"),
+        )
+        assert build_commit_message(feature) == "feat(runner): Add caching layer"
+
+    def test_scope_in_fix_workflow(self) -> None:
+        feature = Feature(
+            id="f-001", description="broken login", workflow="quick",
+            metadata=FeatureMetadata(scope="gate"),
+        )
+        assert build_commit_message(feature) == "fix(gate): Broken login"
+
+    def test_no_scope_omits_parentheses(self) -> None:
+        feature = Feature(id="f-001", description="Add user auth", workflow="standard")
+        assert "(" not in build_commit_message(feature)
+
+
+class TestBranchName:
+    def test_strips_feat_prefix(self) -> None:
+        assert branch_name("feat-add-caching-0415") == "feat/add-caching-0415"
+
+    def test_no_prefix_preserved(self) -> None:
+        assert branch_name("add-caching-0415") == "feat/add-caching-0415"
+
+    def test_quick_fix_id(self) -> None:
+        assert branch_name("feat-fix-login-1234") == "feat/fix-login-1234"
+
 
 class TestCommitChanges:
     @patch("devflow.integrations.git.subprocess.run")
@@ -134,6 +164,7 @@ _SAMPLE_PLAN = """\
 - Type: extension
 - Complexity: low
 - Estimated steps: 3
+- Module: gate
 
 ### Affected files
 | File | Action | What changes |
