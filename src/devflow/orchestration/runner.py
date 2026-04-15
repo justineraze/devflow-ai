@@ -8,7 +8,7 @@ from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output
 from devflow.core.metrics import PhaseMetrics
-from devflow.core.models import Feature, PhaseRecord, PhaseStatus
+from devflow.core.models import Feature, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.orchestration.model_routing import resolve_model
 from devflow.ui.console import console
@@ -96,14 +96,9 @@ def _build_phase_context(feature: Feature, phase: PhaseRecord) -> str:
     if not deps:
         return ""
 
-    phase_by_name = {p.name: p for p in feature.phases}
     parts: list[str] = []
     for dep_name in deps:
         content = load_phase_output(feature.id, dep_name)
-        if content is None:
-            prev = phase_by_name.get(dep_name)
-            if prev and prev.status == PhaseStatus.DONE and prev.output:
-                content = prev.output
         if content:
             parts.append(f"## Output from phase: {dep_name}\n\n{content}")
     return "\n\n---\n\n".join(parts)

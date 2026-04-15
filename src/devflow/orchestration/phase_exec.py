@@ -51,7 +51,12 @@ def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
 def complete_phase(
     feature_id: str, phase_name: str, output: str = "", base: Path | None = None,
 ) -> None:
-    """Mark a phase as completed and persist state."""
+    """Mark a phase as completed and persist state.
+
+    The output is saved to disk as an artifact, then cleared from the
+    PhaseRecord before persisting state.json — avoiding duplication of
+    potentially large strings in the state file.
+    """
     state = load_state(base)
     feature = state.get_feature(feature_id)
     if not feature:
@@ -59,13 +64,13 @@ def complete_phase(
     for phase in feature.phases:
         if phase.name == phase_name and phase.status == PhaseStatus.IN_PROGRESS:
             phase.complete(output)
+            if output:
+                from devflow.core.artifacts import save_phase_output
+
+                save_phase_output(feature_id, phase_name, output, base)
+                phase.output = ""
             break
     save_state(state, base)
-
-    if output:
-        from devflow.core.artifacts import save_phase_output
-
-        save_phase_output(feature_id, phase_name, output, base)
 
 
 def fail_phase(
