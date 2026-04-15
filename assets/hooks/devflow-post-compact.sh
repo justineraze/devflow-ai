@@ -22,6 +22,13 @@ import json
 import sys
 from pathlib import Path
 
+try:
+    from datetime import datetime
+    from dateutil.parser import isoparse
+except ImportError:
+    # dateutil not available; fall back to lexical comparison
+    isoparse = None
+
 state_path = Path(sys.argv[1])
 
 try:
@@ -44,7 +51,20 @@ active = [
 if not active:
     sys.exit(0)
 
-feature = max(active, key=lambda f: f.get("updated_at", ""))
+# Extract timestamps for comparison, using isoparse if available for robustness.
+# Contract: updated_at is ISO 8601 UTC (e.g., "2026-04-15T12:34:56.123456+00:00").
+def get_timestamp(feature_dict):
+    ts_str = feature_dict.get("updated_at", "")
+    if not ts_str:
+        return datetime.min if isoparse else ""
+    if isoparse:
+        try:
+            return isoparse(ts_str)
+        except (ValueError, TypeError):
+            return datetime.min
+    return ts_str
+
+feature = max(active, key=get_timestamp)
 
 feat_id = feature.get("id", "?")
 description = feature.get("description", "")
