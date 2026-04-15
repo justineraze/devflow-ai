@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from devflow.setup.install import ASSETS_DIR, install_agents, install_all, install_hook, install_skills
+from devflow.setup.install import (
+    ASSETS_DIR,
+    install_agents,
+    install_all,
+    install_hook,
+    install_skills,
+)
 
 HOOK_SCRIPT = (
     Path(__file__).resolve().parent.parent.parent / "assets" / "hooks" / "devflow-post-compact.sh"
