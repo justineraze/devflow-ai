@@ -24,21 +24,21 @@ class TestBuildPrTitle:
             id="f-001", description="Add user authentication",
             workflow="standard",
         )
-        assert build_pr_title(feature) == "feat: Add user authentication"
+        assert build_pr_title(feature) == "feat: add user authentication"
 
     def test_fix_prefix_for_quick_workflow(self) -> None:
         feature = Feature(
             id="f-001", description="broken login redirect",
             workflow="quick",
         )
-        assert build_pr_title(feature) == "fix: Broken login redirect"
+        assert build_pr_title(feature) == "fix: broken login redirect"
 
     def test_strips_trailing_punctuation(self) -> None:
         feature = Feature(
             id="f-001", description="Add dark mode!",
             workflow="standard",
         )
-        assert build_pr_title(feature) == "feat: Add dark mode"
+        assert build_pr_title(feature) == "feat: add dark mode"
 
     def test_truncates_long_description(self) -> None:
         long = "Add a very long feature description that goes on and on and exceeds the limit"
@@ -53,7 +53,27 @@ class TestBuildPrTitle:
             id="f-001", description="Add OAuth support",
             workflow="standard",
         )
-        assert build_pr_title(feature) == "feat: Add OAuth support"
+        assert build_pr_title(feature) == "feat: add OAuth support"
+
+    def test_description_is_lowercase(self) -> None:
+        # Conventional Commits: description must be lowercase.
+        feature = Feature(
+            id="f-001", description="Add user authentication",
+            workflow="standard",
+        )
+        title = build_pr_title(feature)
+        assert title == "feat: add user authentication"
+
+    def test_description_with_colon_does_not_create_double_colon(self) -> None:
+        # Regression: descriptions containing ":" were producing titles like
+        # "feat: PostCompact hook: re-inject …" which looks like two type prefixes.
+        feature = Feature(
+            id="f-001", description="PostCompact hook: re-inject devflow context",
+            workflow="standard",
+        )
+        title = build_pr_title(feature)
+        # Only one colon after the type prefix.
+        assert title.count(":") == 1
 
 
 class TestBuildCommitMessage:
@@ -61,28 +81,28 @@ class TestBuildCommitMessage:
         feature = Feature(
             id="f-001", description="Add user auth", workflow="standard",
         )
-        assert build_commit_message(feature) == "feat: Add user auth"
+        assert build_commit_message(feature) == "feat: add user auth"
 
     def test_with_phase_suffix(self) -> None:
         feature = Feature(
             id="f-001", description="Add user auth", workflow="standard",
         )
         msg = build_commit_message(feature, suffix="implementing")
-        assert msg == "feat: Add user auth — implementing"
+        assert msg == "feat: add user auth — implementing"
 
     def test_with_leftover_suffix(self) -> None:
         feature = Feature(
             id="f-001", description="Add user auth", workflow="standard",
         )
         msg = build_commit_message(feature, suffix="leftover changes")
-        assert msg == "feat: Add user auth — leftover changes"
+        assert msg == "feat: add user auth — leftover changes"
 
     def test_quick_workflow_uses_fix_prefix(self) -> None:
         feature = Feature(
             id="f-001", description="broken login", workflow="quick",
         )
         msg = build_commit_message(feature, suffix="implementing")
-        assert msg == "fix: Broken login — implementing"
+        assert msg == "fix: broken login — implementing"
 
     def test_truncates_at_word_boundary(self) -> None:
         long = "Add something very long indeed going past the limit"
@@ -96,14 +116,14 @@ class TestBuildCommitMessage:
             id="f-001", description="Add caching layer", workflow="standard",
             metadata=FeatureMetadata(scope="runner"),
         )
-        assert build_commit_message(feature) == "feat(runner): Add caching layer"
+        assert build_commit_message(feature) == "feat(runner): add caching layer"
 
     def test_scope_in_fix_workflow(self) -> None:
         feature = Feature(
             id="f-001", description="broken login", workflow="quick",
             metadata=FeatureMetadata(scope="gate"),
         )
-        assert build_commit_message(feature) == "fix(gate): Broken login"
+        assert build_commit_message(feature) == "fix(gate): broken login"
 
     def test_no_scope_omits_parentheses(self) -> None:
         feature = Feature(id="f-001", description="Add user auth", workflow="standard")
@@ -206,6 +226,18 @@ class TestParsePlanSummary:
 
     def test_returns_empty_on_empty_string(self) -> None:
         assert _parse_plan_summary("") == ""
+
+    def test_does_not_match_hyphen_inside_summary_words(self) -> None:
+        # Regression: "re-inject" was eaten by the greedy [—–\-] match,
+        # returning only "inject devflow context" instead of the full summary.
+        plan = "## Plan: feat-xxx — PostCompact hook: re-inject devflow context\n### Scope"
+        assert _parse_plan_summary(plan) == "PostCompact hook: re-inject devflow context"
+
+    def test_does_not_match_hyphens_in_feature_id(self) -> None:
+        # The feature ID itself contains hyphens — separator must be the dash
+        # between ID and summary, not a hyphen inside the ID.
+        plan = "## Plan: feat-add-caching-layer-0415 — Add Redis caching\n### Scope"
+        assert _parse_plan_summary(plan) == "Add Redis caching"
 
 
 class TestParsePlanChanges:
@@ -339,4 +371,4 @@ class TestPushAndCreatePr:
         pr_call = mock_run.call_args_list[5]
         pr_args = pr_call[0][0]
         title_idx = pr_args.index("--title") + 1
-        assert pr_args[title_idx] == "feat: Add auth"
+        assert pr_args[title_idx] == "feat: add auth"

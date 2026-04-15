@@ -23,11 +23,14 @@ def _commit_prefix(feature: Feature) -> str:
 
 
 def _normalize_description(description: str) -> str:
-    """Capitalize the first letter and strip trailing punctuation."""
+    """Lowercase the first letter, strip trailing punctuation, and sanitize colons.
+
+    Colons in the description are replaced with em-dashes so they don't look
+    like a second Conventional Commits type prefix (e.g. "feat: foo: bar").
+    """
     desc = description.strip().rstrip(".!?")
-    if desc:
-        desc = desc[0].upper() + desc[1:]
-    return desc
+    desc = desc.replace(":", " —")
+    return desc[0].lower() + desc[1:] if desc else desc
 
 
 def _truncate_at_word(text: str, max_len: int, min_prefix: int = 0) -> str:
@@ -307,7 +310,7 @@ def _parse_plan_summary(plan_output: str) -> str:
     Supports em-dash (—), en-dash (–), and regular hyphen (-).
     Returns the summary text, or "" if the header is absent.
     """
-    match = re.search(r"^##\s+Plan:[^\n]*[—–\-]\s*(.+)$", plan_output, re.MULTILINE)
+    match = re.search(r"^##\s+Plan:[^\n]*?(?:—|–| - )\s*(.+)$", plan_output, re.MULTILINE)
     if not match:
         return ""
     return match.group(1).strip()

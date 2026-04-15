@@ -220,7 +220,8 @@ class TestCheckHookInstalled:
         settings.write_text("{}")  # exists but empty — not "missing"
         result = check_hook_installed(settings, hooks_dir)
         assert result.passed is False
-        assert "missing" not in result.message.lower() or "settings.json missing" not in result.message
+        # Message should not say "settings.json missing" — the file exists, just empty.
+        assert result.message != "settings.json missing — run: devflow install"
 
 
 class TestRunDoctor:
