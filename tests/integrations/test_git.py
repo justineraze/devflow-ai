@@ -2,8 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
-from devflow.core.models import Feature, FeatureStatus
+from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.integrations.git import (
+    _build_pr_body,
+    _parse_plan_changes,
+    _parse_plan_summary,
     build_commit_message,
     build_pr_title,
     commit_changes,
@@ -119,6 +122,142 @@ class TestHasCommitsAhead:
     def test_no_commits(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="0\n")
         assert has_commits_ahead() is False
+
+
+_SAMPLE_PLAN = """\
+## Plan: feat-gate-parallel-0415 — Run ruff and pytest in parallel in the gate
+
+### Scope
+- Type: extension
+- Complexity: low
+- Estimated steps: 3
+
+### Affected files
+| File | Action | What changes |
+|------|--------|-------------|
+| src/devflow/integrations/gate.py | modify | parallel execution |
+
+### Quality audit
+No issues found.
+
+### Implementation steps
+1. **src/devflow/integrations/gate.py** — wrap runners with `asyncio.gather`.
+   Test: test_gate_runs_in_parallel asserts both checks complete
+2. **tests/integrations/test_gate.py** — add fixture with two slow checks.
+   Test: wall time < sum of individual times
+3. **src/devflow/ui/rendering.py** — update gate panel to show parallel badge.
+   Test: snapshot test
+
+### Risks
+- asyncio loop already running → use thread executor as fallback
+"""
+
+
+class TestParsePlanSummary:
+    def test_extracts_summary_with_em_dash(self) -> None:
+        assert _parse_plan_summary(_SAMPLE_PLAN) == (
+            "Run ruff and pytest in parallel in the gate"
+        )
+
+    def test_extracts_summary_with_en_dash(self) -> None:
+        plan = "## Plan: feat-xxx – My feature summary\n### Scope"
+        assert _parse_plan_summary(plan) == "My feature summary"
+
+    def test_extracts_summary_with_hyphen(self) -> None:
+        plan = "## Plan: feat-xxx - Simple fix\n### Scope"
+        assert _parse_plan_summary(plan) == "Simple fix"
+
+    def test_returns_empty_when_no_header(self) -> None:
+        assert _parse_plan_summary("No plan header here") == ""
+
+    def test_returns_empty_on_empty_string(self) -> None:
+        assert _parse_plan_summary("") == ""
+
+
+class TestParsePlanChanges:
+    def test_extracts_numbered_steps_as_bullets(self) -> None:
+        result = _parse_plan_changes(_SAMPLE_PLAN)
+        lines = result.splitlines()
+        assert len(lines) == 3
+        assert all(line.startswith("- ") for line in lines)
+
+    def test_strips_test_tail(self) -> None:
+        result = _parse_plan_changes(_SAMPLE_PLAN)
+        assert "Test:" not in result
+
+    def test_respects_max_items(self) -> None:
+        result = _parse_plan_changes(_SAMPLE_PLAN, max_items=2)
+        assert len(result.splitlines()) == 2
+
+    def test_returns_empty_when_section_absent(self) -> None:
+        plan = "## Plan: feat-xxx — Something\n### Scope\nno steps here"
+        assert _parse_plan_changes(plan) == ""
+
+    def test_first_bullet_contains_file_and_action(self) -> None:
+        result = _parse_plan_changes(_SAMPLE_PLAN)
+        first = result.splitlines()[0]
+        assert "gate.py" in first
+        assert "asyncio.gather" in first
+
+
+class TestBuildPrBody:
+    def _make_feature(
+        self,
+        plan_output: str = "",
+        gate_output: str = "",
+    ) -> Feature:
+        phases: list[PhaseRecord] = []
+        if plan_output:
+            p = PhaseRecord(name="planning", status=PhaseStatus.DONE)
+            p.output = plan_output
+            phases.append(p)
+        if gate_output:
+            g = PhaseRecord(name="gate", status=PhaseStatus.DONE)
+            g.output = gate_output
+            phases.append(g)
+        return Feature(
+            id="feat-test-0415",
+            description="raw user prompt",
+            workflow="standard",
+            phases=phases,
+        )
+
+    def test_summary_from_plan_header(self) -> None:
+        feature = self._make_feature(plan_output=_SAMPLE_PLAN)
+        body = _build_pr_body(feature)
+        assert "Run ruff and pytest in parallel in the gate" in body
+
+    def test_changes_section_present(self) -> None:
+        feature = self._make_feature(plan_output=_SAMPLE_PLAN)
+        body = _build_pr_body(feature)
+        assert "## Changes" in body
+        assert "gate.py" in body
+
+    def test_fallback_to_description_when_no_plan(self) -> None:
+        feature = self._make_feature()
+        body = _build_pr_body(feature)
+        assert "raw user prompt" in body
+        assert "## Changes" not in body
+
+    def test_gate_output_included(self) -> None:
+        feature = self._make_feature(
+            plan_output=_SAMPLE_PLAN, gate_output="✓ ruff passed\n✓ pytest 42 tests"
+        )
+        body = _build_pr_body(feature)
+        assert "## Quality gate" in body
+        assert "ruff passed" in body
+
+    def test_plan_output_not_dumped_raw(self) -> None:
+        feature = self._make_feature(plan_output=_SAMPLE_PLAN)
+        body = _build_pr_body(feature)
+        # The raw plan sections should NOT appear in the PR body.
+        assert "### Implementation steps" not in body
+        assert "### Affected files" not in body
+
+    def test_footer_always_present(self) -> None:
+        feature = self._make_feature()
+        body = _build_pr_body(feature)
+        assert "devflow-ai" in body
 
 
 class TestPushAndCreatePr:
