@@ -104,7 +104,7 @@ def render_feature_detail(feature: Feature) -> None:
 
     if feature.phases:
         console.print("\nPhases:")
-        for _i, phase in enumerate(feature.phases, 1):
+        for phase in feature.phases:
             ps = status_style(phase.status.value)
             marker = _phase_marker(phase.status)
             console.print(f"  {marker} [{ps}]{phase.name}[/{ps}]")

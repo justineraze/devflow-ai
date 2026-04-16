@@ -12,12 +12,10 @@ Resolution order for a phase, first hit wins:
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
-from devflow.core.artifacts import read_artifact
+from devflow.core.artifacts import read_json_artifact
 from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
 
@@ -52,12 +50,8 @@ Selector = Callable[[str, Path | None], str | None]
 
 def _select_for_fixing(feature_id: str, base: Path | None) -> str | None:
     """Haiku when the gate report only complains about trivial tools."""
-    raw = read_artifact(feature_id, "gate.json", base)
-    if not raw:
-        return None
-    try:
-        data: dict[str, Any] = json.loads(raw)
-    except json.JSONDecodeError:
+    data = read_json_artifact(feature_id, "gate.json", base)
+    if not data:
         return None
 
     failing = [c for c in data.get("checks", []) if not c.get("passed", True)]
@@ -70,12 +64,8 @@ def _select_for_fixing(feature_id: str, base: Path | None) -> str | None:
 
 def _select_for_reviewing(feature_id: str, base: Path | None) -> str | None:
     """Downgrade Opus → Sonnet for small, non-sensitive diffs."""
-    raw = read_artifact(feature_id, "files.json", base)
-    if not raw:
-        return None
-    try:
-        data: dict[str, Any] = json.loads(raw)
-    except json.JSONDecodeError:
+    data = read_json_artifact(feature_id, "files.json", base)
+    if not data:
         return None
 
     if data.get("critical_paths"):

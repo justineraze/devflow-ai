@@ -31,7 +31,7 @@ def detect_stack(path: Path) -> str | None:
     """
     counts: Counter[str] = Counter()
 
-    for item in _walk(path):
+    for item in walk_files(path):
         lang = EXTENSION_MAP.get(item.suffix)
         if lang:
             counts[lang] += 1
@@ -58,7 +58,7 @@ def resolve_stack(base: Path | None = None) -> str | None:
     return detect_stack(root)
 
 
-def _walk(root: Path) -> list[Path]:
+def walk_files(root: Path) -> list[Path]:
     """Recursively list files, skipping ignored directories."""
     files: list[Path] = []
     try:
@@ -66,7 +66,7 @@ def _walk(root: Path) -> list[Path]:
             if entry.is_dir():
                 if entry.name in IGNORED_DIRS:
                     continue
-                files.extend(_walk(entry))
+                files.extend(walk_files(entry))
             elif entry.is_file():
                 files.append(entry)
     except PermissionError:

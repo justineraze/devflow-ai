@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
-import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from pathlib import Path as _Path
 from typing import Any, NamedTuple
 
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.paths import venv_env
 from devflow.ui.console import console
 
 # Patterns that likely indicate leaked secrets.
@@ -163,12 +161,6 @@ def _run_command_check(
         CheckResult with *passed=True* when the tool exits 0 **or** is missing.
         Missing tools are reported but never fail the gate.
     """
-    # Ensure the active venv's bin dir is first in PATH so ruff/pytest are
-    # found even when devflow is invoked outside an activated virtualenv.
-    venv_bin = str(_Path(sys.executable).parent)
-    env = os.environ.copy()
-    env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
-
     try:
         result = subprocess.run(
             cmd,
@@ -176,7 +168,7 @@ def _run_command_check(
             text=True,
             cwd=str(cwd),
             timeout=timeout,
-            env=env,
+            env=venv_env(),
         )
     except FileNotFoundError:
         return CheckResult(

@@ -43,7 +43,13 @@ line-length = 99
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/e2e"]
+addopts = "-m 'not smoke'"
+norecursedirs = ["tests/e2e/fixtures", "tests/smoke/fixtures"]
+markers = [
+    "e2e: orchestration tests — real git + gate, mocked claude (fast, no API cost)",
+    "smoke: full pipeline with real claude -p calls — run manually before releases",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/devflow"]

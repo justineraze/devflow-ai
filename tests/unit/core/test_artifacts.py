@@ -12,6 +12,7 @@ from devflow.core.artifacts import (
     feature_dir,
     load_phase_output,
     read_artifact,
+    read_json_artifact,
     save_phase_output,
     write_artifact,
 )
@@ -53,6 +54,27 @@ class TestArtifactIO:
     def test_save_and_load_phase_output(self, project_dir: Path) -> None:
         save_phase_output("feat-001", "planning", "# Plan body")
         assert load_phase_output("feat-001", "planning") == "# Plan body"
+
+
+class TestReadJsonArtifact:
+    """read_json_artifact parses JSON, treating malformed/missing as None."""
+
+    def test_parses_valid_json(self, project_dir: Path) -> None:
+        write_artifact("feat-001", "gate.json", '{"passed": true, "checks": []}')
+        data = read_json_artifact("feat-001", "gate.json")
+        assert data == {"passed": True, "checks": []}
+
+    def test_missing_artifact_returns_none(self, project_dir: Path) -> None:
+        assert read_json_artifact("feat-001", "nope.json") is None
+
+    def test_malformed_json_returns_none(self, project_dir: Path) -> None:
+        """Corrupt artifact is equivalent to missing for routing/rendering purposes."""
+        write_artifact("feat-001", "gate.json", "{ not valid json")
+        assert read_json_artifact("feat-001", "gate.json") is None
+
+    def test_empty_string_returns_none(self, project_dir: Path) -> None:
+        write_artifact("feat-001", "gate.json", "")
+        assert read_json_artifact("feat-001", "gate.json") is None
 
 
 class TestContextDeps:

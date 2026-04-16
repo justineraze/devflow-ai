@@ -9,6 +9,7 @@ from devflow.core.models import (
     FeatureMetadata,
     FeatureStatus,
     InvalidTransition,
+    PhaseName,
     PhaseRecord,
     PhaseStatus,
     WorkflowState,
@@ -71,7 +72,7 @@ class TestComplexityScore:
         score = ComplexityScore(files_touched=1, integrations=0, security=0, scope=1)
         meta = FeatureMetadata(complexity=score)
         assert meta.complexity is not None
-        assert meta.complexity.workflow == "light"
+        assert meta.complexity.workflow == "quick"
 
     def test_feature_metadata_complexity_defaults_none(self) -> None:
         meta = FeatureMetadata()
@@ -195,6 +196,49 @@ class TestFeatureProperties:
     def test_not_terminal_pending(self) -> None:
         feat = Feature(id="f-001", description="test")
         assert feat.is_terminal is False
+
+
+class TestFeatureFindPhase:
+    def _feature_with(self, *names: str) -> Feature:
+        return Feature(
+            id="f-001",
+            description="test",
+            phases=[PhaseRecord(name=n) for n in names],
+        )
+
+    def test_returns_phase_by_name(self) -> None:
+        feat = self._feature_with("planning", "implementing", "gate")
+        phase = feat.find_phase("implementing")
+        assert phase is not None
+        assert phase.name == "implementing"
+
+    def test_returns_none_when_missing(self) -> None:
+        feat = self._feature_with("planning")
+        assert feat.find_phase("reviewing") is None
+
+    def test_returns_first_match(self) -> None:
+        """Duplicate names should not happen in practice, but behaviour is defined."""
+        duplicate = Feature(
+            id="f-001",
+            description="test",
+            phases=[
+                PhaseRecord(name="fixing", status=PhaseStatus.DONE),
+                PhaseRecord(name="fixing"),
+            ],
+        )
+        first = duplicate.find_phase("fixing")
+        assert first is not None
+        assert first.status == PhaseStatus.DONE
+
+    def test_accepts_phase_name_enum(self) -> None:
+        feat = self._feature_with("planning", "gate")
+        phase = feat.find_phase(PhaseName.GATE)
+        assert phase is not None
+        assert phase.name == "gate"
+
+    def test_empty_phases_returns_none(self) -> None:
+        feat = Feature(id="f-001", description="test")
+        assert feat.find_phase("planning") is None
 
 
 class TestWorkflowState:

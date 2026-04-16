@@ -6,7 +6,13 @@ from io import StringIO
 
 from rich.console import Console
 
-from devflow.core.models import ComplexityScore, Feature, FeatureMetadata, FeatureStatus, WorkflowState
+from devflow.core.models import (
+    ComplexityScore,
+    Feature,
+    FeatureMetadata,
+    FeatureStatus,
+    WorkflowState,
+)
 from devflow.ui.display import render_feature_detail, render_status_table
 
 

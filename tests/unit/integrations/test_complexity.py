@@ -88,7 +88,12 @@ class TestScoreSecurity:
         assert _score_security("add CORS and CSRF protection") >= 1
 
     def test_critical_path_patterns_counted(self) -> None:
-        assert _score_security("handle payment and billing with crypto") == 3
+        # 3 hits (payment, billing, crypto) → score 2 per the <=3 bucket
+        assert _score_security("handle payment and billing with crypto") == 2
+
+    def test_four_security_patterns_scores_max(self) -> None:
+        # 4+ hits → score 3
+        assert _score_security("payment billing crypto token auth") == 3
 
 
 class TestScoreScope:

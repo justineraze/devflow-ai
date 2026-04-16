@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import subprocess
-import sys
 from pathlib import Path
 
-from devflow.core.artifacts import context_deps_for, load_phase_output
+from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, PhaseRecord
+from devflow.core.paths import assets_dir, venv_env
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.orchestration.model_routing import resolve_model
 from devflow.ui.console import console
@@ -19,9 +18,8 @@ from devflow.ui.console import console
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
 INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
 # Fallback: bundled assets in the package.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-BUNDLED_AGENTS_DIR = _PROJECT_ROOT / "assets" / "agents"
-BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
+BUNDLED_AGENTS_DIR = assets_dir() / "agents"
+BUNDLED_SKILLS_DIR = assets_dir() / "skills"
 
 # Skills always injected on every phase.
 ALWAYS_ON_SKILLS: tuple[str, ...] = ("devflow-context",)
@@ -146,17 +144,24 @@ Feature status: {feature.status.value}""")
         sections.append(f"# Context from previous phases\n\n{previous_context}")
 
     if phase.name == "fixing":
-        from devflow.core.artifacts import read_artifact
-
         gate_json = read_artifact(feature.id, "gate.json")
         if gate_json:
             sections.append(
                 "# Gate failures to fix (structured)\n\n"
                 "The quality gate failed with the following checks. This is "
                 "the authoritative source of truth — not the reviewer's "
-                "free-form text. For each check with `passed: false`:\n"
-                "- Read `details` for the exact errors (ruff rule codes, "
-                "pytest test names with tracebacks, secret patterns).\n"
+                "free-form text.\n\n"
+                "## How to read the report\n\n"
+                "Each check has three possible states:\n"
+                "- `passed: true` — nothing to do.\n"
+                "- `passed: false, skipped: false` — **code error**: fix it in "
+                "the source. Read `details` for exact error codes/tracebacks.\n"
+                "- `passed: false, skipped: true` — **environment error**: the "
+                "tool was not found or could not run. Do NOT modify source code "
+                "for skipped checks. Instead: (1) verify the tool is installed "
+                "by running it directly, (2) check PATH, (3) if the tool is "
+                "genuinely missing, report it and stop — do not loop.\n\n"
+                "## Rules for code errors (`skipped: false`)\n\n"
                 "- Fix the failing check at its source, do not silence it.\n"
                 "- After each fix, commit atomically "
                 "(`git add -A && git commit -m 'fix: ...'`).\n"
@@ -229,11 +234,7 @@ def execute_phase(
     model = resolve_model(feature, phase)
     cwd = str(Path.cwd())
 
-    # Prepend the active virtualenv's bin dir so the agent can run ruff,
-    # pytest, devflow, etc. without PATH issues.
-    venv_bin = str(Path(sys.executable).parent)
-    agent_env = os.environ.copy()
-    agent_env["PATH"] = f"{venv_bin}{os.pathsep}{agent_env.get('PATH', '')}"
+    agent_env = venv_env()
 
     cmd = [
         "claude", "-p", "-",

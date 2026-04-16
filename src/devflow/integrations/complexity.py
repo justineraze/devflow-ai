@@ -5,13 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from devflow.core.models import ComplexityScore
-from devflow.integrations.detect import _walk
-
-# Security-sensitive path/term patterns (shared with orchestration.build).
-CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
-    "auth", "secret", "token", "crypto", "payment", "billing", "password",
-)
+from devflow.core.models import CRITICAL_PATH_PATTERNS, ComplexityScore
+from devflow.integrations.detect import walk_files
 
 # Additional security terms not covered by CRITICAL_PATH_PATTERNS.
 _SECURITY_EXTRA: tuple[str, ...] = ("rbac", "permission", "acl", "privilege", "cors", "csrf")
@@ -42,7 +37,7 @@ _SOURCE_EXTENSIONS: frozenset[str] = frozenset(
 
 def _count_source_files(base: Path) -> int:
     """Count source files in *base*, ignoring build/cache directories."""
-    return sum(1 for f in _walk(base) if f.suffix in _SOURCE_EXTENSIONS)
+    return sum(1 for f in walk_files(base) if f.suffix in _SOURCE_EXTENSIONS)
 
 
 def _score_files_touched(description: str, base: Path | None) -> int:
@@ -55,8 +50,6 @@ def _score_files_touched(description: str, base: Path | None) -> int:
         base_score = 3 if "new subsystem" in desc or "overhaul" in desc else 2
     elif any(v in desc for v in ("refactor", "add module", "new feature", "implement")):
         base_score = 2
-    elif any(v in desc for v in ("add field", "add column", "add endpoint", "add method")):
-        base_score = 1
     else:
         base_score = 1
 
@@ -86,6 +79,9 @@ def _score_security(description: str) -> int:
     """Score 0-3: security-sensitive surface area in the description."""
     desc = description.lower()
     all_patterns = CRITICAL_PATH_PATTERNS + _SECURITY_EXTRA
+    # Intentional substring match (no word boundary): "auth" should trigger on
+    # "authentication", "token" on "tokenisation", etc.  Security scoring
+    # favours false-positives over false-negatives.
     hits = sum(1 for pat in all_patterns if pat in desc)
     if hits == 0:
         return 0
@@ -114,6 +110,7 @@ def _score_scope(description: str) -> int:
     elif words >= 15:
         length_bonus = 1
 
+    # raw may be negative (many low-scope verbs) — clamp to [0, 3].
     raw = net + length_bonus
     return max(0, min(raw, 3))
 
