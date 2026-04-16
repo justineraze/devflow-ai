@@ -13,7 +13,8 @@ from pathlib import Path
 
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus
 from devflow.core.phases import get_spec
-from devflow.core.workflow import create_feature, load_state, save_state
+from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
+from devflow.integrations.complexity import score_complexity
 from devflow.ui.console import console
 
 
@@ -36,10 +37,16 @@ def _transition_safe(feature: Feature, target: FeatureStatus) -> bool:
 
 def start_build(
     description: str,
-    workflow_name: str = "standard",
+    workflow_name: str | None = None,
     base: Path | None = None,
 ) -> Feature:
-    """Start a new feature build."""
+    """Start a new feature build.
+
+    When *workflow_name* is ``None``, the workflow is auto-selected by scoring
+    the feature description and project structure via :func:`score_complexity`.
+    The resulting :class:`~devflow.core.models.ComplexityScore` is stored in
+    ``feature.metadata.complexity`` for display in ``devflow status``.
+    """
     state = load_state(base)
     feature_id = _generate_feature_id(description)
 
@@ -49,7 +56,22 @@ def start_build(
         counter += 1
         feature_id = f"{original_id}-{counter}"
 
+    complexity = None
+    if workflow_name is None:
+        complexity = score_complexity(description, base)
+        workflow_name = complexity.workflow
+        console.print(
+            f"[dim]Auto-selected workflow:[/dim] [bold]{workflow_name}[/bold] "
+            f"[dim](score {complexity.total}/12 — "
+            f"files:{complexity.files_touched} "
+            f"integrations:{complexity.integrations} "
+            f"security:{complexity.security} "
+            f"scope:{complexity.scope})[/dim]"
+        )
+
     feature = create_feature(state, feature_id, description, workflow_name)
+    if complexity is not None:
+        feature.metadata.complexity = complexity
     save_state(state, base)
     return feature
 
@@ -82,24 +104,21 @@ def resume_build(
     If the feature is failed, resets the failed phase to pending
     so it can be retried.
     """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            console.print(f"[red]Feature {feature_id!r} not found.[/red]")
+            return None
+        if feature.is_terminal:
+            console.print(
+                f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
+            )
+            return None
 
-    if not feature:
-        console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-        return None
-    if feature.is_terminal:
-        console.print(
-            f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
-        )
-        return None
+        if feature.status == FeatureStatus.FAILED:
+            _recover_failed_feature(feature)
+            console.print(f"[cyan]Recovering {feature_id} from failed state.[/cyan]")
 
-    if feature.status == FeatureStatus.FAILED:
-        _recover_failed_feature(feature)
-        save_state(state, base)
-        console.print(f"[cyan]Recovering {feature_id} from failed state.[/cyan]")
-
-    return feature
+        return feature
 
 
 def retry_build(
@@ -111,25 +130,25 @@ def retry_build(
     Unlike resume_build, this is strictly for FAILED features
     and skips any feedback/re-planning flow.
     """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            console.print(f"[red]Feature {feature_id!r} not found.[/red]")
+            return None
 
-    if not feature:
-        console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-        return None
+        if feature.status != FeatureStatus.FAILED:
+            console.print(
+                f"[yellow]Feature {feature_id!r} is {feature.status.value}, not failed.[/yellow]"
+            )
+            return None
 
-    if feature.status != FeatureStatus.FAILED:
-        console.print(
-            f"[yellow]Feature {feature_id!r} is {feature.status.value}, not failed.[/yellow]"
-        )
-        return None
-
-    _recover_failed_feature(feature)
-    save_state(state, base)
-    console.print(f"[cyan]Retrying {feature_id} — reset failed phase to pending.[/cyan]")
-    return feature
+        _recover_failed_feature(feature)
+        console.print(f"[cyan]Retrying {feature_id} — reset failed phase to pending.[/cyan]")
+        return feature
 
 
 def start_fix(description: str, base: Path | None = None) -> Feature:
-    """Start a bug fix using the quick workflow (no planning phase)."""
+    """Start a bug fix using the quick workflow (no planning phase).
+
+    Always uses ``quick`` — complexity scoring is intentionally skipped.
+    """
     return start_build(description, workflow_name="quick", base=base)

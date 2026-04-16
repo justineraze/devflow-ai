@@ -18,10 +18,16 @@ from pathlib import Path
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from devflow.core.artifacts import read_artifact, save_phase_output, write_artifact
+from devflow.core.artifacts import read_json_artifact, save_phase_output, write_artifact
 from devflow.core.metrics import PhaseMetrics
-from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
-from devflow.core.workflow import load_state, load_workflow, save_state
+from devflow.core.models import (
+    CRITICAL_PATH_PATTERNS,
+    Feature,
+    FeatureStatus,
+    PhaseRecord,
+    PhaseStatus,
+)
+from devflow.core.workflow import load_state, load_workflow, mutate_feature
 from devflow.orchestration.lifecycle import _transition_safe
 from devflow.orchestration.phase_exec import (
     complete_phase,
@@ -58,11 +64,6 @@ def _get_phase_agent(
 
     return agent
 
-
-# File/path patterns that must never trigger a model downgrade.
-CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
-    "auth", "secret", "token", "crypto", "payment", "billing", "password",
-)
 
 
 def _persist_files_summary(feature_id: str, base: Path | None = None) -> None:
@@ -108,32 +109,30 @@ def _setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
     Returns True when a retry was scheduled, False when the budget is
     exhausted (caller should fall back to the normal failure path).
     """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    if not feature:
-        return False
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            return False
 
-    attempts = feature.metadata.gate_retry
-    if attempts >= MAX_GATE_AUTO_RETRIES:
-        return False
+        attempts = feature.metadata.gate_retry
+        if attempts >= MAX_GATE_AUTO_RETRIES:
+            return False
 
-    gate_phase = next((p for p in feature.phases if p.name == "gate"), None)
-    if not gate_phase:
-        return False
+        gate_phase = feature.find_phase("gate")
+        if not gate_phase:
+            return False
 
-    fixing_phase = next((p for p in feature.phases if p.name == "fixing"), None)
-    if fixing_phase is None:
-        fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
-        gate_idx = feature.phases.index(gate_phase)
-        feature.phases.insert(gate_idx, fixing_phase)
-    else:
-        fixing_phase.reset()
+        fixing_phase = feature.find_phase("fixing")
+        if fixing_phase is None:
+            fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
+            gate_idx = feature.phases.index(gate_phase)
+            feature.phases.insert(gate_idx, fixing_phase)
+        else:
+            fixing_phase.reset()
 
-    gate_phase.reset()
-    feature.metadata.gate_retry = attempts + 1
-    _transition_safe(feature, FeatureStatus.FIXING)
-    save_state(state, base)
-    return True
+        gate_phase.reset()
+        feature.metadata.gate_retry = attempts + 1
+        _transition_safe(feature, FeatureStatus.FIXING)
+        return True
 
 
 def _execute_phase(
@@ -154,12 +153,8 @@ def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
     """Load gate.json from artifacts and render it as a Rich panel."""
     from devflow.integrations.gate import CheckResult, GateReport, render_gate_report
 
-    raw = read_artifact(feature_id, "gate.json", base)
-    if not raw:
-        return
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
+    data = read_json_artifact(feature_id, "gate.json", base)
+    if not data:
         return
 
     report = GateReport(checks=[
@@ -220,10 +215,10 @@ def execute_build_loop(
     branch = branch_name(feature.id)
     if is_resuming:
         reset_planning_phases(feature.id, base)
-        state = load_state(base)
-        feature = state.get_feature(feature.id) or feature
-        feature.metadata.feedback = feedback
-        save_state(state, base)
+        with mutate_feature(feature.id, base) as tracked:
+            if tracked:
+                tracked.metadata.feedback = feedback
+                feature = tracked
         switch_branch(branch)
     else:
         branch = create_branch(feature.id)
@@ -246,14 +241,11 @@ def execute_build_loop(
 
         # Stop before non-planning phases — wait for confirmation.
         if phase.name not in ("architecture", "planning", "plan_review"):
-            state = load_state(base)
-            tracked = state.get_feature(feature.id)
-            if tracked:
-                for p in tracked.phases:
-                    if p.name == phase.name and p.status == PhaseStatus.IN_PROGRESS:
+            with mutate_feature(feature.id, base) as tracked:
+                if tracked:
+                    p = tracked.find_phase(phase.name)
+                    if p and p.status == PhaseStatus.IN_PROGRESS:
                         p.reset()
-                        break
-                save_state(state, base)
             break
 
         render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
@@ -274,11 +266,9 @@ def execute_build_loop(
             plan_output = output
             module = _parse_plan_module(output)
             if module:
-                state = load_state(base)
-                feat = state.get_feature(feature.id)
-                if feat:
-                    feat.metadata.scope = module
-                    save_state(state, base)
+                with mutate_feature(feature.id, base) as feat:
+                    if feat:
+                        feat.metadata.scope = module
 
         feature = _refresh_feature(feature.id, base) or feature
 

@@ -71,11 +71,14 @@ def render_status_table(
     for feature in visible:
         style = status_style(feature.status.value)
         phase_info = _current_phase_info(feature)
+        workflow_cell = feature.workflow
+        if feature.metadata.complexity is not None:
+            workflow_cell = f"{feature.workflow} ({feature.metadata.complexity.total}/12)"
         table.add_row(
             feature.id,
             _truncate(feature.description, 50),
             Text(feature.status.value, style=style),
-            feature.workflow,
+            workflow_cell,
             phase_info,
             feature.updated_at.strftime("%Y-%m-%d %H:%M"),
         )
@@ -90,9 +93,18 @@ def render_feature_detail(feature: Feature) -> None:
     console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
     console.print(f"Workflow: [dim]{feature.workflow}[/dim]")
 
+    if feature.metadata.complexity is not None:
+        c = feature.metadata.complexity
+        console.print(
+            f"Complexity: [dim]{c.total}/12 "
+            f"(files:{c.files_touched} integrations:{c.integrations} "
+            f"security:{c.security} scope:{c.scope})[/dim] "
+            f"→ [bold]{c.workflow}[/bold]"
+        )
+
     if feature.phases:
         console.print("\nPhases:")
-        for _i, phase in enumerate(feature.phases, 1):
+        for phase in feature.phases:
             ps = status_style(phase.status.value)
             marker = _phase_marker(phase.status)
             console.print(f"  {marker} [{ps}]{phase.name}[/{ps}]")
@@ -205,6 +217,14 @@ def render_log_detail(feature: Feature) -> None:
     console.print(f"\n[bold]{feature.id}[/bold] — {feature.description}")
     console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
     console.print(f"Workflow: [dim]{feature.workflow}[/dim]")
+    if feature.metadata.complexity is not None:
+        c = feature.metadata.complexity
+        console.print(
+            f"Complexity: [dim]{c.total}/12 "
+            f"(files:{c.files_touched} integrations:{c.integrations} "
+            f"security:{c.security} scope:{c.scope})[/dim] "
+            f"→ [bold]{c.workflow}[/bold]"
+        )
     console.print(f"Created: [dim]{feature.created_at.strftime('%Y-%m-%d %H:%M')}[/dim]")
     console.print(f"Duration: [dim]{duration}[/dim]")
 

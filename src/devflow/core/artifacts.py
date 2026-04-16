@@ -8,8 +8,11 @@ prompt compact and stable enough to benefit from prompt caching.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
+from devflow.core.paths import atomic_write_text
 from devflow.core.workflow import ensure_devflow_dir
 
 
@@ -31,9 +34,7 @@ def write_artifact(
 ) -> Path:
     """Write an artifact atomically (tmp + rename) to avoid partial writes."""
     target = artifact_path(feature_id, name, base)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(content)
-    tmp.rename(target)
+    atomic_write_text(target, content)
     return target
 
 
@@ -45,6 +46,25 @@ def read_artifact(
     if not target.exists():
         return None
     return target.read_text()
+
+
+def read_json_artifact(
+    feature_id: str, name: str, base: Path | None = None,
+) -> dict[str, Any] | None:
+    """Read an artifact and parse it as JSON, or None if missing/malformed.
+
+    Used by ``build.py`` (gate panel rendering) and ``model_routing.py``
+    (gate.json / files.json selectors). Swallows ``JSONDecodeError`` the
+    same way the callers previously did — a corrupt artifact is equivalent
+    to a missing one for routing/rendering purposes.
+    """
+    raw = read_artifact(feature_id, name, base)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
 def save_phase_output(
@@ -68,8 +88,6 @@ def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
     Returns the destination path.
     Raises ``FileNotFoundError`` if the feature directory does not exist.
     """
-    from devflow.core.workflow import ensure_devflow_dir
-
     devflow = ensure_devflow_dir(project_root)
     src = devflow / feature_id
     if not src.exists():

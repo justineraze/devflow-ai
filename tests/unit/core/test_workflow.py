@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from devflow.core.models import Feature, PhaseStatus, WorkflowState
+from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
 from devflow.core.workflow import (
     advance_phase,
     create_feature,
     load_state,
     load_workflow,
+    mutate_feature,
     save_state,
 )
 
@@ -129,3 +130,61 @@ class TestAdvancePhase:
             p.start()
             p.complete()
         assert advance_phase(feat) is None
+
+
+class TestMutateFeature:
+    """mutate_feature yields the feature and auto-saves on exit."""
+
+    def _seed(self, project_dir: Path) -> None:
+        state = WorkflowState()
+        state.add_feature(Feature(id="f-001", description="seed"))
+        save_state(state, project_dir)
+
+    def test_mutation_is_persisted(self, project_dir: Path) -> None:
+        self._seed(project_dir)
+
+        with mutate_feature("f-001", project_dir) as feature:
+            assert feature is not None
+            feature.description = "mutated"
+
+        reloaded = load_state(project_dir).get_feature("f-001")
+        assert reloaded is not None
+        assert reloaded.description == "mutated"
+
+    def test_status_transition_is_persisted(self, project_dir: Path) -> None:
+        self._seed(project_dir)
+
+        with mutate_feature("f-001", project_dir) as feature:
+            assert feature is not None
+            feature.transition_to(FeatureStatus.PLANNING)
+
+        reloaded = load_state(project_dir).get_feature("f-001")
+        assert reloaded is not None
+        assert reloaded.status == FeatureStatus.PLANNING
+
+    def test_yields_none_when_feature_missing(self, project_dir: Path) -> None:
+        self._seed(project_dir)
+        with mutate_feature("missing-id", project_dir) as feature:
+            assert feature is None
+
+    def test_no_save_when_feature_missing(
+        self, project_dir: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Save is skipped when the feature does not exist — semantics preserved."""
+        self._seed(project_dir)
+        calls: list[object] = []
+
+        import devflow.core.workflow as wf_mod
+
+        original = wf_mod.save_state
+
+        def tracking(state: WorkflowState, base: Path | None = None) -> Path:
+            calls.append(state)
+            return original(state, base)
+
+        monkeypatch.setattr(wf_mod, "save_state", tracking)
+
+        with mutate_feature("missing-id", project_dir) as feature:
+            assert feature is None
+
+        assert calls == []

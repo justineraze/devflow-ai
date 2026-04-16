@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.paths import assets_dir
 from devflow.integrations.gate import CheckResult, GateReport
 from devflow.ui.console import console
 
@@ -56,15 +57,13 @@ def check_cli_available(name: str, cmd: list[str]) -> CheckResult:
 def check_agents_synced(target: Path | None = None) -> CheckResult:
     """Check that agents are synced to ~/.claude/agents/."""
     target = target or (Path.home() / ".claude" / "agents")
-    assets = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "agents"
-    return _check_assets_synced("agents", assets, target)
+    return _check_assets_synced("agents", assets_dir() / "agents", target)
 
 
 def check_skills_synced(target: Path | None = None) -> CheckResult:
     """Check that skills are synced to ~/.claude/skills/."""
     target = target or (Path.home() / ".claude" / "skills")
-    assets = Path(__file__).resolve().parent.parent.parent.parent / "assets" / "skills"
-    return _check_assets_synced("skills", assets, target)
+    return _check_assets_synced("skills", assets_dir() / "skills", target)
 
 
 def _check_assets_synced(name: str, assets_dir: Path, target_dir: Path) -> CheckResult:

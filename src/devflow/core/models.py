@@ -5,7 +5,65 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+# Security-sensitive path patterns used by both the complexity scorer and the
+# build loop's critical-path detection.  Lives here (core) so both
+# integrations/ and orchestration/ can import from core without coupling each
+# other.
+CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
+    "auth", "secret", "token", "crypto", "payment", "billing", "password",
+)
+
+# Workflow selection thresholds for ComplexityScore.total (0–12).
+_WORKFLOW_THRESHOLDS: list[tuple[int, str]] = [
+    (2, "quick"),
+    (5, "light"),
+    (8, "standard"),
+    (12, "full"),
+]
+
+
+def _resolve_workflow(total: int) -> str:
+    """Map a complexity total (0–12) to a workflow name."""
+    for threshold, name in _WORKFLOW_THRESHOLDS:
+        if total <= threshold:
+            return name
+    return "full"
+
+
+class ComplexityScore(BaseModel):
+    """Complexity score for a feature across four dimensions (each 0–3).
+
+    ``workflow`` is resolved once at construction time and stored as a plain
+    field so it survives JSON round-trips and never drifts if thresholds change.
+    """
+
+    files_touched: int = Field(default=0, ge=0, le=3)
+    """Number of files expected to be modified (heuristic, 0–3)."""
+
+    integrations: int = Field(default=0, ge=0, le=3)
+    """External systems involved: API, DB, webhook, OAuth… (0–3)."""
+
+    security: int = Field(default=0, ge=0, le=3)
+    """Security-sensitive surface area: auth, tokens, crypto… (0–3)."""
+
+    scope: int = Field(default=0, ge=0, le=3)
+    """Breadth of the change: tweak vs. new module vs. rewrite (0–3)."""
+
+    workflow: str = ""
+    """Workflow resolved from total at construction time (never recomputed)."""
+
+    def model_post_init(self, __context: object) -> None:
+        """Resolve workflow from total once, at construction time."""
+        if not self.workflow:
+            object.__setattr__(self, "workflow", _resolve_workflow(self.total))
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total(self) -> int:
+        """Sum of all four dimension scores (0–12)."""
+        return self.files_touched + self.integrations + self.security + self.scope
 
 
 class FeatureMetadata(BaseModel):
@@ -23,6 +81,9 @@ class FeatureMetadata(BaseModel):
     scope: str | None = None
     """Primary module touched (e.g. 'runner', 'gate'). Parsed from the plan's
     Module: line — used as the Conventional Commits scope in commit messages."""
+
+    complexity: ComplexityScore | None = None
+    """Complexity score computed at feature creation (auto-select workflow)."""
 
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""
@@ -202,6 +263,19 @@ class Feature(BaseModel):
             raise InvalidTransition(self.status, target)
         self.status = target
         self.updated_at = datetime.now(UTC)
+
+    def find_phase(self, name: str | PhaseName) -> PhaseRecord | None:
+        """Return the phase with *name* (first match), or None.
+
+        Replaces the ``next(p for p in feature.phases if p.name == name)``
+        / ``for phase in feature.phases: if phase.name == name`` pattern
+        sprinkled across ``phase_exec.py`` and ``build.py``.
+        """
+        target = name.value if isinstance(name, PhaseName) else name
+        for phase in self.phases:
+            if phase.name == target:
+                return phase
+        return None
 
     @property
     def current_phase(self) -> PhaseRecord | None:

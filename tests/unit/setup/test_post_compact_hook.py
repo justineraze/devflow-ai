@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 HOOK_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "assets" / "hooks" / "devflow-post-compact.sh"
+    Path(__file__).resolve().parents[3] / "assets" / "hooks" / "devflow-post-compact.sh"
 )
 
 

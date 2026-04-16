@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -15,13 +17,15 @@ from devflow.core.models import (
     WorkflowDefinition,
     WorkflowState,
 )
+from devflow.core.paths import atomic_write_text
+from devflow.core.paths import workflows_dir as _workflows_dir
 
 # Default location for project state.
 DEVFLOW_DIR = Path(".devflow")
 STATE_FILE = DEVFLOW_DIR / "state.json"
 
 # Where workflow definitions live (relative to package root).
-WORKFLOWS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "workflows"
+WORKFLOWS_DIR = _workflows_dir()
 
 
 def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefinition:
@@ -75,14 +79,29 @@ def save_state(state: WorkflowState, base: Path | None = None) -> Path:
     """
     devflow = ensure_devflow_dir(base)
     state_file = devflow / "state.json"
-    tmp_file = devflow / "state.json.tmp"
-
-    # Write to temp file first, then atomic rename — crash-safe.
-    data = state.model_dump_json(indent=2)
-    tmp_file.write_text(data)
-    tmp_file.rename(state_file)
-
+    atomic_write_text(state_file, state.model_dump_json(indent=2))
     return state_file
+
+
+@contextmanager
+def mutate_feature(
+    feature_id: str, base: Path | None = None,
+) -> Iterator[Feature | None]:
+    """Load a feature, yield it for mutation, persist state on exit.
+
+    Replaces the ``load_state → get_feature → … → save_state`` triple that
+    appears in ``phase_exec.py``, ``lifecycle.py``, and ``build.py``.
+
+    When the feature is missing, yields ``None`` and skips the final
+    ``save_state`` — callers already guarded against this case, so the
+    semantics are unchanged. Callers must check for ``None`` inside
+    the block.
+    """
+    state = load_state(base)
+    feature = state.get_feature(feature_id)
+    yield feature
+    if feature is not None:
+        save_state(state, base)
 
 
 def create_feature(

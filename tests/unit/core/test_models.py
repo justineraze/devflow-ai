@@ -4,13 +4,79 @@
 import pytest
 
 from devflow.core.models import (
+    ComplexityScore,
     Feature,
+    FeatureMetadata,
     FeatureStatus,
     InvalidTransition,
+    PhaseName,
     PhaseRecord,
     PhaseStatus,
     WorkflowState,
 )
+
+
+class TestComplexityScore:
+    def test_total_is_sum_of_dimensions(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=2, security=0, scope=1)
+        assert score.total == 4
+
+    def test_all_zeros_gives_total_zero(self) -> None:
+        score = ComplexityScore()
+        assert score.total == 0
+
+    def test_max_score_is_twelve(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=3, scope=3)
+        assert score.total == 12
+
+    def test_workflow_quick_at_zero(self) -> None:
+        score = ComplexityScore()
+        assert score.workflow == "quick"
+
+    def test_workflow_quick_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=1, security=0, scope=0)
+        assert score.total == 2
+        assert score.workflow == "quick"
+
+    def test_workflow_light(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=1, security=1, scope=0)
+        assert score.total == 3
+        assert score.workflow == "light"
+
+    def test_workflow_light_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=1, security=1, scope=1)
+        assert score.total == 5
+        assert score.workflow == "light"
+
+    def test_workflow_standard(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=2, security=1, scope=1)
+        assert score.total == 6
+        assert score.workflow == "standard"
+
+    def test_workflow_standard_at_boundary(self) -> None:
+        score = ComplexityScore(files_touched=2, integrations=2, security=2, scope=2)
+        assert score.total == 8
+        assert score.workflow == "standard"
+
+    def test_workflow_full(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=2, scope=1)
+        assert score.total == 9
+        assert score.workflow == "full"
+
+    def test_workflow_full_at_max(self) -> None:
+        score = ComplexityScore(files_touched=3, integrations=3, security=3, scope=3)
+        assert score.total == 12
+        assert score.workflow == "full"
+
+    def test_complexity_stored_in_feature_metadata(self) -> None:
+        score = ComplexityScore(files_touched=1, integrations=0, security=0, scope=1)
+        meta = FeatureMetadata(complexity=score)
+        assert meta.complexity is not None
+        assert meta.complexity.workflow == "quick"
+
+    def test_feature_metadata_complexity_defaults_none(self) -> None:
+        meta = FeatureMetadata()
+        assert meta.complexity is None
 
 
 class TestPhaseRecord:
@@ -130,6 +196,49 @@ class TestFeatureProperties:
     def test_not_terminal_pending(self) -> None:
         feat = Feature(id="f-001", description="test")
         assert feat.is_terminal is False
+
+
+class TestFeatureFindPhase:
+    def _feature_with(self, *names: str) -> Feature:
+        return Feature(
+            id="f-001",
+            description="test",
+            phases=[PhaseRecord(name=n) for n in names],
+        )
+
+    def test_returns_phase_by_name(self) -> None:
+        feat = self._feature_with("planning", "implementing", "gate")
+        phase = feat.find_phase("implementing")
+        assert phase is not None
+        assert phase.name == "implementing"
+
+    def test_returns_none_when_missing(self) -> None:
+        feat = self._feature_with("planning")
+        assert feat.find_phase("reviewing") is None
+
+    def test_returns_first_match(self) -> None:
+        """Duplicate names should not happen in practice, but behaviour is defined."""
+        duplicate = Feature(
+            id="f-001",
+            description="test",
+            phases=[
+                PhaseRecord(name="fixing", status=PhaseStatus.DONE),
+                PhaseRecord(name="fixing"),
+            ],
+        )
+        first = duplicate.find_phase("fixing")
+        assert first is not None
+        assert first.status == PhaseStatus.DONE
+
+    def test_accepts_phase_name_enum(self) -> None:
+        feat = self._feature_with("planning", "gate")
+        phase = feat.find_phase(PhaseName.GATE)
+        assert phase is not None
+        assert phase.name == "gate"
+
+    def test_empty_phases_returns_none(self) -> None:
+        feat = Feature(id="f-001", description="test")
+        assert feat.find_phase("planning") is None
 
 
 class TestWorkflowState:
