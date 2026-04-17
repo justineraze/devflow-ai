@@ -63,12 +63,25 @@ def switch_branch(branch: str) -> None:
     _git("checkout", branch)
 
 
-def commit_changes(message: str) -> bool:
-    """Stage all files and commit if there are changes.
+def get_untracked_files(cwd: Path | None = None) -> list[str]:
+    """Return the list of untracked files honoring .gitignore."""
+    result = _git("ls-files", "--others", "--exclude-standard", cwd=cwd)
+    return [line for line in result.stdout.splitlines() if line.strip()]
 
-    Returns True if a commit was created, False if nothing to commit.
+
+def commit_changes(message: str, exclude: list[str] | None = None) -> bool:
+    """Stage changes and commit if any.
+
+    When *exclude* is provided, paths in it are kept out of the staged set.
+    This is how the build loop prevents user scratch files (prompt notes, temp
+    drafts) that existed as untracked before the build started from being swept
+    into devflow's auto-commits.
     """
-    _git("add", "-A")
+    if exclude:
+        pathspecs = [f":(exclude){p}" for p in exclude]
+        _git("add", "-A", "--", ".", *pathspecs)
+    else:
+        _git("add", "-A")
     diff = _git("diff", "--cached", "--quiet")
     if diff.returncode == 0:
         return False

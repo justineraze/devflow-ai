@@ -168,7 +168,7 @@ def _run_command_check(
             text=True,
             cwd=str(cwd),
             timeout=timeout,
-            env=venv_env(),
+            env=venv_env(cwd),
         )
     except FileNotFoundError:
         return CheckResult(

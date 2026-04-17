@@ -232,9 +232,9 @@ def execute_phase(
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
     model = resolve_model(feature, phase)
-    cwd = str(Path.cwd())
+    cwd = Path.cwd()
 
-    agent_env = venv_env()
+    agent_env = venv_env(cwd)
 
     cmd = [
         "claude", "-p", "-",
@@ -253,7 +253,7 @@ def execute_phase(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=cwd,
+            cwd=str(cwd),
             env=agent_env,
         )
 

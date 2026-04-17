@@ -85,16 +85,22 @@ def _build_pr_body(feature: Feature) -> str:
     return "\n".join(parts)
 
 
-def push_and_create_pr(feature: Feature, branch: str) -> str | None:
+def push_and_create_pr(
+    feature: Feature,
+    branch: str,
+    exclude: list[str] | None = None,
+) -> str | None:
     """Push branch and create a GitHub PR.
 
-    Commits any uncommitted changes first as a safety net.
+    Commits any uncommitted changes first as a safety net. *exclude* is
+    forwarded to ``commit_changes`` so user scratch files captured before the
+    build started stay out of the final PR.
     Returns the PR URL, or None if creation failed.
     """
     cwd = str(Path.cwd())
 
     # Safety net: commit anything left uncommitted.
-    commit_changes(build_commit_message(feature, suffix="leftover changes"))
+    commit_changes(build_commit_message(feature, suffix="leftover changes"), exclude=exclude)
 
     if not has_commits_ahead():
         console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")
