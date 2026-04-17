@@ -66,7 +66,7 @@ class TestGateReport:
 class TestRunCommandCheck:
     """Tests for the generic _run_command_check helper."""
 
-    @patch("devflow.integrations.gate.subprocess.run")
+    @patch("devflow.integrations.gate.checks.subprocess.run")
     def test_success(self, mock_run: patch, tmp_path: Path) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["tool"], returncode=0, stdout="all good\n", stderr="",
@@ -75,7 +75,7 @@ class TestRunCommandCheck:
         assert result.passed is True
         assert result.message == "No issues"
 
-    @patch("devflow.integrations.gate.subprocess.run")
+    @patch("devflow.integrations.gate.checks.subprocess.run")
     def test_failure(self, mock_run: patch, tmp_path: Path) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["tool"], returncode=1, stdout="error line 1\nerror line 2\n", stderr="",
@@ -84,7 +84,7 @@ class TestRunCommandCheck:
         assert result.passed is False
         assert "issues found" in result.message
 
-    @patch("devflow.integrations.gate.subprocess.run", side_effect=FileNotFoundError)
+    @patch("devflow.integrations.gate.checks.subprocess.run", side_effect=FileNotFoundError)
     def test_missing_tool_skipped(self, _mock: patch, tmp_path: Path) -> None:
         result = _run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
         assert result.skipped is True
@@ -92,7 +92,7 @@ class TestRunCommandCheck:
         assert "not found" in result.message
 
     @patch(
-        "devflow.integrations.gate.subprocess.run",
+        "devflow.integrations.gate.checks.subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd=["tool"], timeout=60),
     )
     def test_timeout(self, _mock: patch, tmp_path: Path) -> None:
@@ -100,7 +100,7 @@ class TestRunCommandCheck:
         assert result.passed is False
         assert "timed out" in result.message
 
-    @patch("devflow.integrations.gate.subprocess.run")
+    @patch("devflow.integrations.gate.checks.subprocess.run")
     def test_custom_parse_output(self, mock_run: patch, tmp_path: Path) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["t"], returncode=0, stdout="5 passed in 0.1s\n", stderr="",
@@ -146,8 +146,8 @@ class TestChecksForStack:
 class TestRunGate:
     """Tests for run_gate stack dispatch."""
 
-    @patch("devflow.integrations.gate._run_command_check")
-    @patch("devflow.integrations.gate.scan_secrets")
+    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_uses_typescript_tools(
         self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
     ) -> None:
@@ -162,8 +162,8 @@ class TestRunGate:
         call_names = [call.args[0] for call in mock_check.call_args_list]
         assert call_names == ["biome", "vitest"]
 
-    @patch("devflow.integrations.gate._run_command_check")
-    @patch("devflow.integrations.gate.scan_secrets")
+    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_default_stack_is_python(
         self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
     ) -> None:
@@ -177,8 +177,8 @@ class TestRunGate:
         call_names = [call.args[0] for call in mock_check.call_args_list]
         assert call_names == ["ruff", "pytest"]
 
-    @patch("devflow.integrations.gate._run_command_check")
-    @patch("devflow.integrations.gate.scan_secrets")
+    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_secrets_always_runs(
         self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
     ) -> None:

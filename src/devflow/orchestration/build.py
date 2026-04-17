@@ -6,7 +6,7 @@ coordinating phase execution, and creating the PR on success.
 Feature lifecycle (create/resume/retry) → lifecycle.py
 Phase state machine (run/complete/fail) → phase_exec.py
 Model selection                          → model_routing.py
-Gate execution                           → integrations/gate.py
+Gate execution                           → integrations/gate/
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from devflow.core.artifacts import read_json_artifact, save_phase_output, write_artifact
+from devflow.core.artifacts import save_phase_output, write_artifact
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import (
     CRITICAL_PATH_PATTERNS,
@@ -148,26 +148,6 @@ def _execute_phase(
         return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
     return execute_phase(feature, phase, agent_name, verbose=verbose)
 
-
-def _render_gate_panel(feature_id: str, base: Path | None = None) -> None:
-    """Load gate.json from artifacts and render it as a Rich panel."""
-    from devflow.integrations.gate import CheckResult, GateReport, render_gate_report
-
-    data = read_json_artifact(feature_id, "gate.json", base)
-    if not data:
-        return
-
-    report = GateReport(checks=[
-        CheckResult(
-            name=c.get("name", "?"),
-            passed=bool(c.get("passed", False)),
-            skipped=bool(c.get("skipped", False)),
-            message=c.get("message", ""),
-            details=c.get("details", ""),
-        )
-        for c in data.get("checks", [])
-    ])
-    render_gate_report(report)
 
 
 def execute_build_loop(
@@ -319,7 +299,8 @@ def execute_build_loop(
             complete_phase(feature.id, phase.name, output, base)
 
             if phase.name == "gate":
-                _render_gate_panel(feature.id, base)
+                from devflow.ui.gate_panel import render_gate_panel
+                render_gate_panel(feature.id, base)
             else:
                 render_phase_success(phase.name, elapsed, metrics)
             totals.add(phase.name, metrics, elapsed)
@@ -338,7 +319,8 @@ def execute_build_loop(
             if phase.name == "gate":
                 save_phase_output(feature.id, "gate", output, base)
                 if _setup_gate_retry(feature.id, base):
-                    _render_gate_panel(feature.id, base)
+                    from devflow.ui.gate_panel import render_gate_panel
+                    render_gate_panel(feature.id, base)
                     render_phase_auto_retry(phase.name, elapsed, "")
                     feature = _refresh_feature(feature.id, base) or feature
                     continue
