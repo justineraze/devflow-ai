@@ -46,29 +46,52 @@ class TestProjectLayout:
 
 
 class TestVenvEnv:
-    """venv_env prepends the active venv's bin dir to PATH."""
+    """venv_env resolves: project .venv > $VIRTUAL_ENV > sys.executable."""
 
     def test_returns_copy_not_original(self) -> None:
         env = venv_env()
         assert env is not os.environ
 
-    def test_path_is_prefixed_with_venv_bin(self) -> None:
-        env = venv_env()
-        venv_bin = str(Path(sys.executable).parent)
-        assert env["PATH"].startswith(venv_bin + os.pathsep)
+    def test_prefers_project_venv(self, tmp_path: Path) -> None:
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        env = venv_env(tmp_path)
+        assert env["PATH"].startswith(str(venv_bin))
 
-    def test_preserves_original_path(self) -> None:
+    def test_falls_back_to_virtual_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        custom = tmp_path / "custom_venv"
+        (custom / "bin").mkdir(parents=True)
+        monkeypatch.setenv("VIRTUAL_ENV", str(custom))
+        project = tmp_path / "project"
+        project.mkdir()
+        env = venv_env(project)
+        assert str(custom / "bin") in env["PATH"]
+
+    def test_falls_back_to_sys_executable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        project = tmp_path / "project"
+        project.mkdir()
+        env = venv_env(project)
+        assert str(Path(sys.executable).parent) in env["PATH"]
+
+    def test_default_root_is_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        venv_bin = tmp_path / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+        env = venv_env()
+        assert env["PATH"].startswith(str(venv_bin))
+
+    def test_preserves_existing_path(self) -> None:
         env = venv_env()
         for entry in os.environ.get("PATH", "").split(os.pathsep):
             if entry:
                 assert entry in env["PATH"]
-
-    def test_handles_empty_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("PATH", raising=False)
-        env = venv_env()
-        venv_bin = str(Path(sys.executable).parent)
-        # Ends with os.pathsep when original PATH was missing.
-        assert env["PATH"].startswith(venv_bin)
 
     def test_other_env_vars_copied(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DEVFLOW_TEST_MARKER", "hello")

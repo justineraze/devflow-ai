@@ -191,6 +191,7 @@ def execute_build_loop(
         commit_changes,
         create_branch,
         get_diff_stat,
+        get_untracked_files,
         push_and_create_pr,
         switch_branch,
     )
@@ -210,6 +211,11 @@ def execute_build_loop(
     state = load_state(base)
     stack = state.stack
     totals = BuildTotals()
+
+    # Snapshot untracked files so user scratch/prompt files at the repo root
+    # are never swept into auto-commits. Claude's new files are added after
+    # this point and therefore get committed normally.
+    initial_untracked = get_untracked_files()
 
     # ── Branch ──
     branch = branch_name(feature.id)
@@ -320,7 +326,7 @@ def execute_build_loop(
 
             if phase.name in ("implementing", "fixing"):
                 msg = build_commit_message(feature, suffix=phase.name)
-                if commit_changes(msg):
+                if commit_changes(msg, exclude=initial_untracked):
                     console.print("  [dim]💾 auto-committed changes[/dim]")
                 diff = get_diff_stat()
                 if diff:
@@ -348,7 +354,7 @@ def execute_build_loop(
 
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
-    pr_url = push_and_create_pr(final, branch) if final else None
+    pr_url = push_and_create_pr(final, branch, exclude=initial_untracked) if final else None
 
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
