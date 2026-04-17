@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.integrations.gate.checks import _checks_for_stack, _run_command_check
 from devflow.integrations.gate.report import GateReport
 from devflow.integrations.gate.secrets import scan_secrets
@@ -49,7 +50,7 @@ def run_gate_phase(
     base: Path | None = None,
     stack: str | None = None,
     feature_id: str | None = None,
-) -> tuple[bool, str, object]:
+) -> tuple[bool, str, PhaseMetrics]:
     """Run the gate phase locally (ruff + pytest + secrets).
 
     When *feature_id* is provided, the structured report is persisted as
@@ -62,7 +63,6 @@ def run_gate_phase(
     import json
 
     from devflow.core.artifacts import write_artifact
-    from devflow.core.metrics import PhaseMetrics
 
     report = run_gate(base, stack=stack)
 

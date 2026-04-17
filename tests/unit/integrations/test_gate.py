@@ -8,11 +8,10 @@ from devflow.integrations.gate import (
     STACK_CHECKS,
     CheckResult,
     GateReport,
-    _checks_for_stack,
-    _run_command_check,
     run_gate,
     scan_secrets,
 )
+from devflow.integrations.gate.checks import _checks_for_stack, _run_command_check
 
 
 class TestCheckResult:

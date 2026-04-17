@@ -175,7 +175,8 @@ def sync(
 def check() -> None:
     """Run the quality gate (lint, tests, secrets detection)."""
     from devflow.integrations.detect import resolve_stack
-    from devflow.integrations.gate import render_gate_report, run_gate
+    from devflow.integrations.gate import run_gate
+    from devflow.ui.gate_panel import render_gate_report
 
     render_header(subtitle="Quality gate")
     report = run_gate(stack=resolve_stack())
