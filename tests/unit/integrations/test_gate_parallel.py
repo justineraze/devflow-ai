@@ -44,10 +44,10 @@ class TestParallelExecution:
             return CheckResult(name="fake", passed=True, message="ok")
 
         with patch(
-            "devflow.integrations.gate._run_command_check",
+            "devflow.integrations.gate.runner._run_command_check",
             side_effect=slow_check,
         ), patch(
-            "devflow.integrations.gate.scan_secrets",
+            "devflow.integrations.gate.runner.scan_secrets",
             side_effect=slow_check,
         ):
             start = time.monotonic()
@@ -72,10 +72,10 @@ class TestParallelExecution:
             return CheckResult(name=check_name, passed=True)
 
         with patch(
-            "devflow.integrations.gate._run_command_check",
+            "devflow.integrations.gate.runner._run_command_check",
             side_effect=capturing,
         ), patch(
-            "devflow.integrations.gate.scan_secrets",
+            "devflow.integrations.gate.runner.scan_secrets",
             side_effect=named("secrets"),
         ):
             report = run_gate(base=tmp_path, stack="python")
