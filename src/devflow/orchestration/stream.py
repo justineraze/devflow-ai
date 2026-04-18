@@ -49,7 +49,10 @@ def _summarize_tool_use(tool_name: str, tool_input: dict[str, Any]) -> str:
     if tool_name == "TodoWrite":
         todos = tool_input.get("todos", [])
         active = next((t for t in todos if t.get("status") == "in_progress"), None)
-        return active["activeForm"][:60] if active else f"{len(todos)} todos"
+        if active:
+            label = active.get("activeForm") or active.get("content", "")
+            return label[:60]
+        return f"{len(todos)} todos"
     return ""
 
 

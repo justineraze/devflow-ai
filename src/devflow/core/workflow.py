@@ -28,8 +28,15 @@ STATE_FILE = DEVFLOW_DIR / "state.json"
 WORKFLOWS_DIR = _workflows_dir()
 
 
+_workflow_cache: dict[str, WorkflowDefinition] = {}
+
+
 def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefinition:
     """Load a workflow definition from a YAML file.
+
+    Results are cached by *name* when using the default workflows
+    directory. Pass *workflows_dir* explicitly to bypass the cache
+    (used in tests with temporary directories).
 
     Args:
         name: Workflow name (without .yaml extension).
@@ -39,6 +46,9 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
     Raises:
         FileNotFoundError: If the workflow file doesn't exist.
     """
+    if workflows_dir is None and name in _workflow_cache:
+        return _workflow_cache[name]
+
     base = workflows_dir or WORKFLOWS_DIR
     path = base / f"{name}.yaml"
     if not path.exists():
@@ -46,11 +56,15 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
 
     raw = yaml.safe_load(path.read_text())
     phases = [PhaseDefinition(**p) for p in raw.get("phases", [])]
-    return WorkflowDefinition(
+    wf = WorkflowDefinition(
         name=raw.get("name", name),
         description=raw.get("description", ""),
         phases=phases,
     )
+
+    if workflows_dir is None:
+        _workflow_cache[name] = wf
+    return wf
 
 
 def ensure_devflow_dir(base: Path | None = None) -> Path:

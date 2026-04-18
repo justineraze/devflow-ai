@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -189,3 +190,22 @@ def delete_branch(name: str, cwd: Path | None = None) -> bool:
     """Force-delete a local branch. Returns True on success."""
     result = _git("branch", "-D", name, cwd=cwd)
     return result.returncode == 0
+
+
+def persist_files_summary(feature_id: str, base: Path | None = None) -> None:
+    """Write files.json capturing the branch-diff summary for downstream phases.
+
+    Enriches the raw diff summary with ``critical_paths`` — paths matching
+    security/auth/payment patterns defined in ``CRITICAL_PATH_PATTERNS``.
+    """
+    from devflow.core.artifacts import write_artifact
+    from devflow.core.models import CRITICAL_PATH_PATTERNS
+
+    summary = get_branch_diff_summary()
+    paths = summary.get("paths") or []
+    critical = [
+        p for p in paths
+        if any(pat in p.lower() for pat in CRITICAL_PATH_PATTERNS)
+    ]
+    summary["critical_paths"] = critical
+    write_artifact(feature_id, "files.json", json.dumps(summary, indent=2), base)

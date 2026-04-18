@@ -12,7 +12,7 @@ from pathlib import Path
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import advance_phase, mutate_feature
-from devflow.orchestration.lifecycle import _transition_safe
+from devflow.orchestration.lifecycle import transition_safe
 
 
 def _walk_to_done(feature: Feature) -> None:
@@ -21,7 +21,7 @@ def _walk_to_done(feature: Feature) -> None:
     Every non-terminal state has DONE as a valid transition (enforced in
     VALID_TRANSITIONS), so a single targeted call is sufficient.
     """
-    _transition_safe(feature, FeatureStatus.DONE)
+    transition_safe(feature, FeatureStatus.DONE)
 
 
 def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
@@ -40,7 +40,7 @@ def run_phase(feature: Feature, base: Path | None = None) -> PhaseRecord | None:
         except UnknownPhase:
             target_status = None
         if target_status and tracked.status != target_status:
-            _transition_safe(tracked, target_status)
+            transition_safe(tracked, target_status)
 
         return phase
 
@@ -77,7 +77,7 @@ def fail_phase(
         phase = feature.find_phase(phase_name)
         if phase and phase.status == PhaseStatus.IN_PROGRESS:
             phase.fail(error)
-        _transition_safe(feature, FeatureStatus.FAILED)
+        transition_safe(feature, FeatureStatus.FAILED)
 
 
 def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
@@ -89,3 +89,38 @@ def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
             if phase.name in ("architecture", "planning", "plan_review"):
                 phase.reset()
         feature.status = FeatureStatus.PENDING
+
+
+MAX_GATE_AUTO_RETRIES = 1
+
+
+def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
+    """Reset gate+fixing to PENDING for one automatic retry loop.
+
+    Returns True when a retry was scheduled, False when the budget is
+    exhausted (caller should fall back to the normal failure path).
+    """
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            return False
+
+        attempts = feature.metadata.gate_retry
+        if attempts >= MAX_GATE_AUTO_RETRIES:
+            return False
+
+        gate_phase = feature.find_phase("gate")
+        if not gate_phase:
+            return False
+
+        fixing_phase = feature.find_phase("fixing")
+        if fixing_phase is None:
+            fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
+            gate_idx = feature.phases.index(gate_phase)
+            feature.phases.insert(gate_idx, fixing_phase)
+        else:
+            fixing_phase.reset()
+
+        gate_phase.reset()
+        feature.metadata.gate_retry = attempts + 1
+        transition_safe(feature, FeatureStatus.FIXING)
+        return True

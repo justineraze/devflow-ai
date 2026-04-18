@@ -75,7 +75,9 @@ class TestPhaseSuccess:
         assert "implementing" in out
         assert "2m34s" in out
         assert "8 tools" in out
-        assert "5.2k" in out
+        # Total input = 5200 + 18000 = 23200 → "23.2k"
+        assert "23.2k" in out
+        assert "cached" in out
         assert "$0.18" in out
 
     def test_no_metrics_skips_token_section(self) -> None:

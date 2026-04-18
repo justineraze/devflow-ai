@@ -16,8 +16,19 @@ from devflow.core.paths import atomic_write_text
 from devflow.core.workflow import ensure_devflow_dir
 
 
+def _validate_path_component(value: str, label: str = "ID") -> None:
+    """Reject path separators and traversal sequences in user-supplied IDs."""
+    if "/" in value or "\\" in value or ".." in value:
+        raise ValueError(f"Invalid {label}: {value!r}")
+
+
 def feature_dir(feature_id: str, base: Path | None = None) -> Path:
-    """Return .devflow/<feature_id>/, creating it if missing."""
+    """Return .devflow/<feature_id>/, creating it if missing.
+
+    Raises ``ValueError`` if *feature_id* contains path separators or
+    traversal sequences (defense-in-depth against crafted ``--resume`` args).
+    """
+    _validate_path_component(feature_id, "feature ID")
     devflow = ensure_devflow_dir(base)
     path = devflow / feature_id
     path.mkdir(parents=True, exist_ok=True)
@@ -88,6 +99,7 @@ def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
     Returns the destination path.
     Raises ``FileNotFoundError`` if the feature directory does not exist.
     """
+    _validate_path_component(feature_id, "feature ID")
     devflow = ensure_devflow_dir(project_root)
     src = devflow / feature_id
     if not src.exists():

@@ -18,6 +18,7 @@ from pathlib import Path
 from devflow.core.artifacts import read_json_artifact
 from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
+from devflow.core.workflow import load_state, load_workflow
 
 DEFAULT_MODEL = "sonnet"
 
@@ -102,3 +103,36 @@ def resolve_model(
         return get_spec(phase.name).model_default
     except UnknownPhase:
         return DEFAULT_MODEL
+
+
+def get_phase_agent(
+    feature: Feature,
+    phase_name: str,
+    base: Path | None = None,
+    *,
+    stack: str | None = None,
+) -> str:
+    """Return the agent name for a phase, with stack-aware override.
+
+    Resolution: workflow YAML agent → stack-specialized developer → "developer".
+
+    Pass *stack* explicitly to avoid a redundant ``load_state()`` call
+    when the caller already knows the project stack (e.g. in the build loop).
+    """
+    agent = "developer"
+    try:
+        wf = load_workflow(feature.workflow)
+        for phase_def in wf.phases:
+            if phase_def.name == phase_name:
+                agent = phase_def.agent
+                break
+    except FileNotFoundError:
+        pass
+
+    if agent == "developer":
+        resolved_stack = stack if stack is not None else load_state(base).stack
+        specialized = agent_for_stack(resolved_stack)
+        if specialized:
+            agent = specialized
+
+    return agent

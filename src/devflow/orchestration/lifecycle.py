@@ -11,7 +11,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from devflow.core.models import Feature, FeatureStatus, PhaseStatus
+from devflow.core.models import Feature, FeatureStatus, InvalidTransition, PhaseStatus
 from devflow.core.phases import get_spec
 from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
 from devflow.integrations.complexity import score_complexity
@@ -26,12 +26,12 @@ def _generate_feature_id(description: str) -> str:
     return f"feat-{slug}-{timestamp}" if slug else f"feat-{timestamp}"
 
 
-def _transition_safe(feature: Feature, target: FeatureStatus) -> bool:
+def transition_safe(feature: Feature, target: FeatureStatus) -> bool:
     """Attempt a state transition, returning True if successful."""
     try:
         feature.transition_to(target)
         return True
-    except Exception:
+    except InvalidTransition:
         return False
 
 
@@ -91,7 +91,7 @@ def _recover_failed_feature(feature: Feature) -> None:
                 if p.name == phase.name:
                     break
                 if p.status == PhaseStatus.DONE:
-                    _transition_safe(feature, get_spec(p.name).feature_status)
+                    transition_safe(feature, get_spec(p.name).feature_status)
             return
 
 

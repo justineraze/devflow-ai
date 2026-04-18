@@ -134,12 +134,14 @@ def render_phase_success(
     if metrics.tool_count:
         chip.append(f"   {metrics.tool_count} tools", style="dim")
 
-    if metrics.input_tokens or metrics.output_tokens:
+    total_in = metrics.input_tokens + metrics.cache_read
+    if total_in or metrics.output_tokens:
         chip.append("   ")
-        chip.append(format_tokens(metrics.input_tokens), style="cyan")
+        chip.append(format_tokens(total_in), style="cyan")
         chip.append(" in", style="dim")
         if metrics.cache_read:
-            chip.append(f" (cache {format_tokens(metrics.cache_read)})", style="dim")
+            pct = int(metrics.cache_read / total_in * 100) if total_in else 0
+            chip.append(f" ({pct}% cached)", style="dim")
         chip.append(" / ", style="dim")
         chip.append(format_tokens(metrics.output_tokens), style="cyan")
         chip.append(" out", style="dim")
@@ -196,10 +198,12 @@ def render_build_summary(
     grid.add_row("Cost", Text(format_cost(totals.cost_usd), style="yellow bold"))
     grid.add_row("Tools", str(totals.tool_count))
 
+    total_in = totals.input_tokens + totals.cache_read
     in_text = Text()
-    in_text.append(format_tokens(totals.input_tokens), style="cyan")
+    in_text.append(format_tokens(total_in), style="cyan")
     if totals.cache_read:
-        in_text.append(f" (cache {format_tokens(totals.cache_read)})", style="dim")
+        pct = int(totals.cache_read / total_in * 100) if total_in else 0
+        in_text.append(f" ({pct}% cached)", style="dim")
     in_text.append(" in · ", style="dim")
     in_text.append(format_tokens(totals.output_tokens), style="cyan")
     in_text.append(" out", style="dim")
@@ -212,12 +216,11 @@ def render_build_summary(
         rows.append(_budget_row("Cost    ", _bar(ratio), format_cost(totals.cost_usd),
                                 f"/ {format_cost(cost_budget)}", f"{int(ratio * 100)}%"))
 
-    # input_tokens is the actual tokens billed — cache_read is a breakdown
-    # detail already included in that count, not an additive component.
-    total_tokens = totals.input_tokens
-    ctx_ratio = total_tokens / context_budget if context_budget else 0
+    # total input = fresh tokens + cache-read tokens (they are additive
+    # in the API response, not overlapping).
+    ctx_ratio = total_in / context_budget if context_budget else 0
     rows.append(_budget_row("Context ", _bar(ctx_ratio),
-                            format_tokens(total_tokens),
+                            format_tokens(total_in),
                             f"/ {format_tokens(context_budget)}",
                             f"{int(ctx_ratio * 100)}%"))
 

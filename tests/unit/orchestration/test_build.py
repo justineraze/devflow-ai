@@ -8,7 +8,6 @@ import pytest
 from devflow.core.models import FeatureStatus, PhaseStatus
 from devflow.core.workflow import load_state, save_state
 from devflow.orchestration.build import (
-    _get_phase_agent,
     _parse_plan_module,
     execute_build_loop,
 )
@@ -19,6 +18,7 @@ from devflow.orchestration.lifecycle import (
     start_build,
     start_fix,
 )
+from devflow.orchestration.model_routing import get_phase_agent
 from devflow.orchestration.phase_exec import (
     complete_phase,
     fail_phase,
@@ -212,25 +212,39 @@ class TestGetPhaseAgent:
         state = load_state(project_dir)
         state.stack = "python"
         save_state(state, project_dir)
-        assert _get_phase_agent(feature, "implementing", project_dir) == "developer-python"
+        assert get_phase_agent(feature, "implementing", project_dir) == "developer-python"
 
     def test_returns_developer_typescript_for_ts_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         state.stack = "typescript"
         save_state(state, project_dir)
-        assert _get_phase_agent(feature, "implementing", project_dir) == "developer-typescript"
+        assert get_phase_agent(feature, "implementing", project_dir) == "developer-typescript"
 
     def test_returns_developer_when_no_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        assert _get_phase_agent(feature, "implementing", project_dir) == "developer"
+        assert get_phase_agent(feature, "implementing", project_dir) == "developer"
 
     def test_non_developer_agent_unchanged_with_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         state.stack = "python"
         save_state(state, project_dir)
-        assert _get_phase_agent(feature, "planning", project_dir) == "planner"
+        assert get_phase_agent(feature, "planning", project_dir) == "planner"
+
+    def test_stack_kwarg_avoids_state_read(self, project_dir: Path) -> None:
+        """Passing stack= directly skips load_state — no state.json needed."""
+        feature = start_build("test", "standard", project_dir)
+        result = get_phase_agent(feature, "implementing", stack="python")
+        assert result == "developer-python"
+
+    def test_stack_none_falls_back_to_state(self, project_dir: Path) -> None:
+        feature = start_build("test", "standard", project_dir)
+        state = load_state(project_dir)
+        state.stack = "typescript"
+        save_state(state, project_dir)
+        agent = get_phase_agent(feature, "implementing", project_dir, stack=None)
+        assert agent == "developer-typescript"
 
 
 class TestAutoCommitAfterPhase:

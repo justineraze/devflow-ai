@@ -15,9 +15,9 @@ from devflow.core.models import (
     WorkflowState,
 )
 from devflow.core.workflow import save_state
-from devflow.orchestration.build import (
+from devflow.orchestration.phase_exec import (
     MAX_GATE_AUTO_RETRIES,
-    _setup_gate_retry,
+    setup_gate_retry,
 )
 from devflow.orchestration.runner import build_user_prompt
 
@@ -55,7 +55,7 @@ class TestSetupGateRetry:
     ) -> None:
         _make_feature_with_gate(project_dir, with_fixing=False)
 
-        scheduled = _setup_gate_retry("feat-001", project_dir)
+        scheduled = setup_gate_retry("feat-001", project_dir)
 
         assert scheduled is True
         from devflow.core.workflow import load_state
@@ -73,7 +73,7 @@ class TestSetupGateRetry:
     def test_resets_existing_fixing_phase(self, project_dir: Path) -> None:
         _make_feature_with_gate(project_dir, with_fixing=True)
 
-        _setup_gate_retry("feat-001", project_dir)
+        setup_gate_retry("feat-001", project_dir)
 
         from devflow.core.workflow import load_state
         feature = load_state(project_dir).get_feature("feat-001")
@@ -89,12 +89,12 @@ class TestSetupGateRetry:
         state = WorkflowState(features={feature.id: feature})
         save_state(state, project_dir)
 
-        scheduled = _setup_gate_retry("feat-001", project_dir)
+        scheduled = setup_gate_retry("feat-001", project_dir)
 
         assert scheduled is False
 
     def test_returns_false_for_unknown_feature(self, project_dir: Path) -> None:
-        assert _setup_gate_retry("ghost", project_dir) is False
+        assert setup_gate_retry("ghost", project_dir) is False
 
 
 class TestFixingPromptInjectsGateJson:

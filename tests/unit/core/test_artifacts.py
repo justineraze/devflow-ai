@@ -56,6 +56,26 @@ class TestArtifactIO:
         assert load_phase_output("feat-001", "planning") == "# Plan body"
 
 
+class TestPathTraversalGuard:
+    """feature_dir rejects IDs containing path traversal sequences."""
+
+    @pytest.mark.parametrize("bad_id", [
+        "../../etc",
+        "feat/../../../passwd",
+        "feat/sub",
+        "feat\\sub",
+        "..",
+    ])
+    def test_rejects_traversal_ids(self, project_dir: Path, bad_id: str) -> None:
+        with pytest.raises(ValueError, match="Invalid feature ID"):
+            feature_dir(bad_id)
+
+    def test_accepts_normal_ids(self, project_dir: Path) -> None:
+        path = feature_dir("feat-add-caching-0415")
+        assert path.exists()
+        assert path.name == "feat-add-caching-0415"
+
+
 class TestReadJsonArtifact:
     """read_json_artifact parses JSON, treating malformed/missing as None."""
 

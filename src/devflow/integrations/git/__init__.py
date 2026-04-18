@@ -22,6 +22,7 @@ from .repo import (
     get_untracked_files,
     has_commits_ahead,
     is_worktree_dirty,
+    persist_files_summary,
     switch_and_pull_main,
     switch_branch,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "get_untracked_files",
     "has_commits_ahead",
     "is_worktree_dirty",
+    "persist_files_summary",
     "push_and_create_pr",
     "switch_and_pull_main",
     "switch_branch",

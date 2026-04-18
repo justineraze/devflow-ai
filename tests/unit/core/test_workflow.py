@@ -61,6 +61,31 @@ class TestLoadWorkflow:
             load_workflow("nonexistent", workflows_dir)
 
 
+class TestWorkflowCache:
+    def test_same_object_returned_on_second_call(self, workflows_dir: Path) -> None:
+        """Default-dir loads are cached — same object returned on repeated calls."""
+        from devflow.core import workflow as wf_mod
+
+        # Pre-populate the cache with a known workflow dir.
+        wf1 = load_workflow("standard", workflows_dir)
+        # Manually seed the cache as if the default dir had been used.
+        wf_mod._workflow_cache["standard"] = wf1
+
+        wf2 = load_workflow("standard")
+        assert wf2 is wf1
+
+        # Cleanup to avoid polluting other tests.
+        wf_mod._workflow_cache.pop("standard", None)
+
+    def test_explicit_dir_bypasses_cache(self, workflows_dir: Path) -> None:
+        from devflow.core import workflow as wf_mod
+
+        wf_mod._workflow_cache["standard"] = load_workflow("standard", workflows_dir)
+        wf_fresh = load_workflow("standard", workflows_dir)
+        assert wf_fresh is not wf_mod._workflow_cache["standard"]
+        wf_mod._workflow_cache.pop("standard", None)
+
+
 class TestStatePersistence:
     def test_save_and_load_roundtrip(self, project_dir: Path) -> None:
         state = WorkflowState()

@@ -43,7 +43,7 @@ line-length = 99
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/e2e"]
+testpaths = ["tests/unit", "tests/e2e", "tests/smoke"]
 addopts = "-m 'not smoke'"
 norecursedirs = ["tests/e2e/fixtures", "tests/smoke/fixtures"]
 markers = [
