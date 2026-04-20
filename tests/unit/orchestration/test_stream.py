@@ -134,4 +134,4 @@ class TestFormatters:
         tool = ToolUse(name="UnknownTool", summary="stuff")
         line = format_tool_line(tool)
         assert "UnknownTool" in line
-        assert "•" in line
+        assert "🔧" in line

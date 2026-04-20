@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from devflow.core.metrics import PhaseMetrics, ToolUse
+from devflow.ui.formatting import format_cost, format_tokens, format_tool_line
 
 __all__ = [
     "PhaseMetrics",
@@ -15,21 +16,6 @@ __all__ = [
     "format_tool_line",
     "parse_event",
 ]
-
-
-# Icons for common Claude Code tools.
-TOOL_ICONS: dict[str, str] = {
-    "Read": "📖",
-    "Write": "📝",
-    "Edit": "📝",
-    "Bash": "💻",
-    "Grep": "🔍",
-    "Glob": "🔍",
-    "Task": "🤖",
-    "TodoWrite": "📋",
-    "WebFetch": "🌐",
-    "WebSearch": "🌐",
-}
 
 
 def _summarize_tool_use(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -100,29 +86,3 @@ def parse_event(line: str) -> tuple[str, Any] | None:
     return None
 
 
-def format_cost(cost_usd: float) -> str:
-    """Format a cost in USD for display."""
-    if cost_usd < 0.01:
-        cents = cost_usd * 100
-        return f"{cents:.1f}¢"
-    return f"${cost_usd:.2f}"
-
-
-def format_tokens(n: int) -> str:
-    """Format a token count (e.g. 3421 -> '3.4k')."""
-    if n < 1000:
-        return str(n)
-    return f"{n / 1000:.1f}k"
-
-
-def format_tool_line(tool: ToolUse, indent: str = "  ") -> str:
-    """Format a tool use as an aligned, indented progress line.
-
-    Layout: ``{indent}{icon}  {NAME:8}  {summary}``. Fixed-width name
-    column keeps summaries aligned across the whole phase log.
-    """
-    icon = TOOL_ICONS.get(tool.name, "•")
-    name_col = tool.name.ljust(8)
-    if tool.summary:
-        return f"{indent}{icon}  {name_col}  {tool.summary}"
-    return f"{indent}{icon}  {name_col}"

@@ -28,7 +28,7 @@ def _current_branch(cwd: Path) -> str:
     """Return the name of the currently checked-out branch."""
     result = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True, cwd=str(cwd),
+        capture_output=True, text=True, cwd=str(cwd), timeout=30,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
 
@@ -44,7 +44,7 @@ def _pr_is_merged(feature_id: str, cwd: Path) -> bool:
     branch = branch_name(feature_id)
     result = subprocess.run(
         ["gh", "pr", "view", branch, "--json", "state", "--jq", ".state"],
-        capture_output=True, text=True, cwd=str(cwd),
+        capture_output=True, text=True, cwd=str(cwd), timeout=60,
     )
     if result.returncode != 0:
         return False

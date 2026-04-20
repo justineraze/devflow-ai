@@ -14,6 +14,10 @@ _SECRET_RE = r"(?i)(secret|password|passwd|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]"
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("AWS Access Key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("AWS Secret Key", re.compile(r"(?i)aws_secret_access_key\s*=\s*\S+")),
+    ("GitHub Token", re.compile(r"gh[pousr]_[A-Za-z0-9_]{36,}")),
+    ("GitHub PAT", re.compile(r"github_pat_[A-Za-z0-9_]{22,}")),
+    ("Anthropic API Key", re.compile(r"sk-ant-[A-Za-z0-9\-]{20,}")),
+    ("Slack Token", re.compile(r"xox[bprs]-[A-Za-z0-9\-]{10,}")),
     ("Generic API Key", re.compile(_API_KEY_RE)),
     ("Generic Secret", re.compile(_SECRET_RE)),
     ("Private Key", re.compile(r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----")),

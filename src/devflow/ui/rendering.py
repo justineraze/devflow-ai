@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from rich.console import Group
 from rich.panel import Panel
@@ -12,8 +13,11 @@ from rich.text import Text
 
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature
-from devflow.orchestration.stream import format_cost, format_tokens
 from devflow.ui.console import console
+from devflow.ui.formatting import format_cost, format_tokens
+
+if TYPE_CHECKING:
+    from devflow.orchestration.sync import SyncResult
 
 STACK_ICONS: dict[str, str] = {
     "python": "🐍",
@@ -284,16 +288,8 @@ def _render_phase_timeline(feature: Feature, totals: BuildTotals) -> Table:
     return grid
 
 
-def render_sync_summary(result: object) -> None:
-    """Render a Rich panel summarising the outcome of ``devflow sync``.
-
-    Accepts a :class:`~devflow.orchestration.sync.SyncResult` but typed as
-    ``object`` to avoid a circular import at module load time.
-    """
-    from devflow.orchestration.sync import SyncResult
-
-    assert isinstance(result, SyncResult)  # noqa: S101 — internal guard
-
+def render_sync_summary(result: SyncResult) -> None:
+    """Render a Rich panel summarising the outcome of ``devflow sync``."""
     prefix = "[yellow]dry-run[/yellow] " if result.dry_run else ""
 
     grid = Table.grid(expand=False, padding=(0, 2))

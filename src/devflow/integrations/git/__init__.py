@@ -4,9 +4,9 @@ Split into focused submodules; re-exports preserved for existing consumers.
 """
 from .commit_message import build_commit_message, build_pr_title
 from .pr_body import (
-    _build_pr_body,
-    _parse_plan_changes,
-    _parse_plan_summary,
+    build_pr_body,
+    parse_plan_changes,
+    parse_plan_summary,
     push_and_create_pr,
 )
 from .repo import (
@@ -46,7 +46,7 @@ __all__ = [
     "push_and_create_pr",
     "switch_and_pull_main",
     "switch_branch",
-    "_build_pr_body",
-    "_parse_plan_changes",
-    "_parse_plan_summary",
+    "build_pr_body",
+    "parse_plan_changes",
+    "parse_plan_summary",
 ]

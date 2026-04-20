@@ -23,6 +23,7 @@ def _normalize_description(description: str) -> str:
     like a second Conventional Commits type prefix (e.g. "feat: foo: bar").
     """
     desc = description.strip().rstrip(".!?")
+    desc = desc.replace("\n", " ").replace("\r", "")
     desc = desc.replace(":", " —")
     return desc[0].lower() + desc[1:] if desc else desc
 

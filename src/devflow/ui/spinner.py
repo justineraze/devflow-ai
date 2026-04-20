@@ -12,29 +12,7 @@ from rich.live import Live
 from rich.text import Text
 
 from devflow.ui.console import console
-
-# Emoji icon per tool name prefix (first word of the tool name).
-_TOOL_ICONS: dict[str, str] = {
-    "read": "📖",
-    "write": "✏️",
-    "edit": "✏️",
-    "bash": "⚡",
-    "grep": "🔍",
-    "glob": "🔍",
-    "agent": "🤖",
-    "task": "📋",
-    "web": "🌐",
-    "todo": "📝",
-}
-
-
-def _tool_icon(tool_name: str) -> str:
-    """Return an emoji for *tool_name* (case-insensitive prefix match)."""
-    key = tool_name.lower().split("(")[0].strip()
-    for prefix, icon in _TOOL_ICONS.items():
-        if key.startswith(prefix):
-            return icon
-    return "🔧"
+from devflow.ui.formatting import tool_icon
 
 
 class PhaseSpinner:
@@ -67,7 +45,7 @@ class PhaseSpinner:
 
     def update(self, tool_name: str, summary: str) -> None:
         """Update the spinner text with the latest tool action."""
-        icon = _tool_icon(tool_name)
+        icon = tool_icon(tool_name)
         action = f"{icon} {tool_name}  {summary}"
         self._renderable = self._make_text(action)
         self._live.update(self._renderable)

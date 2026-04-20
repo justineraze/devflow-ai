@@ -9,7 +9,7 @@ from pathlib import Path
 from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, PhaseRecord
-from devflow.core.paths import assets_dir, venv_env
+from devflow.core.paths import venv_env
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.orchestration.model_routing import resolve_model
 from devflow.ui.console import console
@@ -17,17 +17,34 @@ from devflow.ui.console import console
 # Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
 INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
-# Fallback: bundled assets in the package.
-BUNDLED_AGENTS_DIR = assets_dir() / "agents"
-BUNDLED_SKILLS_DIR = assets_dir() / "skills"
+
+
+def _bundled_dir(subdir: str) -> Path:
+    """Lazy accessor for bundled asset directories."""
+    from devflow.core.paths import assets_dir
+    return assets_dir() / subdir
 
 # Skills always injected on every phase.
 ALWAYS_ON_SKILLS: tuple[str, ...] = ("devflow-context",)
 
-# Hard ceiling for a single Claude phase. 30 minutes covers planning
-# and implementing on large features; anything past that is almost
-# certainly a hung process and we'd rather kill it than freeze the CLI.
-PHASE_TIMEOUT_S: int = 30 * 60
+# Hard ceiling for a single Claude phase when no per-phase timeout is
+# configured in the workflow YAML. 30 minutes covers planning and
+# implementing on large features.
+DEFAULT_PHASE_TIMEOUT_S: int = 30 * 60
+
+
+def _phase_timeout(feature: Feature, phase: PhaseRecord) -> int:
+    """Return the timeout for *phase*, preferring the workflow YAML value."""
+    from devflow.core.workflow import load_workflow
+
+    try:
+        wf = load_workflow(feature.workflow)
+        for phase_def in wf.phases:
+            if phase_def.name == phase.name:
+                return phase_def.timeout
+    except FileNotFoundError:
+        pass
+    return DEFAULT_PHASE_TIMEOUT_S
 
 
 def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path | None:
@@ -41,12 +58,12 @@ def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path 
 
 def _find_agent_file(agent_name: str) -> Path | None:
     """Locate the agent .md file."""
-    return _find_asset_file(agent_name, INSTALLED_AGENTS_DIR, BUNDLED_AGENTS_DIR)
+    return _find_asset_file(agent_name, INSTALLED_AGENTS_DIR, _bundled_dir("agents"))
 
 
 def _find_skill_file(skill_name: str) -> Path | None:
     """Locate the skill .md file."""
-    return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, BUNDLED_SKILLS_DIR)
+    return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, _bundled_dir("skills"))
 
 
 def _load_md_content(path: Path | None) -> str:
@@ -226,12 +243,14 @@ def execute_phase(
     The final phase-summary chip is rendered by the caller from the returned
     PhaseMetrics — keeps the runner focused on I/O.
     """
-    from devflow.orchestration.stream import format_tool_line, parse_event
+    from devflow.orchestration.stream import parse_event
+    from devflow.ui.formatting import format_tool_line
     from devflow.ui.spinner import PhaseSpinner
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
     model = resolve_model(feature, phase)
+    timeout = _phase_timeout(feature, phase)
     cwd = Path.cwd()
 
     agent_env = venv_env(cwd)
@@ -290,13 +309,13 @@ def execute_phase(
                     metrics.tool_count = tool_count
 
         try:
-            proc.wait(timeout=PHASE_TIMEOUT_S)
+            proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
             return False, (
-                f"Phase timed out after {PHASE_TIMEOUT_S}s. "
-                "Increase PHASE_TIMEOUT_S or split the feature."
+                f"Phase timed out after {timeout}s. "
+                "Increase the timeout in your workflow YAML or split the feature."
             ), metrics
 
         if proc.returncode == 0:

@@ -6,24 +6,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devflow.ui.spinner import PhaseSpinner, _tool_icon
+from devflow.ui.formatting import tool_icon
+from devflow.ui.spinner import PhaseSpinner
 
 
 class TestToolIcon:
     def test_read_returns_book(self) -> None:
-        assert _tool_icon("Read") == "📖"
+        assert tool_icon("Read") == "📖"
 
-    def test_bash_returns_lightning(self) -> None:
-        assert _tool_icon("Bash") == "⚡"
+    def test_bash_returns_terminal(self) -> None:
+        assert tool_icon("Bash") == "💻"
 
     def test_grep_returns_magnifier(self) -> None:
-        assert _tool_icon("Grep") == "🔍"
+        assert tool_icon("Grep") == "🔍"
 
     def test_unknown_returns_wrench(self) -> None:
-        assert _tool_icon("SomeUnknownTool") == "🔧"
+        assert tool_icon("SomeUnknownTool") == "🔧"
 
-    def test_case_insensitive(self) -> None:
-        assert _tool_icon("WRITE") == _tool_icon("write")
+    def test_case_insensitive_prefix_fallback(self) -> None:
+        # "WRITE" doesn't match exact key "Write", but case-insensitive prefix works
+        assert tool_icon("WRITE") == "📝"
 
 
 class TestPhaseSpinner:

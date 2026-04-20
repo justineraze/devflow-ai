@@ -14,7 +14,7 @@ from .commit_message import build_commit_message, build_pr_title
 from .repo import _git, commit_changes, has_commits_ahead
 
 
-def _parse_plan_summary(plan_output: str) -> str:
+def parse_plan_summary(plan_output: str) -> str:
     """Extract the one-line summary from the plan header.
 
     Looks for: ``## Plan: <id> — <summary>``
@@ -27,7 +27,7 @@ def _parse_plan_summary(plan_output: str) -> str:
     return match.group(1).strip()
 
 
-def _parse_plan_changes(plan_output: str, max_items: int = 5) -> str:
+def parse_plan_changes(plan_output: str, max_items: int = 5) -> str:
     """Extract implementation steps as markdown bullets.
 
     Finds ``### Implementation steps`` and reformats numbered items as
@@ -57,7 +57,7 @@ def _parse_plan_changes(plan_output: str, max_items: int = 5) -> str:
     return "\n".join(bullets)
 
 
-def _build_pr_body(feature: Feature) -> str:
+def build_pr_body(feature: Feature) -> str:
     """Build the PR description from planning and gate phase artifacts.
 
     Summary and Changes are extracted from the planner's structured output.
@@ -66,8 +66,8 @@ def _build_pr_body(feature: Feature) -> str:
     """
     plan_output = load_phase_output(feature.id, "planning") or ""
 
-    summary = _parse_plan_summary(plan_output) if plan_output else ""
-    changes = _parse_plan_changes(plan_output) if plan_output else ""
+    summary = parse_plan_summary(plan_output) if plan_output else ""
+    changes = parse_plan_changes(plan_output) if plan_output else ""
 
     parts = ["## Summary", ""]
     parts.append(summary or feature.description)
@@ -113,12 +113,12 @@ def push_and_create_pr(
         return None
 
     # Build PR body and title using Conventional Commits format.
-    body = _build_pr_body(feature)
+    body = build_pr_body(feature)
     title = build_pr_title(feature)
 
     pr = subprocess.run(
         ["gh", "pr", "create", "--title", title, "--body", body],
-        capture_output=True, text=True, cwd=cwd,
+        capture_output=True, text=True, cwd=cwd, timeout=120,
     )
     if pr.returncode == 0:
         return pr.stdout.strip()
