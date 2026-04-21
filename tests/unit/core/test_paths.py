@@ -87,6 +87,49 @@ class TestVenvEnv:
         env = venv_env()
         assert env["PATH"].startswith(str(venv_bin))
 
+    # ------------------------------------------------------------------
+    # Windows path handling — _VENV_BIN = "Scripts" on nt
+    # ------------------------------------------------------------------
+
+    def test_windows_uses_scripts_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """On Windows (os.name == 'nt') the venv bin dir is 'Scripts'."""
+        import devflow.core.paths as _paths_mod
+
+        monkeypatch.setattr(_paths_mod, "_VENV_BIN", "Scripts")
+        scripts_dir = tmp_path / ".venv" / "Scripts"
+        scripts_dir.mkdir(parents=True)
+        env = venv_env(tmp_path)
+        assert env["PATH"].startswith(str(scripts_dir))
+
+    def test_posix_uses_bin_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """On POSIX (os.name == 'posix') the venv bin dir is 'bin'."""
+        import devflow.core.paths as _paths_mod
+
+        monkeypatch.setattr(_paths_mod, "_VENV_BIN", "bin")
+        bin_dir = tmp_path / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        env = venv_env(tmp_path)
+        assert env["PATH"].startswith(str(bin_dir))
+
+    def test_virtual_env_fallback_windows_uses_scripts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """VIRTUAL_ENV fallback also uses Scripts on Windows."""
+        import devflow.core.paths as _paths_mod
+
+        monkeypatch.setattr(_paths_mod, "_VENV_BIN", "Scripts")
+        custom = tmp_path / "custom_venv"
+        (custom / "Scripts").mkdir(parents=True)
+        monkeypatch.setenv("VIRTUAL_ENV", str(custom))
+        project = tmp_path / "project"
+        project.mkdir()
+        env = venv_env(project)
+        assert str(custom / "Scripts") in env["PATH"]
+
     def test_preserves_existing_path(self) -> None:
         env = venv_env()
         for entry in os.environ.get("PATH", "").split(os.pathsep):
