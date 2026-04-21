@@ -1,15 +1,17 @@
-"""Tests for devflow.ui.display — log table, log detail, format duration."""
+"""Tests for devflow.ui.display — log table, log detail, format duration, metrics."""
 
 from datetime import UTC, datetime, timedelta
 from io import StringIO
 
 from rich.console import Console
 
+from devflow.core.history import BuildMetrics, PhaseSnapshot
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.ui.display import (
     _format_duration,
     render_log_detail,
     render_log_table,
+    render_metrics_table,
 )
 
 
@@ -184,3 +186,97 @@ class TestRenderLogDetail:
         feature = _make_feature("feat-empty", phases=[])
         output = _capture(render_log_detail, feature)
         assert "No phases recorded" in output
+
+
+def _make_build_metrics(
+    feature_id: str = "feat-001",
+    success: bool = True,
+    cost_usd: float = 0.05,
+    phases: list[PhaseSnapshot] | None = None,
+) -> BuildMetrics:
+    """Helper to build a BuildMetrics with sensible defaults."""
+    if phases is None:
+        phases = [
+            PhaseSnapshot(
+                name="planning",
+                model="claude-sonnet-4-5",
+                cost_usd=0.02,
+                input_tokens=5000,
+                cache_read=3000,
+                duration_s=45.0,
+                success=True,
+            ),
+            PhaseSnapshot(
+                name="implementing",
+                model="claude-sonnet-4-5",
+                cost_usd=0.03,
+                input_tokens=8000,
+                cache_read=6000,
+                duration_s=90.0,
+                success=True,
+            ),
+        ]
+    record = BuildMetrics(
+        feature_id=feature_id,
+        description=f"Test feature {feature_id}",
+        workflow="light",
+        timestamp="2026-04-21T10:00:00+00:00",
+        success=success,
+        cost_usd=cost_usd,
+        input_tokens=sum(p.input_tokens for p in phases),
+        cache_read=sum(p.cache_read for p in phases),
+        duration_s=sum(p.duration_s for p in phases),
+        gate_passed_first_try=success,
+        phases=phases,
+    )
+    return record
+
+
+class TestRenderMetricsTable:
+    def test_empty_list(self) -> None:
+        output = _capture(render_metrics_table, [])
+        assert "No build history" in output
+
+    def test_single_build_shows_last_build_and_history(self) -> None:
+        record = _make_build_metrics("feat-metrics-001")
+        output = _capture(render_metrics_table, [record])
+        # Last build panel present
+        assert "Last build" in output
+        assert "feat-metrics-001" in output
+        # Phase breakdown present
+        assert "planning" in output
+        assert "implementing" in output
+        # History table present
+        assert "Build history" in output
+        # No phase averages with only 1 record
+        assert "Avg cost by phase" not in output
+
+    def test_multiple_builds_show_all_three_sections(self) -> None:
+        records = [
+            _make_build_metrics("feat-001", cost_usd=0.05),
+            _make_build_metrics("feat-002", cost_usd=0.08),
+            _make_build_metrics("feat-003", cost_usd=0.03),
+        ]
+        output = _capture(render_metrics_table, records)
+        # All 3 sections
+        assert "Last build" in output
+        assert "Avg cost by phase" in output
+        assert "Build history" in output
+        # Most recent is records[0]
+        assert "feat-001" in output
+        assert "planning" in output
+
+    def test_zero_cost_phases_appear_in_averages(self) -> None:
+        phases = [
+            PhaseSnapshot(name="gate", cost_usd=0.0, duration_s=5.0, success=True),
+            PhaseSnapshot(name="implementing", cost_usd=0.04, duration_s=60.0, success=True),
+        ]
+        records = [
+            _make_build_metrics("feat-a", phases=phases, cost_usd=0.04),
+            _make_build_metrics("feat-b", phases=phases, cost_usd=0.04),
+        ]
+        output = _capture(render_metrics_table, records)
+        assert "Avg cost by phase" in output
+        # Both phases should appear even though gate has $0.00
+        assert "gate" in output
+        assert "implementing" in output
