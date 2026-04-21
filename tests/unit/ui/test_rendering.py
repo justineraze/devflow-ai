@@ -133,7 +133,7 @@ class TestBuildSummary:
         assert "Duration" in out
         assert "Cost" in out
         assert "Tokens" in out
-        assert "Context" in out
+        assert "Cache" in out
         assert "https://github.com/x/y/pull/1" in out
         assert "planning" in out
         assert "gate" in out

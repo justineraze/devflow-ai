@@ -108,13 +108,17 @@ def install_hook(
     post_compact: list = hooks_section.setdefault("PostCompact", [])
 
     # Upsert: only add if not already present (match by command path).
+    # Claude Code hook format: {"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}
     already_registered = any(
-        entry.get("command") == hook_command
+        any(h.get("command") == hook_command for h in entry.get("hooks", []))
         for entry in post_compact
         if isinstance(entry, dict)
     )
     if not already_registered:
-        post_compact.append({"type": "command", "command": hook_command})
+        post_compact.append({
+            "matcher": "",
+            "hooks": [{"type": "command", "command": hook_command}],
+        })
 
     write_settings_atomic(cfg, data)
     return HOOK_SCRIPT_NAME

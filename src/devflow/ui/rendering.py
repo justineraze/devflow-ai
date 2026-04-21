@@ -219,7 +219,6 @@ def render_build_summary(
     pr_url: str | None,
     branch: str,
     cost_budget: float | None = None,
-    context_budget: int = 200_000,
 ) -> None:
     """Final multi-block panel shown when a build completes."""
     phase_dots = _render_phase_timeline(feature, totals)
@@ -250,13 +249,12 @@ def render_build_summary(
         rows.append(_budget_row("Cost    ", _bar(ratio), format_cost(totals.cost_usd),
                                 f"/ {format_cost(cost_budget)}", f"{int(ratio * 100)}%"))
 
-    # total input = fresh tokens + cache-read tokens (they are additive
-    # in the API response, not overlapping).
-    ctx_ratio = total_in / context_budget if context_budget else 0
-    rows.append(_budget_row("Context ", _bar(ctx_ratio),
-                            format_tokens(total_in),
-                            f"/ {format_tokens(context_budget)}",
-                            f"{int(ctx_ratio * 100)}%"))
+    if total_in > 0:
+        cache_ratio = totals.cache_read / total_in
+        rows.append(_budget_row("Cache   ", _bar(cache_ratio),
+                                format_tokens(totals.cache_read),
+                                f"/ {format_tokens(total_in)}",
+                                f"{int(cache_ratio * 100)}%"))
 
     rows.append(Text())
     rows.append(phase_dots)

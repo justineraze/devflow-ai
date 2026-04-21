@@ -41,6 +41,8 @@ def tool_icon(tool_name: str) -> str:
 
 def format_cost(cost_usd: float) -> str:
     """Format a cost in USD for display."""
+    if cost_usd == 0:
+        return "$0.00"
     if cost_usd < 0.01:
         cents = cost_usd * 100
         return f"{cents:.1f}¢"
