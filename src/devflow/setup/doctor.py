@@ -216,7 +216,8 @@ def check_hook_installed(
     hook_command = str(hook_path.resolve())
     post_compact = data.get("hooks", {}).get("PostCompact", [])
     registered = any(
-        isinstance(entry, dict) and entry.get("command") == hook_command
+        isinstance(entry, dict)
+        and any(h.get("command") == hook_command for h in entry.get("hooks", []))
         for entry in post_compact
     )
     if not registered:
