@@ -142,6 +142,81 @@ class TestVenvEnv:
         assert env["DEVFLOW_TEST_MARKER"] == "hello"
 
 
+class TestVenvEnvUvToolInstallScenario:
+    """Integration-style tests simulating 'devflow installed via uv tool install'.
+
+    When devflow is installed globally with ``uv tool install devflow-ai`` its
+    isolated tool-venv does **not** contain the target project's dev deps (ruff,
+    pytest).  ``venv_env()`` must therefore resolve the project-local ``.venv``
+    so that gate checks find the right executables.
+
+    These tests use real subprocess calls against a tiny stub executable placed
+    in a temporary ``.venv/bin`` directory, verifying the full PATH resolution
+    chain end-to-end without needing an actual virtualenv.
+    """
+
+    def _make_stub(self, bin_dir: Path, name: str) -> Path:
+        """Write a minimal executable stub that exits 0 and return its path."""
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.chmod(0o755)
+        return stub
+
+    def test_project_venv_used_over_system_path(self, tmp_path: Path) -> None:
+        """A tool in project .venv/bin is found even if absent from system PATH."""
+        import subprocess
+
+        from devflow.core.paths import venv_env
+
+        bin_dir = tmp_path / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        self._make_stub(bin_dir, "fake-tool-devflow-test")
+
+        env = venv_env(tmp_path)
+        # The project .venv/bin must appear first in PATH.
+        assert env["PATH"].startswith(str(bin_dir))
+
+        # The stub should be findable and runnable via the resolved env.
+        result = subprocess.run(
+            ["fake-tool-devflow-test"],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0
+
+    def test_gate_ruff_resolves_via_project_venv(self, tmp_path: Path) -> None:
+        """_run_command_check finds a project-local stub even without a system ruff."""
+
+        from devflow.integrations.gate.checks import _run_command_check
+
+        bin_dir = tmp_path / ".venv" / "bin"
+        bin_dir.mkdir(parents=True)
+        stub_name = "ruff-devflow-stub"
+        self._make_stub(bin_dir, stub_name)
+
+        # Verify that the command succeeds (tool resolved from project venv)
+        # rather than raising FileNotFoundError.
+        result = _run_command_check(stub_name, [stub_name], cwd=tmp_path)
+        assert result.passed is True
+        assert not result.skipped, "tool should be found, not skipped"
+
+    def test_no_project_venv_falls_back_gracefully(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without .venv the env still contains a usable PATH (no crash)."""
+        from devflow.core.paths import venv_env
+
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        project = tmp_path / "no_venv_project"
+        project.mkdir()
+
+        env = venv_env(project)
+        # PATH must exist and be non-empty for subprocess calls to work.
+        assert "PATH" in env
+        assert env["PATH"]
+
+
 class TestAtomicWriteText:
     """atomic_write_text writes via tmp + os.replace, cleaning up on failure."""
 

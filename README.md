@@ -80,6 +80,12 @@ devflow install   # sync agents & skills to ~/.claude/
 devflow doctor    # verify setup
 ```
 
+> **Note for `uv tool install` users:** devflow's isolated tool-venv does not
+> include your project's dev dependencies (ruff, pytest, etc.).  The quality
+> gate automatically picks up tools from the target project's `.venv` — make
+> sure your project has an activated or present `.venv` before running
+> `devflow check` or `devflow build`.
+
 ---
 
 ## Commands
