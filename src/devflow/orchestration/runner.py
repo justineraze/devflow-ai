@@ -78,9 +78,43 @@ def _load_md_content(path: Path | None) -> str:
     return content
 
 
+def _parse_extends(path: Path | None) -> str | None:
+    """Extract the ``extends`` field from a .md frontmatter, if present."""
+    if not path:
+        return None
+    content = path.read_text()
+    if not content.startswith("---"):
+        return None
+    end = content.find("---", 3)
+    if end == -1:
+        return None
+    frontmatter = content[3:end]
+    for line in frontmatter.splitlines():
+        if line.startswith("extends:"):
+            value = line.split(":", 1)[1].strip()
+            return value or None
+    return None
+
+
 def _load_agent_prompt(agent_name: str) -> str:
-    """Load the agent's .md file content."""
-    return _load_md_content(_find_agent_file(agent_name))
+    """Load the agent's .md file content, resolving ``extends`` chains.
+
+    When a specialist agent (e.g. ``developer-python``) declares
+    ``extends: developer`` in its frontmatter, the base agent content is
+    loaded first, followed by the specialist delta. This makes the base
+    a stable prefix for prompt caching — identical across all stacks.
+    """
+    path = _find_agent_file(agent_name)
+    parent_name = _parse_extends(path)
+    parts: list[str] = []
+    if parent_name:
+        base_content = _load_md_content(_find_agent_file(parent_name))
+        if base_content:
+            parts.append(base_content)
+    own_content = _load_md_content(path)
+    if own_content:
+        parts.append(own_content)
+    return "\n\n---\n\n".join(parts)
 
 
 def _load_skills_for_phase(phase_name: str) -> str:

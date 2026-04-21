@@ -11,7 +11,9 @@ from devflow.orchestration.runner import (
     _build_phase_context,
     _find_agent_file,
     _find_skill_file,
+    _load_agent_prompt,
     _load_skills_for_phase,
+    _parse_extends,
     build_prompt,
     execute_phase,
 )
@@ -216,6 +218,57 @@ class TestSkillInjection:
         prompt = build_prompt(sample_feature, phase, "developer")
         assert "Skills (discipline rules)" in prompt
         assert "Context Discipline" in prompt
+
+
+class TestParseExtends:
+    def test_returns_parent_name_from_frontmatter(self) -> None:
+        path = _find_agent_file("developer-python")
+        assert _parse_extends(path) == "developer"
+
+    def test_returns_none_for_agent_without_extends(self) -> None:
+        path = _find_agent_file("developer")
+        assert _parse_extends(path) is None
+
+    def test_returns_none_for_missing_path(self) -> None:
+        assert _parse_extends(None) is None
+
+    def test_returns_none_for_no_frontmatter(self, tmp_path: Path) -> None:
+        md = tmp_path / "agent.md"
+        md.write_text("# No frontmatter\nJust content.")
+        assert _parse_extends(md) is None
+
+
+class TestLoadAgentPrompt:
+    def test_specialist_loads_base_then_delta(self) -> None:
+        prompt = _load_agent_prompt("developer-python")
+        # Base developer content comes first.
+        idx_base = prompt.find("# Agent: Developer\n")
+        idx_spec = prompt.find("# Agent: Developer — Python Specialist")
+        assert idx_base >= 0, "base developer content missing"
+        assert idx_spec > idx_base, "specialist should come after base"
+
+    def test_base_agent_loads_without_duplication(self) -> None:
+        prompt = _load_agent_prompt("developer")
+        assert prompt.count("# Agent: Developer") == 1
+
+    def test_non_extending_agent_loads_normally(self) -> None:
+        prompt = _load_agent_prompt("planner")
+        assert "Planner" in prompt
+        # Should not contain developer base content.
+        assert "# Agent: Developer\n" not in prompt
+
+    def test_all_specialists_extend_developer(self) -> None:
+        for name in ("developer-python", "developer-typescript",
+                      "developer-php", "developer-frontend"):
+            path = _find_agent_file(name)
+            assert _parse_extends(path) == "developer", f"{name} should extend developer"
+
+    def test_system_prompt_with_specialist_includes_base(self) -> None:
+        from devflow.orchestration.runner import build_system_prompt
+
+        system = build_system_prompt("implementing", "developer-python")
+        assert "# Agent: Developer\n" in system
+        assert "Python Specialist" in system
 
 
 class TestPromptSplit:

@@ -7,9 +7,8 @@ trigger: auto-detected when project uses TypeScript
 
 # Agent: Developer — TypeScript Specialist
 
-Extends the base developer agent with TypeScript-specific expertise.
-All rules from `developer.md` apply. This agent adds TS idioms,
-Node.js patterns, and modern tooling.
+TypeScript-specific idioms, Node.js patterns, and modern tooling.
+Base developer rules are loaded automatically via `extends`.
 
 ## TypeScript strictness
 

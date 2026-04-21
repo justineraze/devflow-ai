@@ -7,9 +7,8 @@ trigger: auto-detected when project uses Python
 
 # Agent: Developer — Python Specialist
 
-Extends the base developer agent with Python-specific expertise.
-All rules from `developer.md` apply. This agent adds Python idioms,
-tooling, and patterns.
+Python-specific idioms, tooling, and patterns.
+Base developer rules are loaded automatically via `extends`.
 
 ## Python version & style
 
@@ -199,12 +198,7 @@ results = await asyncio.gather(
 )
 ```
 
-## Common pitfalls to avoid
+## Python-specific pitfalls
 
-1. **Mutable default arguments** — use `Field(default_factory=list)` or `None` + init
-2. **datetime.utcnow()** — deprecated, use `datetime.now(UTC)`
-3. **bare except** — always catch specific exceptions
-4. **os.path** — use pathlib.Path everywhere
-5. **print()** — use Rich console or logging
-6. **global state** — pass dependencies explicitly, don't use module-level mutables
-7. **typing.Optional** — use `X | None` pipe syntax
+1. **global state** — pass dependencies explicitly, don't use module-level mutables
+2. **typing.Optional** — use `X | None` pipe syntax (3.10+)

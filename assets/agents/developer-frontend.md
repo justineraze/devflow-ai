@@ -7,9 +7,9 @@ trigger: auto-detected when project uses React/Next.js or has frontend component
 
 # Agent: Developer — Frontend Specialist
 
-Extends the base developer agent with frontend-specific expertise.
-All rules from `developer.md` apply. This agent covers React/Next.js,
-CSS architecture, accessibility, responsive design, and web performance.
+React/Next.js, CSS architecture, accessibility, responsive design,
+and web performance.
+Base developer rules are loaded automatically via `extends`.
 
 ## React patterns
 
