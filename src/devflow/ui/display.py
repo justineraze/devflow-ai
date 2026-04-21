@@ -212,12 +212,126 @@ def render_log_table(features: list[Feature]) -> None:
 
 
 def render_metrics_table(records: list[BuildMetrics]) -> None:
-    """Render a table showing build metrics history."""
+    """Render build metrics: last build summary, phase averages, build history."""
     if not records:
         console.print("[dim]No build history yet. Run a build to start tracking.[/dim]")
         return
 
-    table = Table(title="Build metrics", border_style="dim")
+    _render_last_build(records[0])
+
+    if len(records) > 1:
+        _render_phase_averages(records)
+
+    _render_build_history(records)
+
+
+def _render_last_build(record: BuildMetrics) -> None:
+    """Render a summary panel for the most recent build."""
+    success_style = "green" if record.success else "red bold"
+    success_icon = "✓" if record.success else "✗"
+    header = (
+        f"[bold]{record.feature_id}[/bold]  "
+        f"[{success_style}]{success_icon}[/{success_style}]  "
+        f"[yellow]{format_cost(record.cost_usd)}[/yellow]  ·  "
+        f"{_format_build_duration(record.duration_s)}  ·  "
+        f"[dim]{record.timestamp[:10]}[/dim]"
+    )
+    console.print(Panel(header, title="Last build", border_style="dim", padding=(0, 1)))
+
+    if not record.phases:
+        return
+
+    phase_table = Table(border_style="dim", padding=(0, 1))
+    phase_table.add_column("Phase")
+    phase_table.add_column("Model", style="dim")
+    phase_table.add_column("Cost", justify="right")
+    phase_table.add_column("Tokens", justify="right")
+    phase_table.add_column("Cache%", justify="right")
+    phase_table.add_column("Duration", justify="right")
+    phase_table.add_column("", justify="center")
+
+    for p in record.phases:
+        total_tokens = p.input_tokens + p.cache_read
+        cache_pct = f"{int(p.cache_read / total_tokens * 100)}%" if total_tokens > 0 else "—"
+        p_icon = Text("✓", style="green") if p.success else Text("✗", style="red")
+        row_style = "" if p.success else "red"
+        phase_table.add_row(
+            Text(p.name, style=row_style or "default"),
+            p.model or "—",
+            format_cost(p.cost_usd),
+            format_tokens(p.input_tokens + p.cache_read),
+            cache_pct,
+            _format_build_duration(p.duration_s),
+            p_icon,
+            style=row_style,
+        )
+
+    console.print(phase_table)
+
+
+def _render_phase_averages(records: list[BuildMetrics]) -> None:
+    """Render avg cost/duration/tokens per phase type across all builds, sorted by cost."""
+    acc: dict[str, dict[str, float | int]] = {}
+    for r in records:
+        for p in r.phases:
+            if p.name not in acc:
+                acc[p.name] = {"cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0}
+            acc[p.name]["cost"] = float(acc[p.name]["cost"]) + p.cost_usd
+            acc[p.name]["duration"] = float(acc[p.name]["duration"]) + p.duration_s
+            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + p.input_tokens + p.cache_read
+            acc[p.name]["runs"] = int(acc[p.name]["runs"]) + 1
+
+    if not acc:
+        return
+
+    sorted_phases = sorted(
+        acc.items(),
+        key=lambda x: float(x[1]["cost"]) / int(x[1]["runs"]) if int(x[1]["runs"]) > 0 else 0.0,
+        reverse=True,
+    )
+
+    table = Table(title="Avg cost by phase", border_style="dim")
+    table.add_column("Phase", style="bold")
+    table.add_column("Avg Cost", justify="right")
+    table.add_column("Avg Duration", justify="right")
+    table.add_column("Avg Tokens", justify="right")
+    table.add_column("Runs", justify="right", style="dim")
+
+    total_avg_cost = 0.0
+    total_avg_duration = 0.0
+    total_avg_tokens = 0
+
+    for name, data in sorted_phases:
+        runs = int(data["runs"])
+        avg_cost = float(data["cost"]) / runs
+        avg_duration = float(data["duration"]) / runs
+        avg_tokens = int(data["tokens"]) // runs
+        total_avg_cost += avg_cost
+        total_avg_duration += avg_duration
+        total_avg_tokens += avg_tokens
+        table.add_row(
+            name,
+            format_cost(avg_cost),
+            _format_build_duration(avg_duration),
+            format_tokens(avg_tokens),
+            str(runs),
+        )
+
+    table.add_section()
+    table.add_row(
+        "[dim]Total avg[/dim]",
+        Text(format_cost(total_avg_cost), style="yellow"),
+        _format_build_duration(total_avg_duration),
+        format_tokens(total_avg_tokens),
+        "[dim]—[/dim]",
+    )
+
+    console.print(table)
+
+
+def _render_build_history(records: list[BuildMetrics]) -> None:
+    """Render the per-build history table with a summary line."""
+    table = Table(title="Build history", border_style="dim")
     table.add_column("Feature", style="bold", max_width=28)
     table.add_column("", justify="center")  # status icon
     table.add_column("Cost", justify="right")
@@ -241,7 +355,6 @@ def render_metrics_table(records: list[BuildMetrics]) -> None:
             gate = r.failed_phase or "—"
             gate_style = "red"
 
-        # Compact model summary: deduplicate and show unique models used.
         models = sorted({p.model for p in r.phases if p.model})
         models_str = ", ".join(models) if models else "—"
 
@@ -259,7 +372,6 @@ def render_metrics_table(records: list[BuildMetrics]) -> None:
 
     console.print(table)
 
-    # Summary line
     if len(records) > 1:
         successes = [r for r in records if r.success]
         avg_cost = sum(r.cost_usd for r in records) / len(records)

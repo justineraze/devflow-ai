@@ -161,7 +161,10 @@ class TestCheckHookInstalled:
         hook = hooks_dir / "devflow-post-compact.sh"
         hook.write_text("#!/usr/bin/env bash\n")
         settings = tmp_path / "settings.json"
-        entry = {"type": "command", "command": str(hook.resolve())}
+        entry = {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": str(hook.resolve())}],
+        }
         settings.write_text(json.dumps({"hooks": {"PostCompact": [entry]}}))
         return hooks_dir, settings
 

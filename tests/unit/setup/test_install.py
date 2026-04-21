@@ -136,7 +136,10 @@ class TestInstallHook:
         hooks_dir = tmp_path / "claude" / "hooks"
         settings = tmp_path / "claude" / "settings.json"
         settings.parent.mkdir(parents=True, exist_ok=True)
-        existing_entry = {"type": "command", "command": "/usr/local/bin/other-hook.sh"}
+        existing_entry = {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": "/usr/local/bin/other-hook.sh"}],
+        }
         settings.write_text(json.dumps({"hooks": {"PostCompact": [existing_entry]}}))
 
         install_hook(assets, settings, hooks_dir)
@@ -144,7 +147,7 @@ class TestInstallHook:
         data = json.loads(settings.read_text())
         entries = data["hooks"]["PostCompact"]
         assert len(entries) == 2
-        commands = [e["command"] for e in entries]
+        commands = [h["command"] for e in entries for h in e.get("hooks", [])]
         assert "/usr/local/bin/other-hook.sh" in commands
 
     def test_idempotent_no_duplicate_entry(self, tmp_path: Path) -> None:
