@@ -13,6 +13,7 @@ from devflow.ui.display import (
     render_header,
     render_log_detail,
     render_log_table,
+    render_metrics_table,
     render_status_table,
 )
 
@@ -31,9 +32,19 @@ def status(
     archived: Annotated[
         bool, typer.Option("--archived", help="Include archived features")
     ] = False,
+    metrics: Annotated[
+        bool, typer.Option("--metrics", "-m", help="Show build cost/token history")
+    ] = False,
 ) -> None:
     """Show the status of tracked features."""
     render_header(subtitle="Feature status")
+
+    if metrics:
+        from devflow.core.history import read_history
+
+        records = read_history()
+        render_metrics_table(records)
+        return
 
     if feature_id:
         feat = get_feature(feature_id)

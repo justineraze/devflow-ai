@@ -42,6 +42,21 @@ PHASE_DOT_COLORS: dict[str, str] = {
 
 
 @dataclass
+class PhaseMetricSnapshot:
+    """Metrics for a single phase execution — stored in BuildTotals for history."""
+
+    name: str
+    model: str
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+    cache_read: int
+    tool_count: int
+    duration_s: float
+    success: bool
+
+
+@dataclass
 class BuildTotals:
     """Running totals across all phases of a build."""
 
@@ -52,8 +67,12 @@ class BuildTotals:
     tool_count: int = 0
     duration_s: float = 0.0
     phase_durations: dict[str, float] = field(default_factory=dict)
+    phase_snapshots: list[PhaseMetricSnapshot] = field(default_factory=list)
 
-    def add(self, phase_name: str, metrics: PhaseMetrics, elapsed_s: float) -> None:
+    def add(
+        self, phase_name: str, metrics: PhaseMetrics, elapsed_s: float,
+        model: str = "", success: bool = True,
+    ) -> None:
         self.cost_usd += metrics.cost_usd
         self.input_tokens += metrics.input_tokens
         self.output_tokens += metrics.output_tokens
@@ -61,6 +80,17 @@ class BuildTotals:
         self.tool_count += metrics.tool_count
         self.duration_s += elapsed_s
         self.phase_durations[phase_name] = elapsed_s
+        self.phase_snapshots.append(PhaseMetricSnapshot(
+            name=phase_name,
+            model=model,
+            cost_usd=metrics.cost_usd,
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            cache_read=metrics.cache_read,
+            tool_count=metrics.tool_count,
+            duration_s=elapsed_s,
+            success=success,
+        ))
 
 
 def _model_badge(model: str) -> Text:

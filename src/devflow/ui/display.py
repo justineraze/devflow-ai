@@ -8,8 +8,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
 from devflow.ui.console import console
+from devflow.ui.formatting import format_cost, format_tokens
 
 # Status colors for visual feedback.
 STATUS_COLORS: dict[str, str] = {
@@ -207,6 +209,78 @@ def render_log_table(features: list[Feature]) -> None:
         )
 
     console.print(table)
+
+
+def render_metrics_table(records: list[BuildMetrics]) -> None:
+    """Render a table showing build metrics history."""
+    if not records:
+        console.print("[dim]No build history yet. Run a build to start tracking.[/dim]")
+        return
+
+    table = Table(title="Build metrics", border_style="dim")
+    table.add_column("Feature", style="bold", max_width=28)
+    table.add_column("", justify="center")  # status icon
+    table.add_column("Cost", justify="right")
+    table.add_column("Tokens in", justify="right")
+    table.add_column("Cache %", justify="right")
+    table.add_column("Duration", justify="right")
+    table.add_column("Gate", justify="center")
+    table.add_column("Models", style="dim", max_width=20)
+    table.add_column("Date", style="dim")
+
+    for r in records:
+        status_icon = Text("✓", style="green") if r.success else Text("✗", style="red")
+        cache_pct = f"{int(r.cache_hit_rate * 100)}%"
+        cache_style = "green" if r.cache_hit_rate > 0.5 else "yellow"
+        duration = _format_build_duration(r.duration_s)
+
+        if r.success:
+            gate = "✓" if r.gate_passed_first_try else f"retry ×{r.gate_retries}"
+            gate_style = "green" if r.gate_passed_first_try else "yellow"
+        else:
+            gate = r.failed_phase or "—"
+            gate_style = "red"
+
+        # Compact model summary: deduplicate and show unique models used.
+        models = sorted({p.model for p in r.phases if p.model})
+        models_str = ", ".join(models) if models else "—"
+
+        table.add_row(
+            _truncate(r.feature_id, 28),
+            status_icon,
+            Text(format_cost(r.cost_usd), style="yellow"),
+            format_tokens(r.input_tokens + r.cache_read),
+            Text(cache_pct, style=cache_style),
+            duration,
+            Text(gate, style=gate_style),
+            models_str,
+            r.timestamp[:10],
+        )
+
+    console.print(table)
+
+    # Summary line
+    if len(records) > 1:
+        successes = [r for r in records if r.success]
+        avg_cost = sum(r.cost_usd for r in records) / len(records)
+        avg_cache = sum(r.cache_hit_rate for r in records) / len(records)
+        total_cost = sum(r.cost_usd for r in records)
+        success_rate = len(successes) / len(records) * 100
+        console.print(
+            f"  [dim]{len(records)} builds · "
+            f"{int(success_rate)}% success · "
+            f"avg {format_cost(avg_cost)}/build · "
+            f"avg cache {int(avg_cache * 100)}% · "
+            f"total {format_cost(total_cost)}[/dim]"
+        )
+
+
+def _format_build_duration(seconds: float) -> str:
+    """Format build duration for the metrics table."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s"
 
 
 def render_log_detail(feature: Feature) -> None:

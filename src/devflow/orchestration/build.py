@@ -114,19 +114,21 @@ def _run_planning_loop(
                         p.reset()
             break
 
-        render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
+        model = resolve_model(feature, phase)
+        render_phase_header(phase_num, total, phase.name, model)
         start = time.monotonic()
         success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
 
         if not success:
+            totals.add(phase.name, metrics, elapsed, model=model, success=False)
             fail_phase(feature.id, phase.name, output, base)
             render_phase_failure(phase.name, elapsed, output)
             return feature, "", False
 
         complete_phase(feature.id, phase.name, output, base)
         render_phase_success(phase.name, elapsed, metrics)
-        totals.add(phase.name, metrics, elapsed)
+        totals.add(phase.name, metrics, elapsed, model=model)
 
         if phase.name == "planning":
             plan_output = output
@@ -180,7 +182,8 @@ def _run_execution_loop(
         phase_num = done_count + 1
         agent_name = get_phase_agent(feature, phase.name, base, stack=stack)
 
-        render_phase_header(phase_num, total, phase.name, resolve_model(feature, phase))
+        model = resolve_model(feature, phase)
+        render_phase_header(phase_num, total, phase.name, model)
         start = time.monotonic()
         success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
@@ -193,7 +196,7 @@ def _run_execution_loop(
                 render_gate_panel(feature.id, base)
             else:
                 render_phase_success(phase.name, elapsed, metrics)
-            totals.add(phase.name, metrics, elapsed)
+            totals.add(phase.name, metrics, elapsed, model=model)
 
             if phase.name in ("implementing", "fixing"):
                 msg = build_commit_message(feature, suffix=phase.name)
@@ -206,6 +209,8 @@ def _run_execution_loop(
                     ) + "[/dim]\n")
                 persist_files_summary(feature.id, base)
         else:
+            totals.add(phase.name, metrics, elapsed, model=model, success=False)
+
             if phase.name == "gate":
                 save_phase_output(feature.id, "gate", output, base)
                 if setup_gate_retry(feature.id, base):
@@ -231,7 +236,8 @@ def _finalize_build(
     initial_untracked: list[str],
     base: Path | None = None,
 ) -> bool:
-    """Push branch, create PR, and render the build summary."""
+    """Push branch, create PR, persist metrics, and render the build summary."""
+    from devflow.core.history import append_build_metrics, build_metrics_from
     from devflow.integrations.git import push_and_create_pr
     from devflow.ui.rendering import render_build_summary
 
@@ -240,6 +246,10 @@ def _finalize_build(
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
     pr_url = push_and_create_pr(final, branch, exclude=initial_untracked) if final else None
+
+    # Persist build metrics for historical tracking.
+    record = build_metrics_from(final, totals, success=True)
+    append_build_metrics(record, base)
 
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
@@ -263,6 +273,7 @@ def execute_build_loop(
     5. Auto-commit after implementing/fixing
     6. Create PR on success
     """
+    from devflow.core.history import append_build_metrics, build_metrics_from
     from devflow.integrations.git import (
         branch_name,
         create_branch,
@@ -298,6 +309,8 @@ def execute_build_loop(
     # ── Planning ──
     feature, plan_output, ok = _run_planning_loop(feature, totals, stack, base, verbose)
     if not ok:
+        feature = _refresh_feature(feature.id, base) or feature
+        append_build_metrics(build_metrics_from(feature, totals, success=False), base)
         return False
 
     # ── Plan confirmation ──
@@ -324,6 +337,8 @@ def execute_build_loop(
     # ── Execution ──
     feature, ok = _run_execution_loop(feature, totals, initial_untracked, stack, base, verbose)
     if not ok:
+        feature = _refresh_feature(feature.id, base) or feature
+        append_build_metrics(build_metrics_from(feature, totals, success=False), base)
         return False
 
     # ── PR ──
