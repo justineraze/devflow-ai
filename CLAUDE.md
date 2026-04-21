@@ -56,7 +56,7 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
 ## Commandes
 
     devflow doctor                   → diagnostic de l'installation
-    devflow install / update         → sync agents + skills
+    devflow install                   → install/update agents + skills
     devflow init                     → détection stack + bootstrap projet
     devflow build "..."              → build plan-first
     devflow build "feedback" --resume feat-001  → reprendre avec feedback

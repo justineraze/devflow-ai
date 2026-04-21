@@ -198,23 +198,12 @@ def check() -> None:
 
 @app.command()
 def install() -> None:
-    """Install/sync agents and skills to ~/.claude/."""
+    """Install or update agents and skills to ~/.claude/."""
     from devflow.setup.install import install_all, render_install_report
 
     render_header(subtitle="Installing agents & skills")
     result = install_all()
     render_install_report(result)
-
-
-@app.command()
-def update() -> None:
-    """Update agents and skills to latest version."""
-    from devflow.setup.install import install_all, render_install_report
-
-    render_header(subtitle="Updating agents & skills")
-    result = install_all()
-    render_install_report(result)
-    console.print("[green]Components updated.[/green]")
 
 
 @app.command()
