@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from devflow.ui.rendering import BuildTotals
 
 from devflow.core.artifacts import save_phase_output
+from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import (
     Feature,
@@ -35,7 +36,6 @@ from devflow.orchestration.phase_exec import (
     run_phase,
     setup_gate_retry,
 )
-from devflow.ui.console import console
 
 PLANNING_PHASES = frozenset({"architecture", "planning", "plan_review"})
 

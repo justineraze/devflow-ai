@@ -1,13 +1,8 @@
-"""Single shared Rich Console used across the codebase.
+"""Re-export shim — the singleton now lives in core.
 
-Keeping one instance avoids state conflicts between Live displays,
-captures, and the various modules that need to print. Import as::
-
-    from devflow.ui.console import console
+    from devflow.ui.console import console  # still works
 """
 
-from __future__ import annotations
+from devflow.core.console import console  # noqa: F401
 
-from rich.console import Console
-
-console: Console = Console()
+__all__ = ["console"]

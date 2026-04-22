@@ -11,11 +11,11 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from devflow.core.console import console
 from devflow.core.models import Feature, FeatureStatus, InvalidTransition, PhaseStatus
 from devflow.core.phases import get_spec
 from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
 from devflow.integrations.complexity import score_complexity
-from devflow.ui.console import console
 
 
 def _generate_feature_id(description: str) -> str:
