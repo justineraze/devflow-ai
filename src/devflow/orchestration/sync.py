@@ -95,11 +95,13 @@ def run_sync(
             "Working tree has uncommitted changes. Commit or stash before syncing."
         )
 
-    # Step 2 — switch main + pull.
+    # Step 2 — switch base branch + pull.
+    state = load_state(cwd)
+    main = state.base_branch
     if dry_run:
-        result.actions.append("would: git switch main && git pull --ff-only")
+        result.actions.append(f"would: git switch {main} && git pull --ff-only")
     else:
-        switch_and_pull_main(cwd=cwd)
+        switch_and_pull_main(main, cwd=cwd)
 
     # Step 3 — fetch -p.
     if dry_run:

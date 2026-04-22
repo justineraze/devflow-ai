@@ -296,6 +296,7 @@ class WorkflowState(BaseModel):
 
     version: int = 1
     stack: str | None = None
+    base_branch: str = "main"
     features: dict[str, Feature] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

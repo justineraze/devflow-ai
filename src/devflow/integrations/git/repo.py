@@ -91,6 +91,22 @@ def commit_changes(message: str, exclude: list[str] | None = None) -> bool:
     return True
 
 
+def detect_base_branch() -> str:
+    """Auto-detect the default branch from the remote (origin).
+
+    Parses ``git remote show origin`` for the HEAD branch line.
+    Falls back to ``"main"`` when the remote is unreachable or
+    the output doesn't match the expected format.
+    """
+    result = _git("remote", "show", "origin", timeout=10)
+    if result.returncode != 0:
+        return "main"
+    for line in result.stdout.splitlines():
+        if "HEAD branch:" in line:
+            return line.split(":", 1)[1].strip()
+    return "main"
+
+
 def has_commits_ahead(base_branch: str = "main") -> bool:
     """Check if current branch has commits ahead of base_branch."""
     result = _git("rev-list", "--count", f"{base_branch}..HEAD")
@@ -192,7 +208,9 @@ def delete_branch(name: str, cwd: Path | None = None) -> bool:
     return result.returncode == 0
 
 
-def persist_files_summary(feature_id: str, base: Path | None = None) -> None:
+def persist_files_summary(
+    feature_id: str, base: Path | None = None, base_branch: str = "main",
+) -> None:
     """Write files.json capturing the branch-diff summary for downstream phases.
 
     Enriches the raw diff summary with ``critical_paths`` — paths matching
@@ -201,7 +219,7 @@ def persist_files_summary(feature_id: str, base: Path | None = None) -> None:
     from devflow.core.artifacts import write_artifact
     from devflow.core.models import CRITICAL_PATH_PATTERNS
 
-    summary = get_branch_diff_summary()
+    summary = get_branch_diff_summary(base_branch)
     paths = summary.get("paths") or []
     critical = [
         p for p in paths

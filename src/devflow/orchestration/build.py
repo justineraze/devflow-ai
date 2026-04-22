@@ -150,6 +150,7 @@ def _run_execution_loop(
     stack: str | None,
     base: Path | None = None,
     verbose: bool = False,
+    base_branch: str = "main",
 ) -> tuple[Feature, bool]:
     """Run implementation, review, gate, and fixing phases.
 
@@ -207,7 +208,7 @@ def _run_execution_loop(
                     console.print("[dim]" + "\n".join(
                         f"  {line}" for line in diff.split("\n")
                     ) + "[/dim]\n")
-                persist_files_summary(feature.id, base)
+                persist_files_summary(feature.id, base, base_branch)
         else:
             totals.add(phase.name, metrics, elapsed, model=model, success=False)
 
@@ -235,6 +236,7 @@ def _finalize_build(
     totals: BuildTotals,
     initial_untracked: list[str],
     base: Path | None = None,
+    base_branch: str = "main",
 ) -> bool:
     """Push branch, create PR, persist metrics, and render the build summary."""
     from devflow.core.history import append_build_metrics, build_metrics_from
@@ -245,7 +247,10 @@ def _finalize_build(
 
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
-    pr_url = push_and_create_pr(final, branch, exclude=initial_untracked) if final else None
+    pr_url = (
+        push_and_create_pr(final, branch, exclude=initial_untracked, base_branch=base_branch)
+        if final else None
+    )
 
     # Persist build metrics for historical tracking.
     record = build_metrics_from(final, totals, success=True)
@@ -263,6 +268,7 @@ def execute_build_loop(
     feedback: str | None = None,
     base: Path | None = None,
     verbose: bool = False,
+    base_branch: str = "main",
 ) -> bool:
     """Run a feature build with plan-first confirmation flow.
 
@@ -335,11 +341,13 @@ def execute_build_loop(
             return False
 
     # ── Execution ──
-    feature, ok = _run_execution_loop(feature, totals, initial_untracked, stack, base, verbose)
+    feature, ok = _run_execution_loop(
+        feature, totals, initial_untracked, stack, base, verbose, base_branch,
+    )
     if not ok:
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
         return False
 
     # ── PR ──
-    return _finalize_build(feature, branch, totals, initial_untracked, base)
+    return _finalize_build(feature, branch, totals, initial_untracked, base, base_branch)

@@ -77,6 +77,14 @@ def log(
         render_log_table(features)
 
 
+def _resolve_base_branch(override: str | None) -> str:
+    """Resolve base branch: CLI flag > state.json > "main"."""
+    if override:
+        return override
+    state = get_state()
+    return state.base_branch
+
+
 @app.command()
 def build(
     description: Annotated[str, typer.Argument(help="What to build, or feedback when resuming")],
@@ -85,6 +93,9 @@ def build(
     ] = None,
     workflow: Annotated[
         str | None, typer.Option("--workflow", "-w", help="Workflow to use (default: auto-detect)")
+    ] = None,
+    base: Annotated[
+        str | None, typer.Option("--base", "-b", help="Base branch for PR (default: from state)")
     ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
@@ -101,6 +112,8 @@ def build(
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import resume_build, start_build
 
+    base_branch = _resolve_base_branch(base)
+
     if resume:
         feature = resume_build(resume)
         feedback = description  # When resuming, description = feedback.
@@ -111,7 +124,9 @@ def build(
     if not feature:
         raise typer.Exit(1)
 
-    success = execute_build_loop(feature, feedback=feedback, verbose=verbose)
+    success = execute_build_loop(
+        feature, feedback=feedback, verbose=verbose, base_branch=base_branch,
+    )
     if not success:
         raise typer.Exit(1)
 
@@ -119,6 +134,9 @@ def build(
 @app.command()
 def retry(
     feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
+    base: Annotated[
+        str | None, typer.Option("--base", "-b", help="Base branch for PR (default: from state)")
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,
@@ -131,7 +149,8 @@ def retry(
     if not feature:
         raise typer.Exit(1)
 
-    success = execute_build_loop(feature, verbose=verbose)
+    base_branch = _resolve_base_branch(base)
+    success = execute_build_loop(feature, verbose=verbose, base_branch=base_branch)
     if not success:
         raise typer.Exit(1)
 
@@ -139,6 +158,9 @@ def retry(
 @app.command()
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
+    base: Annotated[
+        str | None, typer.Option("--base", "-b", help="Base branch for PR (default: from state)")
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,
@@ -148,7 +170,8 @@ def fix(
     from devflow.orchestration.lifecycle import start_fix
 
     feature = start_fix(description)
-    success = execute_build_loop(feature, verbose=verbose)
+    base_branch = _resolve_base_branch(base)
+    success = execute_build_loop(feature, verbose=verbose, base_branch=base_branch)
     if not success:
         raise typer.Exit(1)
 
@@ -233,12 +256,15 @@ def init() -> None:
 
     from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
     from devflow.integrations.detect import detect_stack
+    from devflow.integrations.git import detect_base_branch
 
     devflow_dir = ensure_devflow_dir()
 
     stack = detect_stack(Path.cwd())
+    base_branch = detect_base_branch()
     state = load_state()
     state.stack = stack
+    state.base_branch = base_branch
     save_state(state)
 
     console.print(f"[green]Initialized devflow in {devflow_dir}[/green]")
@@ -246,3 +272,4 @@ def init() -> None:
         console.print(f"[green]Stack detected: {stack}[/green]")
     else:
         console.print("[yellow]No stack detected.[/yellow]")
+    console.print(f"[green]Base branch: {base_branch}[/green]")

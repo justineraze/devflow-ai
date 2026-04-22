@@ -252,6 +252,16 @@ class TestWorkflowState:
         state = WorkflowState()
         assert state.get_feature("nope") is None
 
+    def test_base_branch_defaults_to_main(self) -> None:
+        state = WorkflowState()
+        assert state.base_branch == "main"
+
+    def test_base_branch_roundtrip(self) -> None:
+        state = WorkflowState(base_branch="develop")
+        data = state.model_dump()
+        loaded = WorkflowState.model_validate(data)
+        assert loaded.base_branch == "develop"
+
     def test_add_feature_updates_timestamp(self) -> None:
         state = WorkflowState()
         before = state.updated_at

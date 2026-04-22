@@ -89,6 +89,7 @@ def push_and_create_pr(
     feature: Feature,
     branch: str,
     exclude: list[str] | None = None,
+    base_branch: str = "main",
 ) -> str | None:
     """Push branch and create a GitHub PR.
 
@@ -102,8 +103,10 @@ def push_and_create_pr(
     # Safety net: commit anything left uncommitted.
     commit_changes(build_commit_message(feature, suffix="leftover changes"), exclude=exclude)
 
-    if not has_commits_ahead():
-        console.print("[yellow]No changes to push — branch is identical to main.[/yellow]")
+    if not has_commits_ahead(base_branch):
+        console.print(
+            f"[yellow]No changes to push — branch is identical to {base_branch}.[/yellow]"
+        )
         return None
 
     # Push.
@@ -117,7 +120,8 @@ def push_and_create_pr(
     title = build_pr_title(feature)
 
     pr = subprocess.run(
-        ["gh", "pr", "create", "--title", title, "--body", body],
+        ["gh", "pr", "create", "--title", title, "--body", body,
+         "--base", base_branch],
         capture_output=True, text=True, cwd=cwd, timeout=120,
     )
     if pr.returncode == 0:

@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from devflow.integrations.git.repo import (
     branch_name,
     commit_changes,
+    detect_base_branch,
     get_untracked_files,
     has_commits_ahead,
 )
@@ -118,6 +119,28 @@ class TestGetUntrackedFiles:
     def test_empty_when_no_untracked(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         assert get_untracked_files() == []
+
+
+class TestDetectBaseBranch:
+    @patch("devflow.integrations.git.repo.subprocess.run")
+    def test_parses_head_branch(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="* remote origin\n  HEAD branch: develop\n  Remote branches:\n",
+        )
+        assert detect_base_branch() == "develop"
+
+    @patch("devflow.integrations.git.repo.subprocess.run")
+    def test_returns_main_on_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(returncode=128, stdout="")
+        assert detect_base_branch() == "main"
+
+    @patch("devflow.integrations.git.repo.subprocess.run")
+    def test_returns_main_when_no_head_line(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="* remote origin\n  Fetch URL: ...\n",
+        )
+        assert detect_base_branch() == "main"
 
 
 class TestHasCommitsAhead:
