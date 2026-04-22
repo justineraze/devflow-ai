@@ -30,11 +30,11 @@ jobs:
           echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
 
       - name: Update badge
-        uses: schneegans/dynamic-badges-action@v1.7.0
+        uses: schneegans/dynamic-badges-action@v1.8.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ vars.BADGE_GIST_ID }}
           filename: devflow-ai-tests.json
-          label: tests
+          label: Tests
           message: ${{ steps.pytest.outputs.count }}
           color: green
