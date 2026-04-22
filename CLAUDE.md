@@ -143,3 +143,7 @@ Dépendances CLI externes : `claude` (Claude Code), `gh` (GitHub CLI), `uv`.
 - Jamais de logique métier dans cli.py
 - Conventional Commits pour les PR (feat: / fix:)
 - Squash-merge sur main
+
+**Pydantic vs dataclass** : `BaseModel` Pydantic pour tout modèle sérialisé dans `state.json`
+(Feature, WorkflowState, PhaseSpec, BuildMetrics) — on profite de la validation et du round-trip JSON.
+`@dataclass` pour les DTO internes jamais persistés (PhaseMetrics, ToolUse, BuildTotals, SyncResult, CheckResult).
