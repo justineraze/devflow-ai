@@ -82,6 +82,15 @@ class FeatureMetadata(BaseModel):
     """Primary module touched (e.g. 'runner', 'gate'). Parsed from the plan's
     Module: line — used as the Conventional Commits scope in commit messages."""
 
+    title: str | None = None
+    """Concise title parsed from the plan header (e.g. 'document Pydantic vs
+    dataclass convention'). Used instead of the raw description for PR titles."""
+
+    commit_type: str | None = None
+    """Conventional Commits type parsed from the plan's Type: line.  Mapped from
+    plan types (new-feature→feat, bugfix→fix, refactor→refactor, docs→docs,
+    ci→ci, test→test).  Falls back to workflow-based default when absent."""
+
     complexity: ComplexityScore | None = None
     """Complexity score computed at feature creation (auto-select workflow)."""
 

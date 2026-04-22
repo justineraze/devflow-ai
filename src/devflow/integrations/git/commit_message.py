@@ -11,8 +11,11 @@ _MAX_LEN = 70
 def _commit_prefix(feature: Feature) -> str:
     """Return the Conventional Commits prefix for a feature.
 
-    ``fix:`` for the quick workflow (bug fixes), ``feat:`` otherwise.
+    Uses ``metadata.commit_type`` when set by the planner (e.g. refactor, docs).
+    Falls back to ``fix:`` for quick workflow, ``feat:`` otherwise.
     """
+    if feature.metadata.commit_type:
+        return feature.metadata.commit_type
     return "fix" if feature.workflow == "quick" else "feat"
 
 
@@ -54,7 +57,8 @@ def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
     type_ = _commit_prefix(feature)
     scope = feature.metadata.scope
     prefix = f"{type_}({scope})" if scope else type_
-    desc = _normalize_description(feature.description)
+    raw = feature.metadata.title or feature.description
+    desc = _normalize_description(raw)
     base = f"{prefix}: {desc}"
 
     if suffix:

@@ -62,6 +62,56 @@ class TestBuildPrTitle:
         assert title.count(":") == 1
 
 
+    def test_uses_metadata_title_over_description(self) -> None:
+        feature = Feature(
+            id="f-001",
+            description="Ajouter le support du dark mode avec toggle dans les settings",
+            workflow="standard",
+            metadata=FeatureMetadata(title="Add dark mode toggle"),
+        )
+        assert build_pr_title(feature) == "feat: add dark mode toggle"
+
+    def test_uses_metadata_commit_type(self) -> None:
+        feature = Feature(
+            id="f-001",
+            description="Move console to core",
+            workflow="standard",
+            metadata=FeatureMetadata(commit_type="refactor", scope="core"),
+        )
+        assert build_pr_title(feature) == "refactor(core): move console to core"
+
+    def test_docs_commit_type(self) -> None:
+        feature = Feature(
+            id="f-001",
+            description="Document Pydantic vs dataclass convention",
+            workflow="standard",
+            metadata=FeatureMetadata(commit_type="docs", scope="CLAUDE"),
+        )
+        assert build_pr_title(feature) == "docs(CLAUDE): document Pydantic vs dataclass convention"
+
+    def test_commit_type_fallback_when_none(self) -> None:
+        feature = Feature(
+            id="f-001",
+            description="Add caching",
+            workflow="standard",
+            metadata=FeatureMetadata(commit_type=None),
+        )
+        assert build_pr_title(feature).startswith("feat:")
+
+    def test_title_and_type_combined(self) -> None:
+        feature = Feature(
+            id="f-001",
+            description="raw verbose user prompt that is way too long for a title",
+            workflow="standard",
+            metadata=FeatureMetadata(
+                title="Add metrics display to status",
+                commit_type="feat",
+                scope="ui",
+            ),
+        )
+        assert build_pr_title(feature) == "feat(ui): add metrics display to status"
+
+
 class TestBuildCommitMessage:
     def test_no_suffix_matches_pr_title(self) -> None:
         feature = Feature(

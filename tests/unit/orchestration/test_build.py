@@ -9,6 +9,8 @@ from devflow.core.models import FeatureStatus, PhaseStatus
 from devflow.core.workflow import load_state, save_state
 from devflow.orchestration.build import (
     _parse_plan_module,
+    _parse_plan_title,
+    _parse_plan_type,
     execute_build_loop,
 )
 from devflow.orchestration.lifecycle import (
@@ -49,6 +51,68 @@ class TestParsePlanModule:
 
     def test_empty_string_returns_none(self) -> None:
         assert _parse_plan_module("") is None
+
+
+class TestParsePlanTitle:
+    def test_extracts_title_after_em_dash(self) -> None:
+        plan = "## Plan: feat-001 — Document Pydantic vs dataclass convention\n"
+        assert _parse_plan_title(plan) == "Document Pydantic vs dataclass convention"
+
+    def test_extracts_title_after_en_dash(self) -> None:
+        plan = "## Plan: feat-001 – Move console to core\n"
+        assert _parse_plan_title(plan) == "Move console to core"
+
+    def test_extracts_title_after_hyphen(self) -> None:
+        plan = "## Plan: feat-001 - Add metrics display\n"
+        assert _parse_plan_title(plan) == "Add metrics display"
+
+    def test_returns_none_when_absent(self) -> None:
+        plan = "### Scope\n- Type: extension\n"
+        assert _parse_plan_title(plan) is None
+
+    def test_returns_none_for_empty(self) -> None:
+        assert _parse_plan_title("") is None
+
+    def test_strips_whitespace(self) -> None:
+        plan = "## Plan: feat-001 —   Add caching layer  \n"
+        assert _parse_plan_title(plan) == "Add caching layer"
+
+
+class TestParsePlanType:
+    def test_maps_new_feature_to_feat(self) -> None:
+        plan = "- Type: new-feature\n"
+        assert _parse_plan_type(plan) == "feat"
+
+    def test_maps_extension_to_feat(self) -> None:
+        plan = "- Type: extension\n"
+        assert _parse_plan_type(plan) == "feat"
+
+    def test_maps_bugfix_to_fix(self) -> None:
+        plan = "- Type: bugfix\n"
+        assert _parse_plan_type(plan) == "fix"
+
+    def test_maps_refactor(self) -> None:
+        plan = "- Type: refactor\n"
+        assert _parse_plan_type(plan) == "refactor"
+
+    def test_maps_docs(self) -> None:
+        plan = "- Type: docs\n"
+        assert _parse_plan_type(plan) == "docs"
+
+    def test_maps_ci(self) -> None:
+        plan = "- Type: ci\n"
+        assert _parse_plan_type(plan) == "ci"
+
+    def test_returns_none_when_absent(self) -> None:
+        plan = "- Module: runner\n"
+        assert _parse_plan_type(plan) is None
+
+    def test_returns_none_for_unknown_type(self) -> None:
+        plan = "- Type: banana\n"
+        assert _parse_plan_type(plan) is None
+
+    def test_returns_none_for_empty(self) -> None:
+        assert _parse_plan_type("") is None
 
 
 class TestGenerateFeatureId:

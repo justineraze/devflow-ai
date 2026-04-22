@@ -60,6 +60,49 @@ def _parse_plan_module(plan_output: str) -> str | None:
     return match.group(1).strip()
 
 
+def _parse_plan_title(plan_output: str) -> str | None:
+    """Extract the concise title from the plan header.
+
+    Looks for: ``## Plan: <feature-id> — <title>``
+    Returns the title part after the em-dash, or None if absent.
+    """
+    import re
+
+    match = re.search(r"^##\s+Plan:\s+\S+\s+[—–-]\s+(.+)$", plan_output, re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+# Map plan Type: values → Conventional Commits prefixes.
+_PLAN_TYPE_TO_COMMIT: dict[str, str] = {
+    "new-feature": "feat",
+    "extension": "feat",
+    "bugfix": "fix",
+    "refactor": "refactor",
+    "docs": "docs",
+    "ci": "ci",
+    "test": "test",
+    "chore": "chore",
+    "perf": "perf",
+}
+
+
+def _parse_plan_type(plan_output: str) -> str | None:
+    """Extract the Conventional Commits type from the plan's Type: line.
+
+    Looks for: ``- Type: <value>``
+    Maps plan-specific values (new-feature, bugfix…) to commit types (feat, fix…).
+    Returns None if the line is absent or the value is unknown.
+    """
+    import re
+
+    match = re.search(r"^\s*-\s+Type:\s+(\S+)", plan_output, re.MULTILINE)
+    if not match:
+        return None
+    return _PLAN_TYPE_TO_COMMIT.get(match.group(1).strip().lower())
+
+
 def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str,
     base: Path | None = None, verbose: bool = False,
@@ -132,11 +175,17 @@ def _run_planning_loop(
 
         if phase.name == "planning":
             plan_output = output
-            module = _parse_plan_module(output)
-            if module:
-                with mutate_feature(feature.id, base) as feat:
-                    if feat:
+            with mutate_feature(feature.id, base) as feat:
+                if feat:
+                    module = _parse_plan_module(output)
+                    if module:
                         feat.metadata.scope = module
+                    title = _parse_plan_title(output)
+                    if title:
+                        feat.metadata.title = title
+                    commit_type = _parse_plan_type(output)
+                    if commit_type:
+                        feat.metadata.commit_type = commit_type
 
         feature = _refresh_feature(feature.id, base) or feature
 
