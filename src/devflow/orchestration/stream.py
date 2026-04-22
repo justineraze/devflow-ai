@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from devflow.core.formatting import format_cost, format_tokens, format_tool_line
 from devflow.core.metrics import PhaseMetrics, ToolUse
-from devflow.ui.formatting import format_cost, format_tokens, format_tool_line
 
 __all__ = [
     "PhaseMetrics",

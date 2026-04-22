@@ -7,12 +7,12 @@ import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
+from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, PhaseRecord
 from devflow.core.paths import venv_env
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.orchestration.model_routing import resolve_model
-from devflow.ui.console import console
 
 # Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
@@ -277,8 +277,8 @@ def execute_phase(
     The final phase-summary chip is rendered by the caller from the returned
     PhaseMetrics — keeps the runner focused on I/O.
     """
+    from devflow.core.formatting import format_tool_line
     from devflow.orchestration.stream import parse_event
-    from devflow.ui.formatting import format_tool_line
     from devflow.ui.spinner import PhaseSpinner
 
     system_prompt = build_system_prompt(phase.name, agent_name)

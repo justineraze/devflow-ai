@@ -7,8 +7,8 @@ import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import load_phase_output
+from devflow.core.console import console
 from devflow.core.models import Feature
-from devflow.ui.console import console
 
 from .commit_message import build_commit_message, build_pr_title
 from .repo import _git, commit_changes, has_commits_ahead
