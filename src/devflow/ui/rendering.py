@@ -14,7 +14,7 @@ from rich.text import Text
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature
 from devflow.ui.console import console
-from devflow.ui.formatting import format_cost, format_tokens
+from devflow.ui.formatting import format_cost
 
 if TYPE_CHECKING:
     from devflow.orchestration.sync import SyncResult
@@ -168,20 +168,13 @@ def render_phase_success(
     if metrics.tool_count:
         chip.append(f"   {metrics.tool_count} tools", style="dim")
 
-    total_in = metrics.input_tokens + metrics.cache_read
-    if total_in or metrics.output_tokens:
-        chip.append("   ")
-        chip.append(format_tokens(total_in), style="cyan")
-        chip.append(" in", style="dim")
-        if metrics.cache_read:
-            pct = int(metrics.cache_read / total_in * 100) if total_in else 0
-            chip.append(f" ({pct}% cached)", style="dim")
-        chip.append(" / ", style="dim")
-        chip.append(format_tokens(metrics.output_tokens), style="cyan")
-        chip.append(" out", style="dim")
-
     if metrics.cost_usd:
         chip.append(f"   {format_cost(metrics.cost_usd)}", style="yellow")
+
+    total_in = metrics.input_tokens + metrics.cache_read
+    if total_in > 0 and metrics.cache_read:
+        pct = int(metrics.cache_read / total_in * 100)
+        chip.append(f"   cache {pct}%", style="green" if pct >= 80 else "yellow")
 
     console.print(chip)
     console.print()
@@ -232,15 +225,10 @@ def render_build_summary(
     grid.add_row("Tools", str(totals.tool_count))
 
     total_in = totals.input_tokens + totals.cache_read
-    in_text = Text()
-    in_text.append(format_tokens(total_in), style="cyan")
-    if totals.cache_read:
-        pct = int(totals.cache_read / total_in * 100) if total_in else 0
-        in_text.append(f" ({pct}% cached)", style="dim")
-    in_text.append(" in · ", style="dim")
-    in_text.append(format_tokens(totals.output_tokens), style="cyan")
-    in_text.append(" out", style="dim")
-    grid.add_row("Tokens", in_text)
+    if total_in > 0:
+        cache_pct = int(totals.cache_read / total_in * 100)
+        cache_style = "green" if cache_pct >= 80 else "yellow"
+        grid.add_row("Cache", Text(f"{cache_pct}%", style=cache_style))
 
     rows: list = [grid, Text()]
 
@@ -248,13 +236,6 @@ def render_build_summary(
         ratio = totals.cost_usd / cost_budget
         rows.append(_budget_row("Cost    ", _bar(ratio), format_cost(totals.cost_usd),
                                 f"/ {format_cost(cost_budget)}", f"{int(ratio * 100)}%"))
-
-    if total_in > 0:
-        cache_ratio = totals.cache_read / total_in
-        rows.append(_budget_row("Cache   ", _bar(cache_ratio),
-                                format_tokens(totals.cache_read),
-                                f"/ {format_tokens(total_in)}",
-                                f"{int(cache_ratio * 100)}%"))
 
     rows.append(Text())
     rows.append(phase_dots)
