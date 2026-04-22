@@ -1,11 +1,15 @@
-name: CI
+name: Tests
 
 on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  lint-and-test:
+  lint-test:
+    name: Lint + Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -23,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Lint
-        run: uv run ruff check src/ tests/
+      - name: Ruff
+        run: uv run ruff check .
 
-      - name: Test
-        run: uv run pytest tests/ -q --tb=short
+      - name: Pytest
+        run: uv run pytest -q --tb=short
