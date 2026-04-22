@@ -19,10 +19,10 @@ def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
 
 STACK_CHECKS: dict[str, list[CheckDef]] = {
     "python": [
-        CheckDef("ruff", ["ruff", "check", "src/", "tests/"]),
+        CheckDef("ruff", ["ruff", "check", "."]),
         CheckDef(
             "pytest",
-            ["python", "-m", "pytest", "tests/", "-q", "--tb=short"],
+            ["python", "-m", "pytest", "-q", "--tb=short"],
             timeout=120,
             parse_output=_parse_pytest,
         ),

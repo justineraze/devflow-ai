@@ -1,21 +1,24 @@
-name: CI
+name: Tests
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  lint-test:
+    name: Lint + Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -23,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Lint
-        run: uv run ruff check src/ tests/
+      - name: Ruff
+        run: uv run ruff check .
 
-      - name: Test
-        run: uv run pytest tests/ -q --tb=short
+      - name: Pytest
+        run: uv run pytest -q --tb=short
