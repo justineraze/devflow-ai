@@ -1,9 +1,7 @@
-name: Tests
+name: Lint + Test
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 jobs:
@@ -32,20 +30,4 @@ jobs:
         run: uv run ruff check .
 
       - name: Pytest
-        id: pytest
-        run: |
-          output=$(uv run pytest -q --tb=short 2>&1)
-          echo "$output"
-          count=$(echo "$output" | grep -oP '^\d+(?= passed)' | tail -1)
-          echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
-
-      - name: Update test count badge
-        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.12' && github.event_name == 'push'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ vars.BADGE_GIST_ID }}
-          filename: devflow-ai-tests.json
-          label: tests
-          message: ${{ steps.pytest.outputs.count }}
-          color: green
+        run: uv run pytest -q --tb=short

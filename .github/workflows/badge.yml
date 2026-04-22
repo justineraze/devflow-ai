@@ -1,0 +1,42 @@
+name: Update badges
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test-badge:
+    name: Test count badge
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Pytest
+        id: pytest
+        run: |
+          output=$(uv run pytest -q --tb=short 2>&1)
+          echo "$output"
+          count=$(echo "$output" | grep -oP '^\d+(?= passed)' | tail -1)
+          echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: Update badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ vars.BADGE_GIST_ID }}
+          filename: devflow-ai-tests.json
+          label: tests
+          message: ${{ steps.pytest.outputs.count }}
+          color: green
