@@ -32,9 +32,10 @@ class TestBuildMetrics:
         r = BuildMetrics(
             feature_id="f-1", description="test", workflow="standard",
             timestamp="2026-01-01T00:00:00Z",
-            input_tokens=200, cache_read=1800,
+            input_tokens=200, cache_creation=800, cache_read=1000,
         )
-        assert r.cache_hit_rate == pytest.approx(0.9)
+        # 1000 / (200 + 800 + 1000) = 0.5
+        assert r.cache_hit_rate == pytest.approx(0.5)
 
     def test_cache_hit_rate_zero_tokens(self) -> None:
         r = BuildMetrics(
@@ -47,7 +48,7 @@ class TestBuildMetrics:
         r = BuildMetrics(
             feature_id="f-1", description="test", workflow="quick",
             timestamp="2026-01-01T00:00:00Z",
-            input_tokens=5000, cache_read=0,
+            input_tokens=5000, cache_creation=40000, cache_read=0,
         )
         assert r.cache_hit_rate == 0.0
 
@@ -86,6 +87,7 @@ class TestAppendAndRead:
             cost_usd=1.95,
             input_tokens=500,
             output_tokens=22000,
+            cache_creation=45000,
             cache_read=280000,
             tool_count=81,
             gate_passed_first_try=True,
@@ -206,19 +208,20 @@ class TestBuildMetricsFrom:
         totals.cost_usd = 1.50
         totals.input_tokens = 300
         totals.output_tokens = 15000
+        totals.cache_creation = 45000
         totals.cache_read = 250000
         totals.tool_count = 60
         totals.duration_s = 500.0
         totals.phase_snapshots = [
             PhaseMetricSnapshot(
                 name="planning", model="sonnet", cost_usd=0.30,
-                input_tokens=100, output_tokens=5000, cache_read=80000,
-                tool_count=20, duration_s=100.0, success=True,
+                input_tokens=100, output_tokens=5000, cache_creation=40000,
+                cache_read=80000, tool_count=20, duration_s=100.0, success=True,
             ),
             PhaseMetricSnapshot(
                 name="implementing", model="sonnet", cost_usd=1.20,
-                input_tokens=200, output_tokens=10000, cache_read=170000,
-                tool_count=40, duration_s=400.0, success=True,
+                input_tokens=200, output_tokens=10000, cache_creation=5000,
+                cache_read=170000, tool_count=40, duration_s=400.0, success=True,
             ),
         ]
 
@@ -253,13 +256,13 @@ class TestBuildMetricsFrom:
         totals.phase_snapshots = [
             PhaseMetricSnapshot(
                 name="planning", model="sonnet", cost_usd=0.30,
-                input_tokens=100, output_tokens=5000, cache_read=80000,
-                tool_count=20, duration_s=100.0, success=True,
+                input_tokens=100, output_tokens=5000, cache_creation=40000,
+                cache_read=80000, tool_count=20, duration_s=100.0, success=True,
             ),
             PhaseMetricSnapshot(
                 name="implementing", model="sonnet", cost_usd=0.50,
-                input_tokens=200, output_tokens=3000, cache_read=90000,
-                tool_count=15, duration_s=200.0, success=False,
+                input_tokens=200, output_tokens=3000, cache_creation=5000,
+                cache_read=90000, tool_count=15, duration_s=200.0, success=False,
             ),
         ]
 

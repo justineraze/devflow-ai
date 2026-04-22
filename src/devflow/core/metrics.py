@@ -25,6 +25,7 @@ class PhaseMetrics:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation: int = 0
     cache_read: int = 0
     tool_count: int = 0
     tools_used: list[ToolUse] = field(default_factory=list)

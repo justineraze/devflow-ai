@@ -92,6 +92,7 @@ class TestParseEvent:
             "usage": {
                 "input_tokens": 1234,
                 "output_tokens": 567,
+                "cache_creation_input_tokens": 4500,
                 "cache_read_input_tokens": 89,
             },
         }
@@ -103,6 +104,8 @@ class TestParseEvent:
         assert payload.cost_usd == 0.042
         assert payload.input_tokens == 1234
         assert payload.output_tokens == 567
+        assert payload.cache_creation == 4500
+        assert payload.cache_read == 89
         assert payload.final_text == "done"
 
 

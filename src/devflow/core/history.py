@@ -27,6 +27,7 @@ class PhaseSnapshot:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation: int = 0
     cache_read: int = 0
     tool_count: int = 0
     duration_s: float = 0.0
@@ -48,6 +49,7 @@ class BuildMetrics:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation: int = 0
     cache_read: int = 0
     tool_count: int = 0
     # Quality signals
@@ -61,7 +63,7 @@ class BuildMetrics:
     @property
     def cache_hit_rate(self) -> float:
         """Fraction of input tokens served from cache (0.0-1.0)."""
-        total = self.input_tokens + self.cache_read
+        total = self.input_tokens + self.cache_creation + self.cache_read
         return self.cache_read / total if total > 0 else 0.0
 
     @property
@@ -107,6 +109,7 @@ def build_metrics_from(
             cost_usd=round(s.cost_usd, 4),
             input_tokens=s.input_tokens,
             output_tokens=s.output_tokens,
+            cache_creation=s.cache_creation,
             cache_read=s.cache_read,
             tool_count=s.tool_count,
             duration_s=round(s.duration_s, 1),
@@ -126,6 +129,7 @@ def build_metrics_from(
         cost_usd=round(totals.cost_usd, 4),
         input_tokens=totals.input_tokens,
         output_tokens=totals.output_tokens,
+        cache_creation=totals.cache_creation,
         cache_read=totals.cache_read,
         tool_count=totals.tool_count,
         gate_passed_first_try=gate_passed_first,

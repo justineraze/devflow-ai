@@ -251,7 +251,7 @@ def _render_last_build(record: BuildMetrics) -> None:
     phase_table.add_column("", justify="center")
 
     for p in record.phases:
-        total_tokens = p.input_tokens + p.cache_read
+        total_tokens = p.input_tokens + p.cache_creation + p.cache_read
         cache_pct = f"{int(p.cache_read / total_tokens * 100)}%" if total_tokens > 0 else "—"
         p_icon = Text("✓", style="green") if p.success else Text("✗", style="red")
         row_style = "" if p.success else "red"
@@ -259,7 +259,7 @@ def _render_last_build(record: BuildMetrics) -> None:
             Text(p.name, style=row_style or "default"),
             p.model or "—",
             format_cost(p.cost_usd),
-            format_tokens(p.input_tokens + p.cache_read),
+            format_tokens(p.input_tokens + p.cache_creation + p.cache_read),
             cache_pct,
             _format_build_duration(p.duration_s),
             p_icon,
@@ -278,7 +278,7 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
                 acc[p.name] = {"cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0}
             acc[p.name]["cost"] = float(acc[p.name]["cost"]) + p.cost_usd
             acc[p.name]["duration"] = float(acc[p.name]["duration"]) + p.duration_s
-            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + p.input_tokens + p.cache_read
+            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + p.input_tokens + p.cache_creation + p.cache_read
             acc[p.name]["runs"] = int(acc[p.name]["runs"]) + 1
 
     if not acc:
@@ -362,7 +362,7 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
             _truncate(r.feature_id, 28),
             status_icon,
             Text(format_cost(r.cost_usd), style="yellow"),
-            format_tokens(r.input_tokens + r.cache_read),
+            format_tokens(r.input_tokens + r.cache_creation + r.cache_read),
             Text(cache_pct, style=cache_style),
             duration,
             Text(gate, style=gate_style),

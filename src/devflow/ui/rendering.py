@@ -50,6 +50,7 @@ class PhaseMetricSnapshot:
     cost_usd: float
     input_tokens: int
     output_tokens: int
+    cache_creation: int
     cache_read: int
     tool_count: int
     duration_s: float
@@ -63,6 +64,7 @@ class BuildTotals:
     cost_usd: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation: int = 0
     cache_read: int = 0
     tool_count: int = 0
     duration_s: float = 0.0
@@ -76,6 +78,7 @@ class BuildTotals:
         self.cost_usd += metrics.cost_usd
         self.input_tokens += metrics.input_tokens
         self.output_tokens += metrics.output_tokens
+        self.cache_creation += metrics.cache_creation
         self.cache_read += metrics.cache_read
         self.tool_count += metrics.tool_count
         self.duration_s += elapsed_s
@@ -86,6 +89,7 @@ class BuildTotals:
             cost_usd=metrics.cost_usd,
             input_tokens=metrics.input_tokens,
             output_tokens=metrics.output_tokens,
+            cache_creation=metrics.cache_creation,
             cache_read=metrics.cache_read,
             tool_count=metrics.tool_count,
             duration_s=elapsed_s,
@@ -171,7 +175,7 @@ def render_phase_success(
     if metrics.cost_usd:
         chip.append(f"   {format_cost(metrics.cost_usd)}", style="yellow")
 
-    total_in = metrics.input_tokens + metrics.cache_read
+    total_in = metrics.input_tokens + metrics.cache_creation + metrics.cache_read
     if total_in > 0 and metrics.cache_read:
         pct = int(metrics.cache_read / total_in * 100)
         chip.append(f"   cache {pct}%", style="green" if pct >= 80 else "yellow")
@@ -224,7 +228,7 @@ def render_build_summary(
     grid.add_row("Cost", Text(format_cost(totals.cost_usd), style="yellow bold"))
     grid.add_row("Tools", str(totals.tool_count))
 
-    total_in = totals.input_tokens + totals.cache_read
+    total_in = totals.input_tokens + totals.cache_creation + totals.cache_read
     if total_in > 0:
         cache_pct = int(totals.cache_read / total_in * 100)
         cache_style = "green" if cache_pct >= 80 else "yellow"

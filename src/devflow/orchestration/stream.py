@@ -79,6 +79,7 @@ def parse_event(line: str) -> tuple[str, Any] | None:
             cost_usd=event.get("total_cost_usd", 0.0),
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
+            cache_creation=usage.get("cache_creation_input_tokens", 0),
             cache_read=usage.get("cache_read_input_tokens", 0),
             final_text=event.get("result", ""),
         ))

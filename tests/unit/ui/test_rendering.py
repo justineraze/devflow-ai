@@ -67,7 +67,8 @@ class TestPhaseHeader:
 class TestPhaseSuccess:
     def test_renders_metrics_chip(self) -> None:
         m = PhaseMetrics(
-            input_tokens=5200, output_tokens=1800, cache_read=18000,
+            input_tokens=5200, output_tokens=1800,
+            cache_creation=6800, cache_read=18000,
             cost_usd=0.18, tool_count=8,
         )
         out = _capture(r.render_phase_success, "implementing", 154, m)
@@ -76,7 +77,8 @@ class TestPhaseSuccess:
         assert "2m34s" in out
         assert "8 tools" in out
         assert "$0.18" in out
-        assert "cache 77%" in out
+        # 18000 / (5200 + 6800 + 18000) = 60%
+        assert "cache 60%" in out
 
     def test_no_metrics_skips_token_section(self) -> None:
         out = _capture(r.render_phase_success, "gate", 1, PhaseMetrics())
@@ -108,15 +110,15 @@ class TestBuildSummary:
         t = r.BuildTotals()
         t.add("planning", PhaseMetrics(
             input_tokens=2400, output_tokens=900,
-            cache_read=12000, cost_usd=0.12, tool_count=3,
+            cache_creation=40000, cache_read=12000, cost_usd=0.12, tool_count=3,
         ), 72)
         t.add("implementing", PhaseMetrics(
             input_tokens=5200, output_tokens=1800,
-            cache_read=18000, cost_usd=0.18, tool_count=8,
+            cache_creation=5000, cache_read=18000, cost_usd=0.18, tool_count=8,
         ), 154)
         t.add("reviewing", PhaseMetrics(
             input_tokens=3100, output_tokens=620,
-            cache_read=22000, cost_usd=0.21, tool_count=4,
+            cache_creation=2000, cache_read=22000, cost_usd=0.21, tool_count=4,
         ), 48)
         t.add("gate", PhaseMetrics(), 1)
         return t
