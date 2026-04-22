@@ -23,12 +23,10 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Pytest
+      - name: Count tests
         id: pytest
         run: |
-          output=$(uv run pytest -q --tb=short 2>&1)
-          echo "$output"
-          count=$(echo "$output" | grep -oP '^\d+(?= passed)' | tail -1)
+          count=$(uv run pytest --collect-only -q 2>&1 | tail -1 | grep -oP '^\d+')
           echo "count=${count:-0}" >> "$GITHUB_OUTPUT"
 
       - name: Update badge

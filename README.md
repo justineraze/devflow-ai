@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-green.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/justineraze/devflow-ai/actions/workflows/lint-test.yml/badge.svg)](https://github.com/justineraze/devflow-ai/actions/workflows/lint-test.yml)
-[![Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/justineraze/BADGE_GIST_ID/raw/devflow-ai-tests.json)](https://github.com/justineraze/devflow-ai/actions/workflows/lint-test.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/justineraze/10e0ec33f99478dc423de8dda3517994/raw/devflow-ai-tests.json)](https://github.com/justineraze/devflow-ai/actions/workflows/lint-test.yml)
 
 ---
 
