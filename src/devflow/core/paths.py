@@ -64,26 +64,32 @@ def workflows_dir() -> Path:
     return _resolve_sibling("workflows")
 
 
+# On Windows virtualenvs, the executables live under ``Scripts/``; on POSIX
+# (Linux, macOS) they live under ``bin/``.  Using ``os.sep``-based detection
+# is fragile — ``os.name`` is the authoritative flag.
+_VENV_BIN: str = "Scripts" if os.name == "nt" else "bin"
+
+
 def venv_env(project_root: Path | None = None) -> dict[str, str]:
     """Return a copy of ``os.environ`` with the project venv's bin dir on PATH.
 
     Priority:
 
-    1. ``<project_root>/.venv/bin`` — the target project's venv. Critical when
-       devflow is installed via ``uv tool install``: devflow's tool venv
-       lacks the target project's dev deps (ruff, pytest), so we prefer the
-       project's own ``.venv``.
+    1. ``<project_root>/.venv/bin`` (``Scripts`` on Windows) — the target
+       project's venv. Critical when devflow is installed via
+       ``uv tool install``: devflow's tool venv lacks the target project's
+       dev deps (ruff, pytest), so we prefer the project's own ``.venv``.
     2. ``$VIRTUAL_ENV/bin`` — honoured when an activated venv is set.
     3. ``Path(sys.executable).parent`` — last-resort fallback.
     """
     root = project_root or Path.cwd()
-    project_bin = root / ".venv" / "bin"
+    project_bin = root / ".venv" / _VENV_BIN
     virtual_env = os.environ.get("VIRTUAL_ENV")
 
     if project_bin.is_dir():
         venv_bin = project_bin
-    elif virtual_env and (Path(virtual_env) / "bin").is_dir():
-        venv_bin = Path(virtual_env) / "bin"
+    elif virtual_env and (Path(virtual_env) / _VENV_BIN).is_dir():
+        venv_bin = Path(virtual_env) / _VENV_BIN
     else:
         venv_bin = Path(sys.executable).parent
 

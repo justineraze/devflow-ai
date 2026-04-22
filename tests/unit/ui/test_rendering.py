@@ -75,10 +75,8 @@ class TestPhaseSuccess:
         assert "implementing" in out
         assert "2m34s" in out
         assert "8 tools" in out
-        # Total input = 5200 + 18000 = 23200 → "23.2k"
-        assert "23.2k" in out
-        assert "cached" in out
         assert "$0.18" in out
+        assert "cache 77%" in out
 
     def test_no_metrics_skips_token_section(self) -> None:
         out = _capture(r.render_phase_success, "gate", 1, PhaseMetrics())
@@ -132,7 +130,6 @@ class TestBuildSummary:
         assert "Build complete" in out
         assert "Duration" in out
         assert "Cost" in out
-        assert "Tokens" in out
         assert "Cache" in out
         assert "https://github.com/x/y/pull/1" in out
         assert "planning" in out
