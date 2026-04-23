@@ -8,10 +8,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from devflow.core.console import console
+from devflow.core.formatting import format_cost, format_tokens
 from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
-from devflow.ui.console import console
-from devflow.ui.formatting import format_cost, format_tokens
 
 # Status colors for visual feedback.
 STATUS_COLORS: dict[str, str] = {
@@ -278,7 +278,8 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
                 acc[p.name] = {"cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0}
             acc[p.name]["cost"] = float(acc[p.name]["cost"]) + p.cost_usd
             acc[p.name]["duration"] = float(acc[p.name]["duration"]) + p.duration_s
-            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + p.input_tokens + p.cache_creation + p.cache_read
+            total_tokens = p.input_tokens + p.cache_creation + p.cache_read
+            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + total_tokens
             acc[p.name]["runs"] = int(acc[p.name]["runs"]) + 1
 
     if not acc:

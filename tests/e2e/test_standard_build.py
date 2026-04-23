@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 
 from devflow.core.artifacts import load_phase_output
+from devflow.core.console import console
 from devflow.core.models import FeatureStatus
 from devflow.core.workflow import load_state
 from devflow.orchestration.build import execute_build_loop
 from devflow.orchestration.lifecycle import start_build
-from devflow.ui.console import console
 
 
 @pytest.mark.e2e

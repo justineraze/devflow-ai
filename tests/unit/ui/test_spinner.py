@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from devflow.ui.formatting import tool_icon
+from devflow.core.formatting import tool_icon
 from devflow.ui.spinner import PhaseSpinner
 
 

@@ -6,8 +6,8 @@ import shutil
 import stat
 from pathlib import Path
 
+from devflow.core.console import console
 from devflow.core.paths import assets_dir
-from devflow.ui.console import console
 
 # Package assets directory (relative to this file).
 ASSETS_DIR = assets_dir()

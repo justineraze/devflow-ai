@@ -11,8 +11,8 @@ from types import TracebackType
 from rich.live import Live
 from rich.text import Text
 
-from devflow.ui.console import console
-from devflow.ui.formatting import tool_icon
+from devflow.core.console import console
+from devflow.core.formatting import tool_icon
 
 
 class PhaseSpinner:

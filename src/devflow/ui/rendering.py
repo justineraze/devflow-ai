@@ -11,10 +11,10 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
+from devflow.core.console import console
+from devflow.core.formatting import format_cost
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature
-from devflow.ui.console import console
-from devflow.ui.formatting import format_cost
 
 if TYPE_CHECKING:
     from devflow.orchestration.sync import SyncResult

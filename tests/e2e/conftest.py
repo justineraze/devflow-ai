@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
+from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.workflow import load_state, save_state
-from devflow.ui.console import console
 
 # Fixture project shipped with the tests.
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "mini_python"

@@ -7,8 +7,8 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.console import console
 from devflow.integrations.gate.report import CheckResult, GateReport
-from devflow.ui.console import console
 
 
 def render_gate_report(report: GateReport) -> None:

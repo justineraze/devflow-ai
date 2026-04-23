@@ -6,8 +6,8 @@ from typing import Annotated
 
 import typer
 
+from devflow.core.console import console
 from devflow.core.track import get_feature, get_state, list_all_features
-from devflow.ui.console import console
 from devflow.ui.display import (
     render_feature_detail,
     render_header,

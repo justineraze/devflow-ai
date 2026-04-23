@@ -9,9 +9,9 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.console import console
 from devflow.core.paths import assets_dir
 from devflow.integrations.gate import CheckResult, GateReport
-from devflow.ui.console import console
 
 # Alias for clarity — doctor uses the same report structure as gate.
 DoctorReport = GateReport
@@ -237,8 +237,14 @@ def check_hook_installed(
 def run_doctor(base: Path | None = None) -> DoctorReport:
     """Run all diagnostic checks and return the report."""
     report = DoctorReport()
+    from devflow.core.backend import get_backend
+
     report.add(check_python_version())
-    report.add(check_cli_available("claude", ["claude", "--version"]))
+
+    backend = get_backend()
+    ok, msg = backend.check_available()
+    report.add(CheckResult(name=backend.name, passed=ok, message=msg))
+
     report.add(check_cli_available("gh", ["gh", "--version"]))
     report.add(check_claude_default_model())
     report.add(check_agents_synced())
