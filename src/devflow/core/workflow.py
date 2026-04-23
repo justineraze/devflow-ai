@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -98,6 +99,24 @@ def save_state(state: WorkflowState, base: Path | None = None) -> Path:
 
 
 @contextmanager
+def _state_lock(base: Path | None = None) -> Iterator[None]:
+    """Acquire an exclusive file lock on ``.devflow/state.lock``.
+
+    This prevents concurrent builds (e.g. in separate worktrees) from
+    corrupting ``state.json`` with interleaved read-modify-write cycles.
+    The lock is released when the context exits.
+    """
+    lock_path = ensure_devflow_dir(base) / "state.lock"
+    lock_file = lock_path.open("w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+
+
+@contextmanager
 def mutate_feature(
     feature_id: str, base: Path | None = None,
 ) -> Iterator[Feature | None]:
@@ -106,16 +125,20 @@ def mutate_feature(
     Replaces the ``load_state → get_feature → … → save_state`` triple that
     appears in ``phase_exec.py``, ``lifecycle.py``, and ``build.py``.
 
+    Uses an exclusive file lock so concurrent builds in separate worktrees
+    don't corrupt the shared state.
+
     When the feature is missing, yields ``None`` and skips the final
     ``save_state`` — callers already guarded against this case, so the
     semantics are unchanged. Callers must check for ``None`` inside
     the block.
     """
-    state = load_state(base)
-    feature = state.get_feature(feature_id)
-    yield feature
-    if feature is not None:
-        save_state(state, base)
+    with _state_lock(base):
+        state = load_state(base)
+        feature = state.get_feature(feature_id)
+        yield feature
+        if feature is not None:
+            save_state(state, base)
 
 
 def create_feature(

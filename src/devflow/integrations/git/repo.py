@@ -35,6 +35,79 @@ def _git(
     )
 
 
+def main_repo_root(cwd: Path | None = None) -> Path:
+    """Return the root of the main worktree (not a linked worktree).
+
+    Uses ``git rev-parse --path-format=absolute --git-common-dir`` which
+    resolves to the shared ``.git`` directory regardless of which worktree
+    we are in. The parent of that directory is the main repo root.
+
+    Falls back to ``git rev-parse --show-toplevel`` when the common-dir
+    approach fails (e.g. bare repos or old git versions).
+    """
+    result = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=cwd)
+    if result.returncode == 0:
+        common = Path(result.stdout.strip())
+        # common is e.g. /path/to/repo/.git — parent is the repo root.
+        if common.name == ".git":
+            return common.parent
+    # Fallback.
+    result = _git("rev-parse", "--show-toplevel", cwd=cwd)
+    return Path(result.stdout.strip()) if result.returncode == 0 else (cwd or Path.cwd())
+
+
+def create_worktree(feature_id: str, cwd: Path | None = None) -> tuple[str, Path]:
+    """Create a git worktree for *feature_id* and return ``(branch, worktree_path)``.
+
+    The worktree is placed in ``.devflow/.worktrees/<feature-slug>/``
+    under the main repo root. The branch is created if it doesn't exist.
+    """
+    branch = branch_name(feature_id)
+    root = main_repo_root(cwd)
+    wt_dir = root / ".devflow" / ".worktrees" / feature_id
+    wt_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    if wt_dir.exists():
+        # Already created — just return it.
+        return branch, wt_dir
+
+    # Try creating with a new branch; fall back to existing branch.
+    result = _git("worktree", "add", "-b", branch, str(wt_dir), cwd=cwd)
+    if result.returncode != 0:
+        _git("worktree", "add", str(wt_dir), branch, cwd=cwd, check=True)
+    return branch, wt_dir
+
+
+def remove_worktree(feature_id: str, cwd: Path | None = None) -> bool:
+    """Remove the worktree for *feature_id*. Returns True on success."""
+    root = main_repo_root(cwd)
+    wt_dir = root / ".devflow" / ".worktrees" / feature_id
+    if not wt_dir.exists():
+        return True
+    result = _git("worktree", "remove", "--force", str(wt_dir), cwd=cwd)
+    return result.returncode == 0
+
+
+def list_worktrees(cwd: Path | None = None) -> list[dict[str, str]]:
+    """List all active worktrees as ``[{"path": ..., "branch": ...}]``."""
+    result = _git("worktree", "list", "--porcelain", cwd=cwd)
+    if result.returncode != 0:
+        return []
+
+    worktrees: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            if current:
+                worktrees.append(current)
+            current = {"path": line.split(" ", 1)[1]}
+        elif line.startswith("branch "):
+            current["branch"] = line.split(" ", 1)[1].removeprefix("refs/heads/")
+    if current:
+        worktrees.append(current)
+    return worktrees
+
+
 def branch_name(feature_id: str) -> str:
     """Return the git branch name for a feature ID.
 

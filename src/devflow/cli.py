@@ -100,6 +100,9 @@ def build(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,
+    worktree: Annotated[
+        bool, typer.Option("--worktree", "-W", help="Run in an isolated git worktree")
+    ] = False,
 ) -> None:
     """Build a feature end-to-end using the AI workflow.
 
@@ -108,6 +111,9 @@ def build(
 
     When resuming with --resume, the description becomes feedback
     on the previous plan (e.g. "no framework detection, just languages").
+
+    With --worktree, the build runs in a separate git worktree under
+    .devflow/.worktrees/, allowing multiple builds in parallel.
     """
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import resume_build, start_build
@@ -125,7 +131,8 @@ def build(
         raise typer.Exit(1)
 
     success = execute_build_loop(
-        feature, feedback=feedback, verbose=verbose, base_branch=base_branch,
+        feature, feedback=feedback, verbose=verbose,
+        base_branch=base_branch, worktree=worktree,
     )
     if not success:
         raise typer.Exit(1)

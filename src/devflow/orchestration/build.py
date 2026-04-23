@@ -321,44 +321,64 @@ def execute_build_loop(
     base: Path | None = None,
     verbose: bool = False,
     base_branch: str = "main",
+    worktree: bool = False,
 ) -> bool:
     """Run a feature build with plan-first confirmation flow.
 
-    1. Create git branch
+    1. Create git branch (or worktree if ``worktree=True``)
     2. Run planning phases — show plan, ask confirmation
     3. If refused → pause, user can resume with feedback
     4. If confirmed → run remaining phases
     5. Auto-commit after implementing/fixing
     6. Create PR on success
+
+    When ``worktree=True``, the build runs in an isolated git worktree
+    under ``.devflow/.worktrees/<feature-id>/``. This allows multiple
+    builds to run in parallel without checkout conflicts.
     """
     from devflow.core.history import append_build_metrics, build_metrics_from
     from devflow.integrations.git import (
         branch_name,
         create_branch,
+        create_worktree,
         get_untracked_files,
+        main_repo_root,
         switch_branch,
     )
     from devflow.orchestration.phase_exec import reset_planning_phases
     from devflow.ui.rendering import BuildTotals, render_build_banner
 
     is_resuming = feedback is not None
+    # When using worktrees, state always lives in the main repo root.
+    if worktree and base is None:
+        base = main_repo_root()
     state = load_state(base)
     stack = state.stack
     totals = BuildTotals()
+    wt_path: Path | None = None
 
-    initial_untracked = get_untracked_files()
-
-    # ── Branch ──
-    branch = branch_name(feature.id)
-    if is_resuming:
-        reset_planning_phases(feature.id, base)
-        with mutate_feature(feature.id, base) as tracked:
-            if tracked:
-                tracked.metadata.feedback = feedback
-                feature = tracked
-        switch_branch(branch)
+    # ── Branch / Worktree ──
+    if worktree:
+        branch, wt_path = create_worktree(feature.id)
+        initial_untracked = get_untracked_files(cwd=wt_path)
+        if is_resuming:
+            reset_planning_phases(feature.id, base)
+            with mutate_feature(feature.id, base) as tracked:
+                if tracked:
+                    tracked.metadata.feedback = feedback
+                    feature = tracked
     else:
-        branch = create_branch(feature.id)
+        initial_untracked = get_untracked_files()
+        branch = branch_name(feature.id)
+        if is_resuming:
+            reset_planning_phases(feature.id, base)
+            with mutate_feature(feature.id, base) as tracked:
+                if tracked:
+                    tracked.metadata.feedback = feedback
+                    feature = tracked
+            switch_branch(branch)
+        else:
+            branch = create_branch(feature.id)
 
     render_build_banner(feature, branch, stack)
     if is_resuming:
