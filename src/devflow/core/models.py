@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -253,6 +254,18 @@ class PhaseRecord(BaseModel):
         self.error = error
 
 
+def generate_feature_id(description: str) -> str:
+    """Generate a short feature ID from a description.
+
+    Format: ``feat-<slug>-<MMDD>`` where slug is the first 3 words,
+    lowercased and stripped of special characters.
+    """
+    words = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower()).split()
+    slug = "-".join(words[:3])
+    timestamp = datetime.now(UTC).strftime("%m%d")
+    return f"feat-{slug}-{timestamp}" if slug else f"feat-{timestamp}"
+
+
 class Feature(BaseModel):
     """A tracked feature with its lifecycle state."""
 
@@ -264,6 +277,8 @@ class Feature(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     phases: list[PhaseRecord] = Field(default_factory=list)
     metadata: FeatureMetadata = Field(default_factory=FeatureMetadata)
+    parent_id: str | None = None
+    """ID of the parent epic. None for standalone features and epics themselves."""
 
     def transition_to(self, target: FeatureStatus) -> None:
         """Transition to a new status, raising InvalidTransition if not allowed."""
@@ -317,6 +332,19 @@ class WorkflowState(BaseModel):
     def get_feature(self, feature_id: str) -> Feature | None:
         """Get a feature by ID, or None if not found."""
         return self.features.get(feature_id)
+
+    def children_of(self, parent_id: str) -> list[Feature]:
+        """Return all features whose parent_id matches *parent_id*."""
+        return [f for f in self.features.values() if f.parent_id == parent_id]
+
+    def epics(self) -> list[Feature]:
+        """Return features that have children (i.e. are epics)."""
+        parent_ids = {f.parent_id for f in self.features.values() if f.parent_id}
+        return [f for fid, f in self.features.items() if fid in parent_ids]
+
+    def is_epic(self, feature_id: str) -> bool:
+        """Return True if *feature_id* has any child features."""
+        return any(f.parent_id == feature_id for f in self.features.values())
 
 
 class PhaseDefinition(BaseModel):

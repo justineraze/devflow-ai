@@ -312,6 +312,15 @@ def _finalize_build(
     if pr_url is None:
         console.print("[yellow]PR creation failed — push manually.[/yellow]\n")
 
+    # If this feature is part of an epic, check if the epic is now complete.
+    if final.parent_id:
+        from devflow.core.epics import check_epic_completion
+
+        if check_epic_completion(final.parent_id, base):
+            console.print(
+                f"[green bold]Epic {final.parent_id} — all sub-features done![/green bold]\n"
+            )
+
     return True
 
 

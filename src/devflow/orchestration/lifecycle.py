@@ -7,23 +7,22 @@ phase state machine lives in phase_exec.py.
 
 from __future__ import annotations
 
-import re
-from datetime import UTC, datetime
 from pathlib import Path
 
 from devflow.core.console import console
-from devflow.core.models import Feature, FeatureStatus, InvalidTransition, PhaseStatus
+from devflow.core.models import (
+    Feature,
+    FeatureStatus,
+    InvalidTransition,
+    PhaseStatus,
+    generate_feature_id,
+)
 from devflow.core.phases import get_spec
 from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
 from devflow.integrations.complexity import score_complexity
 
-
-def _generate_feature_id(description: str) -> str:
-    """Generate a short feature ID from description."""
-    words = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower()).split()
-    slug = "-".join(words[:3])
-    timestamp = datetime.now(UTC).strftime("%m%d")
-    return f"feat-{slug}-{timestamp}" if slug else f"feat-{timestamp}"
+# Keep the private alias for backwards compatibility (tests, epics.py).
+_generate_feature_id = generate_feature_id
 
 
 def transition_safe(feature: Feature, target: FeatureStatus) -> bool:

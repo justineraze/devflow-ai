@@ -43,11 +43,58 @@ def render_header(title: str = "devflow-ai", subtitle: str = "") -> None:
     console.print(Panel(content, border_style="cyan", padding=(0, 2)))
 
 
+def _epic_status_cell(state: WorkflowState, epic_id: str) -> Text:
+    """Build a status cell showing epic progress (e.g. '3/5 done')."""
+    from devflow.core.epics import epic_progress
+
+    progress = epic_progress(state, epic_id)
+    if progress.all_done:
+        return Text("done", style="green bold")
+    parts = f"{progress.done}/{progress.total} done"
+    if progress.in_progress:
+        parts += f", {progress.in_progress} active"
+    if progress.failed:
+        parts += f", {progress.failed} blocked"
+    return Text(parts, style="cyan")
+
+
+def _add_feature_row(
+    table: Table,
+    feature: Feature,
+    state: WorkflowState,
+    indent: str = "",
+) -> None:
+    """Add a single feature row to the table, with optional indent."""
+    is_epic = state.is_epic(feature.id)
+    phase_info = _current_phase_info(feature)
+    workflow_cell = feature.workflow
+    if feature.metadata.complexity is not None:
+        workflow_cell = f"{feature.workflow} ({feature.metadata.complexity.total}/12)"
+
+    if is_epic:
+        status_cell = _epic_status_cell(state, feature.id)
+        phase_info = ""
+    else:
+        style = status_style(feature.status.value)
+        status_cell = Text(feature.status.value, style=style)
+
+    label = f"{indent}{feature.id}"
+    table.add_row(
+        label,
+        _truncate(feature.description, 50),
+        status_cell,
+        workflow_cell,
+        phase_info,
+        feature.updated_at.strftime("%Y-%m-%d %H:%M"),
+    )
+
+
 def render_status_table(
     state: WorkflowState, include_archived: bool = False,
 ) -> None:
     """Render a table showing features and their current status.
 
+    Epics are shown with their sub-features indented below them.
     Archived features (post-sync) are hidden by default.
     Pass ``include_archived=True`` to show them.
     """
@@ -70,20 +117,27 @@ def render_status_table(
     table.add_column("Phase")
     table.add_column("Updated")
 
+    # Separate epics, children, and standalone features.
+    child_ids = {f.id for f in visible if f.parent_id}
+    rendered: set[str] = set()
+
     for feature in visible:
-        style = status_style(feature.status.value)
-        phase_info = _current_phase_info(feature)
-        workflow_cell = feature.workflow
-        if feature.metadata.complexity is not None:
-            workflow_cell = f"{feature.workflow} ({feature.metadata.complexity.total}/12)"
-        table.add_row(
-            feature.id,
-            _truncate(feature.description, 50),
-            Text(feature.status.value, style=style),
-            workflow_cell,
-            phase_info,
-            feature.updated_at.strftime("%Y-%m-%d %H:%M"),
-        )
+        if feature.id in rendered:
+            continue
+
+        if state.is_epic(feature.id):
+            # Render epic header + children indented.
+            _add_feature_row(table, feature, state)
+            rendered.add(feature.id)
+            for child in state.children_of(feature.id):
+                if not include_archived and child.metadata.archived:
+                    continue
+                _add_feature_row(table, child, state, indent="  └ ")
+                rendered.add(child.id)
+        elif feature.id not in child_ids:
+            # Standalone feature (no parent).
+            _add_feature_row(table, feature, state)
+            rendered.add(feature.id)
 
     console.print(table)
 
