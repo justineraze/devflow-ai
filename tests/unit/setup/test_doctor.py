@@ -233,7 +233,7 @@ class TestRunDoctor:
         assert isinstance(report, DoctorReport)
         names = {c.name for c in report.checks}
         assert "python" in names
-        assert "claude" in names
+        assert "Claude Code" in names
         assert "gh" in names
         assert "claude model" in names
         assert "agents" in names

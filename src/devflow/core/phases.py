@@ -19,6 +19,7 @@ from typing import Self
 
 from pydantic import BaseModel, model_validator
 
+from devflow.core.backend import ModelTier
 from devflow.core.models import FeatureStatus, PhaseName
 
 
@@ -29,7 +30,7 @@ class PhaseSpec(BaseModel):
 
     name: PhaseName
     feature_status: FeatureStatus
-    model_default: str
+    model_default: ModelTier
     skills: tuple[str, ...] = ()
     context_deps: tuple[PhaseName, ...] = ()
     instructions: str = ""
@@ -101,7 +102,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.ARCHITECTURE: PhaseSpec(
         name=PhaseName.ARCHITECTURE,
         feature_status=FeatureStatus.PLANNING,
-        model_default="opus",
+        model_default=ModelTier.THINKING,
         skills=("devflow-planning",),
         context_deps=(),
         instructions=_INSTRUCTIONS_ARCHITECTURE,
@@ -109,7 +110,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.PLANNING: PhaseSpec(
         name=PhaseName.PLANNING,
         feature_status=FeatureStatus.PLANNING,
-        model_default="opus",
+        model_default=ModelTier.THINKING,
         skills=("devflow-planning",),
         context_deps=(PhaseName.ARCHITECTURE,),
         instructions=_INSTRUCTIONS_PLANNING,
@@ -117,7 +118,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.PLAN_REVIEW: PhaseSpec(
         name=PhaseName.PLAN_REVIEW,
         feature_status=FeatureStatus.PLAN_REVIEW,
-        model_default="sonnet",
+        model_default=ModelTier.STANDARD,
         skills=("devflow-review", "devflow-planning"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_PLAN_REVIEW,
@@ -125,7 +126,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.IMPLEMENTING: PhaseSpec(
         name=PhaseName.IMPLEMENTING,
         feature_status=FeatureStatus.IMPLEMENTING,
-        model_default="sonnet",
+        model_default=ModelTier.STANDARD,
         skills=("devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_IMPLEMENTING,
@@ -133,7 +134,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.REVIEWING: PhaseSpec(
         name=PhaseName.REVIEWING,
         feature_status=FeatureStatus.REVIEWING,
-        model_default="opus",
+        model_default=ModelTier.THINKING,
         skills=("devflow-review", "devflow-refactor"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_REVIEWING,
@@ -141,7 +142,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.FIXING: PhaseSpec(
         name=PhaseName.FIXING,
         feature_status=FeatureStatus.FIXING,
-        model_default="sonnet",
+        model_default=ModelTier.STANDARD,
         skills=("devflow-debug", "devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.REVIEWING,),
         instructions=_INSTRUCTIONS_FIXING,
@@ -149,7 +150,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.GATE: PhaseSpec(
         name=PhaseName.GATE,
         feature_status=FeatureStatus.GATE,
-        model_default="sonnet",
+        model_default=ModelTier.STANDARD,
         skills=(),
         context_deps=(),
         instructions="",

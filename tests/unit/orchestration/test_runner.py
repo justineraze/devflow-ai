@@ -1,10 +1,11 @@
 """Tests for devflow.orchestration.runner — prompt building and Claude Code execution."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord
 from devflow.integrations.gate import run_gate_phase
 from devflow.orchestration.runner import (
@@ -115,60 +116,71 @@ class TestFindAgentFile:
         assert _find_agent_file("nonexistent-agent-xyz") is None
 
 
-def _mock_popen(returncode: int = 0, stdout_lines: list[str] | None = None,
-                stderr: str = "") -> MagicMock:
-    """Build a Popen mock with streamable stdout."""
-    proc = MagicMock()
-    proc.returncode = returncode
-    proc.stdout = iter(stdout_lines or [])
-    proc.stderr.read.return_value = stderr
-    proc.stdin = MagicMock()
-    proc.wait = MagicMock()
-    return proc
+class _FakeBackend:
+    """Minimal backend for testing execute_phase without subprocess."""
+
+    def __init__(
+        self,
+        success: bool = True,
+        output: str = "done",
+        cost: float = 0.01,
+    ) -> None:
+        self._success = success
+        self._output = output
+        self._cost = cost
+
+    @property
+    def name(self) -> str:
+        return "Fake"
+
+    def model_name(self, tier: object) -> str:
+        return "fake-model"
+
+    def execute(self, **kwargs: object) -> tuple[bool, str, PhaseMetrics]:
+        return self._success, self._output, PhaseMetrics(cost_usd=self._cost)
+
+    def check_available(self) -> tuple[bool, str]:
+        return True, "fake 1.0"
 
 
 class TestExecutePhase:
-    @patch("devflow.orchestration.runner.subprocess.Popen")
-    def test_successful_execution(
-        self, mock_popen: MagicMock, sample_feature: Feature,
-    ) -> None:
-        result_line = (
-            '{"type":"result","duration_ms":1000,"total_cost_usd":0.01,'
-            '"result":"done","usage":{"input_tokens":100,"output_tokens":50}}'
-        )
-        mock_popen.return_value = _mock_popen(
-            returncode=0, stdout_lines=[result_line],
-        )
+    @pytest.fixture(autouse=True)
+    def _reset_backend(self) -> None:
+        """Reset global backend after each test."""
+        from devflow.core import backend as _backend_mod
+
+        yield  # type: ignore[misc]
+        _backend_mod._current_backend = None
+
+    def test_successful_execution(self, sample_feature: Feature) -> None:
+        from devflow.core.backend import set_backend
+
+        set_backend(_FakeBackend(success=True, output="done"))
         phase = sample_feature.phases[1]
         success, output, _metrics = execute_phase(sample_feature, phase, "developer")
         assert success is True
         assert "done" in output
 
-        cmd = mock_popen.call_args[0][0]
-        assert cmd[0] == "claude"
-        assert "--output-format" in cmd
-        assert "stream-json" in cmd
+    def test_failed_execution(self, sample_feature: Feature) -> None:
+        from devflow.core.backend import set_backend
 
-    @patch("devflow.orchestration.runner.subprocess.Popen")
-    def test_failed_execution(
-        self, mock_popen: MagicMock, sample_feature: Feature,
-    ) -> None:
-        mock_popen.return_value = _mock_popen(
-            returncode=1, stdout_lines=[], stderr="Error: something broke",
-        )
+        set_backend(_FakeBackend(success=False, output="Error: something broke"))
         phase = sample_feature.phases[1]
         success, output, _metrics = execute_phase(sample_feature, phase, "developer")
         assert success is False
         assert "something broke" in output
 
-    @patch("devflow.orchestration.runner.subprocess.Popen", side_effect=FileNotFoundError)
-    def test_claude_not_installed(
-        self, mock_popen: MagicMock, sample_feature: Feature,
-    ) -> None:
+    def test_not_installed(self, sample_feature: Feature) -> None:
+        from devflow.core.backend import set_backend
+
+        backend = _FakeBackend()
+        backend.execute = MagicMock(side_effect=FileNotFoundError)  # type: ignore[assignment]
+        set_backend(backend)
         phase = sample_feature.phases[1]
-        success, output, _metrics = execute_phase(sample_feature, phase, "developer")
-        assert success is False
-        assert "Claude Code CLI not found" in output
+        # FileNotFoundError now propagates; in production the backend
+        # catches it internally. Here we verify the runner doesn't mask it.
+        with pytest.raises(FileNotFoundError):
+            execute_phase(sample_feature, phase, "developer")
 
 
 class TestRunGatePhase:

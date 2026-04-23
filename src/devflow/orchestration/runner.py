@@ -1,14 +1,14 @@
-"""Runner — prompt building and Claude Code execution."""
+"""Runner — prompt building and phase execution via the backend."""
 
 from __future__ import annotations
 
 import contextlib
-import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
+from devflow.core.backend import get_backend
 from devflow.core.console import console
-from devflow.core.metrics import PhaseMetrics
+from devflow.core.metrics import PhaseMetrics, ToolUse
 from devflow.core.models import Feature, PhaseRecord
 from devflow.core.paths import venv_env
 from devflow.core.phases import UnknownPhase, get_spec
@@ -27,7 +27,7 @@ def _bundled_dir(subdir: str) -> Path:
 # Skills always injected on every phase.
 ALWAYS_ON_SKILLS: tuple[str, ...] = ("devflow-context",)
 
-# Hard ceiling for a single Claude phase when no per-phase timeout is
+# Hard ceiling for a single phase when no per-phase timeout is
 # configured in the workflow YAML. 30 minutes covers planning and
 # implementing on large features.
 DEFAULT_PHASE_TIMEOUT_S: int = 30 * 60
@@ -159,7 +159,7 @@ def build_system_prompt(phase_name: str, agent_name: str) -> str:
     """Build the stable part of the prompt (skills + agent role).
 
     This content depends only on the phase type and agent, not on the
-    specific feature. Passing it via `--system-prompt` lets Anthropic
+    specific feature. Passing it via `--system-prompt` lets the backend
     cache it across calls, reducing cost significantly.
     """
     sections = []
@@ -268,7 +268,7 @@ def execute_phase(
     agent_name: str,
     verbose: bool = False,
 ) -> tuple[bool, str, PhaseMetrics]:
-    """Execute a phase by calling Claude Code.
+    """Execute a phase by calling the active backend.
 
     In default mode, shows a Rich spinner updated with the last tool action.
     With ``verbose=True``, streams every tool line to the console instead
@@ -278,94 +278,45 @@ def execute_phase(
     PhaseMetrics — keeps the runner focused on I/O.
     """
     from devflow.core.formatting import format_tool_line
-    from devflow.orchestration.stream import parse_event
     from devflow.ui.spinner import PhaseSpinner
+
+    backend = get_backend()
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
-    model = resolve_model(feature, phase)
+    tier = resolve_model(feature, phase)
+    model = backend.model_name(tier)
     timeout = _phase_timeout(feature, phase)
     cwd = Path.cwd()
-
     agent_env = venv_env(cwd)
 
-    cmd = [
-        "claude", "-p", "-",
-        "--model", model,
-        "--permission-mode", "acceptEdits",
-        "--output-format", "stream-json",
-        "--verbose",
-    ]
-    if system_prompt:
-        cmd.extend(["--system-prompt", system_prompt])
+    # Build the on_tool callback that drives the UI.
+    spinner_ctx = (
+        contextlib.nullcontext(None) if verbose else PhaseSpinner(phase.name)
+    )
 
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(cwd),
-            env=agent_env,
-        )
-
-        proc.stdin.write(user_prompt)
-        proc.stdin.close()
-
-        metrics = PhaseMetrics()
-        tool_count = 0
-
-        # verbose=True: stream every tool line (original behaviour).
-        # verbose=False (default): spinner updated in-place with last action.
-        spinner_ctx = (
-            contextlib.nullcontext(None) if verbose else PhaseSpinner(phase.name)
-        )
-        with spinner_ctx as spinner:
-            for line in proc.stdout:
-                parsed = parse_event(line)
-                if not parsed:
-                    continue
-                kind, payload = parsed
-                if kind == "tool":
-                    tool_count += 1
-                    tool_line = format_tool_line(payload)
-                    if verbose:
-                        console.print(f"[dim]{tool_line}[/dim]")
-                    elif spinner is not None:
-                        parts = tool_line.split(None, 2)
-                        spinner.update(
-                            parts[1] if len(parts) > 1 else "tool",
-                            parts[2] if len(parts) > 2 else "",
-                        )
-                elif kind == "metrics":
-                    metrics = payload
-                    metrics.tool_count = tool_count
+    with spinner_ctx as spinner:
+        def _on_tool(tool: ToolUse) -> None:
+            tool_line = format_tool_line(tool)
+            if verbose:
+                console.print(f"[dim]{tool_line}[/dim]")
+            elif spinner is not None:
+                parts = tool_line.split(None, 2)
+                spinner.update(
+                    parts[1] if len(parts) > 1 else "tool",
+                    parts[2] if len(parts) > 2 else "",
+                )
 
         try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return False, (
-                f"Phase timed out after {timeout}s. "
-                "Increase the timeout in your workflow YAML or split the feature."
-            ), metrics
-
-        if proc.returncode == 0:
-            return True, metrics.final_text or "Phase completed", metrics
-        stderr = proc.stderr.read().strip()
-        return False, stderr or metrics.final_text or "Unknown error", metrics
-
-    except FileNotFoundError:
-        return False, (
-            "Claude Code CLI not found. "
-            "Install it: https://docs.anthropic.com/en/docs/claude-code"
-        ), PhaseMetrics()
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted.[/yellow]")
-        with contextlib.suppress(Exception):
-            proc.terminate()
-        return False, "Interrupted by user", PhaseMetrics()
-
-
+            return backend.execute(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                timeout=timeout,
+                cwd=cwd,
+                env=agent_env,
+                on_tool=_on_tool,
+            )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted.[/yellow]")
+            return False, "Interrupted by user", PhaseMetrics()

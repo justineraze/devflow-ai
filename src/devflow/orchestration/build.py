@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from devflow.ui.rendering import BuildTotals
 
 from devflow.core.artifacts import save_phase_output
+from devflow.core.backend import get_backend
 from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import (
@@ -157,21 +158,22 @@ def _run_planning_loop(
                         p.reset()
             break
 
-        model = resolve_model(feature, phase)
-        render_phase_header(phase_num, total, phase.name, model)
+        tier = resolve_model(feature, phase)
+        model_label = get_backend().model_name(tier)
+        render_phase_header(phase_num, total, phase.name, model_label)
         start = time.monotonic()
         success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
 
         if not success:
-            totals.add(phase.name, metrics, elapsed, model=model, success=False)
+            totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
             fail_phase(feature.id, phase.name, output, base)
             render_phase_failure(phase.name, elapsed, output)
             return feature, "", False
 
         complete_phase(feature.id, phase.name, output, base)
         render_phase_success(phase.name, elapsed, metrics)
-        totals.add(phase.name, metrics, elapsed, model=model)
+        totals.add(phase.name, metrics, elapsed, model=model_label)
 
         if phase.name == "planning":
             plan_output = output
@@ -232,8 +234,9 @@ def _run_execution_loop(
         phase_num = done_count + 1
         agent_name = get_phase_agent(feature, phase.name, base, stack=stack)
 
-        model = resolve_model(feature, phase)
-        render_phase_header(phase_num, total, phase.name, model)
+        tier = resolve_model(feature, phase)
+        model_label = get_backend().model_name(tier)
+        render_phase_header(phase_num, total, phase.name, model_label)
         start = time.monotonic()
         success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
@@ -246,7 +249,7 @@ def _run_execution_loop(
                 render_gate_panel(feature.id, base)
             else:
                 render_phase_success(phase.name, elapsed, metrics)
-            totals.add(phase.name, metrics, elapsed, model=model)
+            totals.add(phase.name, metrics, elapsed, model=model_label)
 
             if phase.name in ("implementing", "fixing"):
                 msg = build_commit_message(feature, suffix=phase.name)
@@ -259,7 +262,7 @@ def _run_execution_loop(
                     ) + "[/dim]\n")
                 persist_files_summary(feature.id, base, base_branch)
         else:
-            totals.add(phase.name, metrics, elapsed, model=model, success=False)
+            totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
 
             if phase.name == "gate":
                 save_phase_output(feature.id, "gate", output, base)

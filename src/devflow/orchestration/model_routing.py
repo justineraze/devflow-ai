@@ -1,13 +1,14 @@
-"""Model routing — pick the cheapest Claude model that fits the task.
+"""Model routing — pick the cheapest model tier that fits the task.
 
 Resolution order for a phase, first hit wins:
 
-1. PhaseRecord.model — explicit override from the workflow YAML.
+1. PhaseRecord.model — explicit override from the workflow YAML
+   (still a string, mapped to ModelTier via ``_tier_from_legacy``).
 2. A phase-specific selector that inspects artifacts (gate.json,
-   files.json). Lets us downgrade to Haiku for trivial fixes or
-   Sonnet for small reviews without changing PHASE_MODELS.
-3. PHASE_MODELS default per phase.
-4. DEFAULT_MODEL fallback.
+   files.json). Lets us downgrade to FAST for trivial fixes or
+   STANDARD for small reviews.
+3. PhaseSpec.model_default per phase (a ModelTier).
+4. DEFAULT_TIER fallback.
 """
 
 from __future__ import annotations
@@ -16,11 +17,30 @@ from collections.abc import Callable
 from pathlib import Path
 
 from devflow.core.artifacts import read_json_artifact
+from devflow.core.backend import ModelTier
 from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import load_state, load_workflow
 
-DEFAULT_MODEL = "sonnet"
+DEFAULT_TIER = ModelTier.STANDARD
+
+# Legacy string → ModelTier mapping for workflow YAML overrides that
+# still use Claude-specific names.
+_LEGACY_MODEL_MAP: dict[str, ModelTier] = {
+    "haiku": ModelTier.FAST,
+    "sonnet": ModelTier.STANDARD,
+    "opus": ModelTier.THINKING,
+    # Also accept tier names directly.
+    "fast": ModelTier.FAST,
+    "standard": ModelTier.STANDARD,
+    "thinking": ModelTier.THINKING,
+}
+
+
+def _tier_from_legacy(name: str) -> ModelTier:
+    """Convert a legacy model name or tier name to ModelTier."""
+    return _LEGACY_MODEL_MAP.get(name.lower(), DEFAULT_TIER)
+
 
 # Stack → specialized developer agent.
 STACK_AGENT_MAP: dict[str, str] = {
@@ -35,22 +55,22 @@ def agent_for_stack(stack: str | None) -> str | None:
     return STACK_AGENT_MAP.get(stack or "") or None
 
 # Gate checks that are cheap, mechanical fixes (lint/format/secret
-# patterns). When *all* failing checks are in this set, Haiku handles
-# the fix perfectly and costs ~10× less than Sonnet.
+# patterns). When *all* failing checks are in this set, FAST tier
+# handles the fix perfectly and costs ~10× less than STANDARD.
 TRIVIAL_GATE_CHECKS: frozenset[str] = frozenset({
     "ruff", "biome", "pint", "secrets",
 })
 
-# Below this many lines, a small review fits comfortably in Sonnet's
-# window of attention — Opus's extra reasoning buys very little.
+# Below this many lines, a small review fits comfortably in STANDARD's
+# window of attention — THINKING's extra reasoning buys very little.
 SMALL_DIFF_THRESHOLD = 50
 
 
-Selector = Callable[[str, Path | None], str | None]
+Selector = Callable[[str, Path | None], ModelTier | None]
 
 
-def _select_for_fixing(feature_id: str, base: Path | None) -> str | None:
-    """Haiku when the gate report only complains about trivial tools."""
+def _select_for_fixing(feature_id: str, base: Path | None) -> ModelTier | None:
+    """FAST tier when the gate report only complains about trivial tools."""
     data = read_json_artifact(feature_id, "gate.json", base)
     if not data:
         return None
@@ -59,12 +79,12 @@ def _select_for_fixing(feature_id: str, base: Path | None) -> str | None:
     if not failing:
         return None
     if all(c.get("name") in TRIVIAL_GATE_CHECKS for c in failing):
-        return "haiku"
+        return ModelTier.FAST
     return None
 
 
-def _select_for_reviewing(feature_id: str, base: Path | None) -> str | None:
-    """Downgrade Opus → Sonnet for small, non-sensitive diffs."""
+def _select_for_reviewing(feature_id: str, base: Path | None) -> ModelTier | None:
+    """Downgrade THINKING → STANDARD for small, non-sensitive diffs."""
     data = read_json_artifact(feature_id, "files.json", base)
     if not data:
         return None
@@ -74,7 +94,7 @@ def _select_for_reviewing(feature_id: str, base: Path | None) -> str | None:
 
     total_lines = int(data.get("lines_added", 0)) + int(data.get("lines_removed", 0))
     if total_lines > 0 and total_lines < SMALL_DIFF_THRESHOLD:
-        return "sonnet"
+        return ModelTier.STANDARD
     return None
 
 
@@ -88,10 +108,10 @@ def resolve_model(
     feature: Feature,
     phase: PhaseRecord,
     base: Path | None = None,
-) -> str:
-    """Return the Claude model alias to use for *phase*."""
+) -> ModelTier:
+    """Return the model tier to use for *phase*."""
     if phase.model:
-        return phase.model
+        return _tier_from_legacy(phase.model)
 
     selector = PHASE_SELECTORS.get(phase.name)
     if selector is not None:
@@ -102,7 +122,7 @@ def resolve_model(
     try:
         return get_spec(phase.name).model_default
     except UnknownPhase:
-        return DEFAULT_MODEL
+        return DEFAULT_TIER
 
 
 def get_phase_agent(

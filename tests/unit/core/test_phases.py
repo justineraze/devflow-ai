@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from devflow.core.backend import ModelTier
 from devflow.core.models import FeatureStatus, PhaseName
 from devflow.core.phases import (
     PHASES,
@@ -20,14 +21,14 @@ class TestPhaseSpec:
             PhaseSpec(
                 name=PhaseName.PLANNING,
                 feature_status=FeatureStatus.PLANNING,
-                model_default="opus",
+                model_default=ModelTier.THINKING,
                 context_deps=(PhaseName.PLANNING,),
             )
 
     def test_spec_is_frozen(self) -> None:
         spec = get_spec(PhaseName.PLANNING)
         with pytest.raises((TypeError, ValueError)):
-            spec.model_default = "haiku"
+            spec.model_default = ModelTier.FAST
 
 
 class TestRegistryShape:

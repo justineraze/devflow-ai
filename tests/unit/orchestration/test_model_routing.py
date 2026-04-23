@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from devflow.core.artifacts import write_artifact
+from devflow.core.backend import ModelTier
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord
 from devflow.core.phases import get_spec
 from devflow.orchestration.model_routing import SMALL_DIFF_THRESHOLD, resolve_model
@@ -32,7 +33,7 @@ class TestResolutionOrder:
     def test_yaml_override_wins(self, project_dir: Path) -> None:
         feature = _make_feature()
         phase = PhaseRecord(name="reviewing", model="haiku")
-        assert resolve_model(feature, phase) == "haiku"
+        assert resolve_model(feature, phase) == ModelTier.FAST
 
     def test_default_when_no_override_and_no_artifact(self, project_dir: Path) -> None:
         feature = _make_feature()
@@ -55,7 +56,7 @@ class TestFixingSelector:
             project_dir,
         )
 
-    def test_haiku_when_only_ruff_fails(self, project_dir: Path) -> None:
+    def test_fast_when_only_ruff_fails(self, project_dir: Path) -> None:
         self._write_gate("feat-001", project_dir, [
             {"name": "ruff", "passed": False, "message": "E501"},
             {"name": "pytest", "passed": True, "message": "ok"},
@@ -63,9 +64,9 @@ class TestFixingSelector:
         ])
         feature = _make_feature()
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == "haiku"
+        assert resolve_model(feature, phase) == ModelTier.FAST
 
-    def test_sonnet_when_pytest_fails(self, project_dir: Path) -> None:
+    def test_standard_when_pytest_fails(self, project_dir: Path) -> None:
         self._write_gate("feat-001", project_dir, [
             {"name": "ruff", "passed": False, "message": "E501"},
             {"name": "pytest", "passed": False, "message": "2 failed"},
@@ -74,12 +75,12 @@ class TestFixingSelector:
         phase = PhaseRecord(name="fixing")
         assert resolve_model(feature, phase) == get_spec("fixing").model_default
 
-    def test_sonnet_when_no_gate_artifact(self, project_dir: Path) -> None:
+    def test_standard_when_no_gate_artifact(self, project_dir: Path) -> None:
         feature = _make_feature()
         phase = PhaseRecord(name="fixing")
         assert resolve_model(feature, phase) == get_spec("fixing").model_default
 
-    def test_sonnet_when_no_failing_checks(self, project_dir: Path) -> None:
+    def test_standard_when_no_failing_checks(self, project_dir: Path) -> None:
         self._write_gate("feat-001", project_dir, [
             {"name": "ruff", "passed": True, "message": "ok"},
         ])
@@ -92,7 +93,7 @@ class TestReviewingSelector:
     def _write_files(self, feature_id: str, project_dir: Path, data: dict) -> None:
         write_artifact(feature_id, "files.json", json.dumps(data), project_dir)
 
-    def test_sonnet_for_small_non_critical_diff(self, project_dir: Path) -> None:
+    def test_standard_for_small_non_critical_diff(self, project_dir: Path) -> None:
         self._write_files("feat-001", project_dir, {
             "lines_added": 20,
             "lines_removed": 5,
@@ -102,9 +103,9 @@ class TestReviewingSelector:
         })
         feature = _make_feature()
         phase = PhaseRecord(name="reviewing")
-        assert resolve_model(feature, phase) == "sonnet"
+        assert resolve_model(feature, phase) == ModelTier.STANDARD
 
-    def test_opus_for_large_diff(self, project_dir: Path) -> None:
+    def test_thinking_for_large_diff(self, project_dir: Path) -> None:
         self._write_files("feat-001", project_dir, {
             "lines_added": SMALL_DIFF_THRESHOLD + 10,
             "lines_removed": 0,
@@ -114,9 +115,9 @@ class TestReviewingSelector:
         })
         feature = _make_feature()
         phase = PhaseRecord(name="reviewing")
-        assert resolve_model(feature, phase) == "opus"
+        assert resolve_model(feature, phase) == ModelTier.THINKING
 
-    def test_opus_when_critical_path_touched(self, project_dir: Path) -> None:
+    def test_thinking_when_critical_path_touched(self, project_dir: Path) -> None:
         self._write_files("feat-001", project_dir, {
             "lines_added": 10,
             "lines_removed": 2,
@@ -126,12 +127,12 @@ class TestReviewingSelector:
         })
         feature = _make_feature()
         phase = PhaseRecord(name="reviewing")
-        assert resolve_model(feature, phase) == "opus"
+        assert resolve_model(feature, phase) == ModelTier.THINKING
 
-    def test_opus_when_no_files_artifact(self, project_dir: Path) -> None:
+    def test_thinking_when_no_files_artifact(self, project_dir: Path) -> None:
         feature = _make_feature()
         phase = PhaseRecord(name="reviewing")
-        assert resolve_model(feature, phase) == "opus"
+        assert resolve_model(feature, phase) == ModelTier.THINKING
 
 
 class TestYamlOverride:
@@ -142,4 +143,4 @@ class TestYamlOverride:
         }), project_dir)
         feature = _make_feature()
         phase = PhaseRecord(name="fixing", model="opus")
-        assert resolve_model(feature, phase) == "opus"
+        assert resolve_model(feature, phase) == ModelTier.THINKING
