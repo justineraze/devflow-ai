@@ -517,6 +517,13 @@ def execute_build_loop(
         ))
         console.print()
 
+        # Flush any buffered stdin (e.g. Enter pressed during planning).
+        import contextlib
+        import sys
+        import termios
+        with contextlib.suppress(termios.error, ValueError, OSError):
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
         confirm = console.input("[bold]Lancer l'implémentation ? [Y/n] [/bold]").strip().lower()
         if confirm and confirm not in ("y", "yes", "o", "oui"):
             console.print()
