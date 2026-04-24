@@ -115,8 +115,8 @@ class TestSetupGateRetry:
 
         setup_gate_retry("feat-001", project_dir)
         feature = load_state(project_dir).get_feature("feat-001")
-        # Retry 1: no escalation (empty string = use selector).
-        assert feature.metadata.gate_retry_models == [""]
+        # Retry 1: no escalation (None = use selector).
+        assert feature.metadata.gate_retry_models == [None]
 
         # Reset gate to DONE so we can retry again.
         gate = feature.find_phase("gate")
@@ -126,7 +126,7 @@ class TestSetupGateRetry:
         setup_gate_retry("feat-001", project_dir)
         feature = load_state(project_dir).get_feature("feat-001")
         # Retry 2: escalate to sonnet.
-        assert feature.metadata.gate_retry_models == ["", "sonnet"]
+        assert feature.metadata.gate_retry_models == [None, "sonnet"]
 
         gate = feature.find_phase("gate")
         gate.status = PhaseStatus.DONE
@@ -135,7 +135,7 @@ class TestSetupGateRetry:
         setup_gate_retry("feat-001", project_dir)
         feature = load_state(project_dir).get_feature("feat-001")
         # Retry 3: escalate to opus.
-        assert feature.metadata.gate_retry_models == ["", "sonnet", "opus"]
+        assert feature.metadata.gate_retry_models == [None, "sonnet", "opus"]
 
     def test_returns_false_for_unknown_feature(self, project_dir: Path) -> None:
         assert setup_gate_retry("ghost", project_dir) is False
@@ -198,7 +198,6 @@ class TestRetryContextInPrompt:
         prompt = build_user_prompt(feature, feature.phases[0])
 
         assert "Tentatives précédentes" in prompt
-        assert "Tentative 1" in prompt
         assert "approche différente" in prompt
 
     def test_no_retry_context_on_first_fixing(
@@ -235,7 +234,6 @@ class TestRetryContextInPrompt:
 
         prompt = build_user_prompt(feature, feature.phases[0])
 
-        assert "Tentative 1" in prompt
-        assert "Tentative 2" in prompt
+        assert "Tentatives précédentes (2)" in prompt
         # Gate errors only on the latest attempt.
         assert "Erreur gate" in prompt

@@ -5,7 +5,7 @@ from __future__ import annotations
 from devflow.core.models import Feature
 
 # Max length for PR titles and commit summaries (Conventional Commits best practice).
-_MAX_LEN = 70
+MAX_COMMIT_SUBJECT_LEN = 70
 
 
 def _commit_prefix(feature: Feature) -> str:
@@ -64,7 +64,7 @@ def build_commit_message(feature: Feature, suffix: str | None = None) -> str:
     if suffix:
         base = f"{base} — {suffix}"
 
-    return _truncate_at_word(base, _MAX_LEN, min_prefix=len(prefix) + 2)
+    return _truncate_at_word(base, MAX_COMMIT_SUBJECT_LEN, min_prefix=len(prefix) + 2)
 
 
 def build_pr_title(feature: Feature) -> str:

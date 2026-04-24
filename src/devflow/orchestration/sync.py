@@ -6,7 +6,7 @@ import contextlib
 import subprocess
 from pathlib import Path
 
-from devflow.core.models import DirtyWorktreeError, SyncResult
+from devflow.core.models import DirtyWorktreeError, FeatureStatus, SyncResult
 
 
 def _current_branch(cwd: Path) -> str:
@@ -108,7 +108,6 @@ def run_sync(
     # Step 5 — archive features with merged PRs.
     if not keep_artifacts:
         state = load_state(cwd)
-        from devflow.core.models import FeatureStatus
         done_features = [
             f for f in state.features.values()
             if f.status == FeatureStatus.DONE and not f.metadata.archived

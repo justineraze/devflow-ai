@@ -121,13 +121,20 @@ def create_branch(feature_id: str) -> str:
     """Create and checkout a git branch for the feature.
 
     If the branch already exists, switches to it instead.
-    Returns the branch name.
+    Returns the branch name. Raises RuntimeError on any other failure
+    (e.g. dirty worktree).
     """
     branch = branch_name(feature_id)
 
     result = _git("checkout", "-b", branch)
     if result.returncode != 0:
-        _git("checkout", branch)
+        # If the branch already exists, switch to it.
+        if "already exists" in result.stderr:
+            _git("checkout", branch)
+        else:
+            raise RuntimeError(
+                f"git checkout -b {branch} failed: {result.stderr.strip()}"
+            )
     return branch
 
 
@@ -279,7 +286,7 @@ def get_branch_diff_summary(base_branch: str = "main") -> DiffSummary:
     added = 0
     removed = 0
     paths: list[str] = []
-    for line in result.stdout.strip().split("\n"):
+    for line in result.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) < 3:
             continue

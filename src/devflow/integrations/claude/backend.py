@@ -187,8 +187,9 @@ class ClaudeCodeBackend:
                 "Install it: https://docs.anthropic.com/en/docs/claude-code"
             ), PhaseMetrics()
 
-        assert proc.stdin is not None
-        assert proc.stdout is not None
+        # stdin=PIPE and stdout=PIPE were passed to Popen, so these are guaranteed non-None
+        if proc.stdin is None or proc.stdout is None:
+            raise RuntimeError("subprocess pipes failed to open")
 
         proc.stdin.write(user_prompt)
         proc.stdin.close()

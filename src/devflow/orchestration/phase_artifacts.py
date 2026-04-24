@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 from devflow.core.artifacts import write_artifact
 from devflow.core.metrics import CommitInfo, PhaseMetrics, PhaseResult
@@ -25,9 +25,6 @@ from devflow.integrations.git.repo import (
     git_log_numstat,
     git_status_porcelain,
 )
-
-if TYPE_CHECKING:  # pragma: no cover
-    pass
 
 
 class EnrichedDiffSummary(TypedDict):

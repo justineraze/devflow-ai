@@ -350,8 +350,10 @@ def _render_last_build(record: BuildMetrics) -> None:
     console.print(phase_table)
 
 
-def _render_phase_averages(records: list[BuildMetrics]) -> None:
-    """Render avg cost/duration/tokens per phase type across all builds, sorted by cost."""
+def _accumulate_phase_stats(
+    records: list[BuildMetrics],
+) -> dict[str, _PhaseAccumulator]:
+    """Aggregate per-phase totals across multiple build records."""
     acc: dict[str, _PhaseAccumulator] = {}
     for r in records:
         for p in r.phases:
@@ -363,7 +365,35 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
             a.cache_read += p.cache_read
             a.cache_total += total_tokens
             a.runs += 1
+    return acc
 
+
+def _phase_average_row(name: str, a: _PhaseAccumulator) -> tuple[str, Text, str, str, Text, str]:
+    """Build one row for the phase-averages table."""
+    avg_cost = a.cost / a.runs
+    avg_duration = a.duration / a.runs
+    avg_tokens = a.tokens // a.runs
+
+    if a.cache_total > 0:
+        cpct = int(a.cache_read / a.cache_total * 100)
+        cache_style = "green" if cpct >= 60 else "yellow"
+        cache_cell = Text(f"{cpct}%", style=cache_style)
+    else:
+        cache_cell = Text("—", style="dim")
+
+    return (
+        name,
+        Text(format_cost(avg_cost)),
+        format_duration(avg_duration),
+        format_tokens(avg_tokens),
+        cache_cell,
+        str(a.runs),
+    )
+
+
+def _render_phase_averages(records: list[BuildMetrics]) -> None:
+    """Render avg cost/duration/tokens per phase type across all builds, sorted by cost."""
+    acc = _accumulate_phase_stats(records)
     if not acc:
         return
 
@@ -388,30 +418,12 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
     total_cache_total = 0
 
     for name, a in sorted_phases:
-        avg_cost = a.cost / a.runs
-        avg_duration = a.duration / a.runs
-        avg_tokens = a.tokens // a.runs
-        total_avg_cost += avg_cost
-        total_avg_duration += avg_duration
-        total_avg_tokens += avg_tokens
+        total_avg_cost += a.cost / a.runs
+        total_avg_duration += a.duration / a.runs
+        total_avg_tokens += a.tokens // a.runs
         total_cache_read += a.cache_read
         total_cache_total += a.cache_total
-
-        if a.cache_total > 0:
-            cpct = int(a.cache_read / a.cache_total * 100)
-            cache_style = "green" if cpct >= 60 else "yellow"
-            cache_cell = Text(f"{cpct}%", style=cache_style)
-        else:
-            cache_cell = Text("—", style="dim")
-
-        table.add_row(
-            name,
-            format_cost(avg_cost),
-            format_duration(avg_duration),
-            format_tokens(avg_tokens),
-            cache_cell,
-            str(a.runs),
-        )
+        table.add_row(*_phase_average_row(name, a))
 
     if total_cache_total > 0:
         total_cpct = int(total_cache_read / total_cache_total * 100)

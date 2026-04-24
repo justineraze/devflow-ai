@@ -63,7 +63,10 @@ def _scan_file(path: Path, root: Path) -> list[str]:
     findings = []
     for secret_name, pattern in SECRET_PATTERNS:
         if pattern.search(content):
-            rel = path.relative_to(root)
+            try:
+                rel = path.relative_to(root)
+            except ValueError:
+                rel = path  # path outside root — show absolute
             findings.append(f"  {rel}: possible {secret_name}")
     return findings
 

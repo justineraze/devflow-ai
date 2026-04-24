@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import MappingProxyType
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -59,7 +61,7 @@ class ComplexityScore(BaseModel):
     method: str = ""
     """How the score was produced: ``"llm"`` or ``"heuristic"`` (empty = unknown)."""
 
-    def model_post_init(self, __context: object) -> None:
+    def model_post_init(self, _context: object) -> None:
         """Resolve workflow from total once, at construction time."""
         if not self.workflow:
             self.workflow = _resolve_workflow(self.total)
@@ -80,8 +82,9 @@ class FeatureMetadata(BaseModel):
     gate_retry: int = 0
     """Number of automatic gate→fixing→gate retry cycles consumed."""
 
-    gate_retry_models: list[str] = Field(default_factory=list)
-    """Model tier used at each gate retry (e.g. ['sonnet', 'sonnet', 'opus'])."""
+    gate_retry_models: list[str | None] = Field(default_factory=list)
+    """Model tier used at each gate retry (e.g. [None, 'sonnet', 'opus']).
+    None entries mean "no escalation, let the selector decide"."""
 
     review_cycles: int = 0
     """Number of review→fix→review cycles consumed (max 2)."""
@@ -168,7 +171,7 @@ class FeatureStatus(StrEnum):
 _RECOVERY: frozenset[FeatureStatus] = frozenset(
     {FeatureStatus.BLOCKED, FeatureStatus.FAILED},
 )
-VALID_TRANSITIONS: dict[FeatureStatus, frozenset[FeatureStatus]] = {
+_VALID_TRANSITIONS_RAW: dict[FeatureStatus, frozenset[FeatureStatus]] = {
     FeatureStatus.PENDING: frozenset({
         FeatureStatus.PLANNING,
         FeatureStatus.IMPLEMENTING,
@@ -231,6 +234,9 @@ VALID_TRANSITIONS: dict[FeatureStatus, frozenset[FeatureStatus]] = {
         FeatureStatus.GATE,
     }),
 }
+VALID_TRANSITIONS: Mapping[FeatureStatus, frozenset[FeatureStatus]] = MappingProxyType(
+    _VALID_TRANSITIONS_RAW,
+)
 
 
 class InvalidTransition(Exception):

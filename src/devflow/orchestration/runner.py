@@ -191,9 +191,8 @@ def _build_retry_context(feature: Feature) -> str:
     if retry <= 0:
         return ""
 
-    parts: list[str] = ["# Tentatives précédentes\n"]
+    parts = [f"# Tentatives précédentes ({retry})\n"]
 
-    # Get fix commit history (best-effort, may fail in tests without git).
     commit_log = ""
     try:
         from devflow.integrations.git import get_fix_commit_log
@@ -202,24 +201,19 @@ def _build_retry_context(feature: Feature) -> str:
         import logging
         logging.getLogger(__name__).warning("Could not read fix commit log")
 
-    # Get the current gate.json as the latest failure snapshot.
     gate_json = read_artifact(feature.id, "gate.json")
 
-    for attempt in range(1, retry + 1):
-        section = f"### Tentative {attempt}\n"
-        if commit_log:
-            # Truncate per attempt to stay within budget.
-            budget = MAX_RETRY_CONTEXT_CHARS
-            trimmed = commit_log[:budget]
-            if len(commit_log) > budget:
-                trimmed += "\n… (tronqué)"
-            section += f"Commits fix:\n```\n{trimmed}\n```\n"
-        if gate_json and attempt == retry:
-            # Only the latest gate failure is relevant — older ones were
-            # already shown in the previous fixing prompt.
-            section += f"Erreur gate:\n```json\n{gate_json[:MAX_RETRY_CONTEXT_CHARS]}\n```\n"
-        section += "\nCe fix n'a pas marché. Essaie une approche différente.\n"
-        parts.append(section)
+    section = ""
+    if commit_log:
+        trimmed = commit_log[:MAX_RETRY_CONTEXT_CHARS]
+        if len(commit_log) > MAX_RETRY_CONTEXT_CHARS:
+            trimmed += "\n… (tronqué)"
+        section += f"Commits fix ({retry} tentatives):\n```\n{trimmed}\n```\n"
+    if gate_json:
+        truncated_gate = gate_json[:MAX_RETRY_CONTEXT_CHARS]
+        section += f"Erreur gate (dernière):\n```json\n{truncated_gate}\n```\n"
+    section += "\nCes fixes n'ont pas marché. Essaie une approche différente.\n"
+    parts.append(section)
 
     return "\n".join(parts)
 

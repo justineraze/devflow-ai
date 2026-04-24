@@ -84,7 +84,7 @@ def _select_for_fixing(
         models = feature.metadata.gate_retry_models
         if models:
             last = models[-1]
-            if last:
+            if last is not None:
                 return _tier_from_legacy(last)
 
     data = read_json_artifact(feature_id, "gate.json", base)

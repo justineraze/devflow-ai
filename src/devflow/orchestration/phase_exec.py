@@ -159,7 +159,7 @@ def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
 
         # Record the tier to use for this retry's fixing phase.
         tier = _RETRY_TIER_ESCALATION.get(next_attempt)
-        feature.metadata.gate_retry_models.append(tier or "")
+        feature.metadata.gate_retry_models.append(tier)
 
         transition_safe(feature, FeatureStatus.FIXING)
         return True

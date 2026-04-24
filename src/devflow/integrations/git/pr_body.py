@@ -106,11 +106,15 @@ def _create_gh_pr(
     title: str, body: str, base_branch: str, cwd: Path,
 ) -> str | None:
     """Invoke ``gh pr create`` and return the PR URL or None on failure."""
-    result = subprocess.run(
-        ["gh", "pr", "create", "--title", title, "--body", body,
-         "--base", base_branch],
-        capture_output=True, text=True, cwd=str(cwd), timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "create", "--title", title, "--body", body,
+             "--base", base_branch],
+            capture_output=True, text=True, cwd=str(cwd), timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        _log.warning("gh pr create timed out")
+        return None
     if result.returncode == 0:
         return result.stdout.strip()
     _log.warning("PR creation failed: %s", result.stderr.strip())

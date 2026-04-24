@@ -170,9 +170,7 @@ def create_issue_for_feature(
 def _sync_epics(
     state: WorkflowState,
     team: str,
-    base: Path | None,
     state_cache: dict[str, dict[str, str]],
-    _log: logging.Logger,
 ) -> tuple[list[str], list[str], list[str]]:
     """Sync epics first so children can reference their Linear IDs.
 
@@ -202,9 +200,7 @@ def _sync_epics(
 def _sync_features(
     state: WorkflowState,
     team: str,
-    base: Path | None,
     state_cache: dict[str, dict[str, str]],
-    _log: logging.Logger,
 ) -> tuple[list[str], list[str], list[str]]:
     """Sync non-epic features (regular and sub-features).
 
@@ -263,10 +259,10 @@ def sync_all(base: Path | None = None) -> LinearSyncResult:
     state_cache: dict[str, dict[str, str]] = {}
 
     epic_created, epic_updated, epic_errors = _sync_epics(
-        state, team_id, base, state_cache, _log,
+        state, team_id, state_cache,
     )
     feat_created, feat_updated, feat_errors = _sync_features(
-        state, team_id, base, state_cache, _log,
+        state, team_id, state_cache,
     )
 
     skipped = sum(1 for f in state.features.values() if f.metadata.archived)

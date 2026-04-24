@@ -95,7 +95,7 @@ def _migrate_gate_yaml(base: Path | None = None) -> GateConfig | None:
     if not path.is_file():
         return None
 
-    data: Any = yaml.safe_load(path.read_text())
+    data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not data:
         path.unlink(missing_ok=True)
         return None
@@ -120,7 +120,7 @@ def _migrate_state_json(base: Path | None = None) -> dict[str, Any]:
         return {}
 
     try:
-        raw = json.loads(state_path.read_text())
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -145,13 +145,17 @@ def load_config(base: Path | None = None) -> DevflowConfig:
     config = DevflowConfig()
 
     if path.is_file():
-        raw: Any = yaml.safe_load(path.read_text())
+        raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            # Flatten nested sections for Pydantic.
-            gate_raw = raw.pop("gate", None)
-            linear_raw = raw.pop("linear", None)
+            # Flatten nested sections for Pydantic without mutating *raw*.
+            gate_raw = raw.get("gate")
+            linear_raw = raw.get("linear")
             config = DevflowConfig(
-                **{k: v for k, v in raw.items() if k in DevflowConfig.model_fields},
+                **{
+                    k: v
+                    for k, v in raw.items()
+                    if k not in {"gate", "linear"} and k in DevflowConfig.model_fields
+                },
                 gate=GateConfig(**(gate_raw or {})),
                 linear=LinearConfig(**(linear_raw or {})),
             )

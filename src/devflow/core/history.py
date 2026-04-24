@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from devflow.core.metrics import BuildTotals, PhaseSnapshot, compute_cache_hit_rate
+from devflow.core.models import PhaseStatus
+from devflow.core.workflow import ensure_devflow_dir
 
 if TYPE_CHECKING:
     from devflow.core.models import Feature
@@ -75,8 +77,6 @@ class BuildMetrics:
 
 def _metrics_path(base: Path | None = None) -> Path:
     """Return the path to the metrics JSONL file."""
-    from devflow.core.workflow import ensure_devflow_dir
-
     return ensure_devflow_dir(base) / "metrics.jsonl"
 
 
@@ -84,8 +84,6 @@ def build_metrics_from(
     feature: Feature, totals: BuildTotals, success: bool,
 ) -> BuildMetrics:
     """Construct a BuildMetrics from a build's feature and totals."""
-    from devflow.core.models import PhaseStatus
-
     phases_completed = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
     # gate_passed_first means no retry was needed (gate succeeded on first attempt)
     gate_passed_first = feature.metadata.gate_retry == 0 and success
@@ -169,22 +167,23 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
     _phase_fields = {f.name for f in fields(PhaseSnapshot)}
 
     records: list[BuildMetrics] = []
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            data = json.loads(stripped)
-            raw_phases = data.pop("phases", [])
-            # Filter unknown fields to prevent TypeError on new fields.
-            known_data = {k: v for k, v in data.items() if k in _build_fields}
-            rec = BuildMetrics(**known_data)
-            rec.phases = [
-                PhaseSnapshot(**{k: v for k, v in p.items() if k in _phase_fields})
-                for p in raw_phases
-            ]
-            records.append(rec)
-        except (json.JSONDecodeError, TypeError, KeyError, ValueError):
-            continue
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                data = json.loads(stripped)
+                raw_phases = data.pop("phases", [])
+                # Filter unknown fields to prevent TypeError on new fields.
+                known_data = {k: v for k, v in data.items() if k in _build_fields}
+                rec = BuildMetrics(**known_data)
+                rec.phases = [
+                    PhaseSnapshot(**{k: v for k, v in p.items() if k in _phase_fields})
+                    for p in raw_phases
+                ]
+                records.append(rec)
+            except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+                continue
 
     return list(reversed(records[-limit:]))

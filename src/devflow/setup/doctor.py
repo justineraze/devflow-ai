@@ -6,12 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from rich.panel import Panel
-from rich.text import Text
-
 from devflow.core.backend import get_backend
 from devflow.core.config import load_config
-from devflow.core.console import console
 from devflow.core.gate_report import CheckResult, GateReport
 from devflow.core.models import WorkflowState
 from devflow.core.paths import assets_dir
@@ -68,12 +64,12 @@ def check_skills_synced(target: Path | None = None) -> CheckResult:
     return _check_assets_synced("skills", assets_dir() / "skills", target)
 
 
-def _check_assets_synced(name: str, assets_dir: Path, target_dir: Path) -> CheckResult:
+def _check_assets_synced(name: str, source_dir: Path, target_dir: Path) -> CheckResult:
     """Compare expected assets against installed ones."""
-    if not assets_dir.is_dir():
+    if not source_dir.is_dir():
         return CheckResult(name=name, passed=False, message=f"assets/{name}/ not found")
 
-    expected = {f.name for f in assets_dir.glob("*.md")}
+    expected = {f.name for f in source_dir.glob("*.md")}
     if not target_dir.is_dir():
         return CheckResult(
             name=name,
@@ -256,21 +252,3 @@ def run_doctor(base: Path | None = None) -> GateReport:
     report.add(check_hook_installed())
     report.add(check_devflow_init(base))
     return report
-
-
-def render_doctor_report(report: GateReport) -> None:
-    """Display the doctor diagnostic report using Rich."""
-    lines = Text()
-    for check in report.checks:
-        icon = "✓" if check.passed else "✗"
-        style = "green" if check.passed else "red"
-        lines.append(f"  {icon} ", style=style)
-        lines.append(f"{check.name}: ", style="bold")
-        lines.append(f"{check.message}\n", style=style)
-        if check.details:
-            lines.append(f"    {check.details[:500]}\n", style="dim")
-
-    verdict = "HEALTHY" if report.passed else "ISSUES FOUND"
-    border = "green" if report.passed else "red"
-
-    console.print(Panel(lines, title=f"Doctor — {verdict}", border_style=border))

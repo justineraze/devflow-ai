@@ -141,25 +141,25 @@ class TestFixingEscalation:
     def test_retry_2_forces_sonnet(self, project_dir: Path) -> None:
         feature = _make_feature()
         feature.metadata.gate_retry = 2
-        feature.metadata.gate_retry_models = ["", "sonnet"]
+        feature.metadata.gate_retry_models = [None, "sonnet"]
         phase = PhaseRecord(name="fixing")
         assert resolve_model(feature, phase) == ModelTier.STANDARD  # sonnet = STANDARD
 
     def test_retry_3_forces_opus(self, project_dir: Path) -> None:
         feature = _make_feature()
         feature.metadata.gate_retry = 3
-        feature.metadata.gate_retry_models = ["", "sonnet", "opus"]
+        feature.metadata.gate_retry_models = [None, "sonnet", "opus"]
         phase = PhaseRecord(name="fixing")
         assert resolve_model(feature, phase) == ModelTier.THINKING  # opus = THINKING
 
     def test_retry_1_uses_selector(self, project_dir: Path) -> None:
-        """Retry 1 stores empty string → selector runs normally."""
+        """Retry 1 stores None → selector runs normally."""
         self._write_gate("feat-001", project_dir, [
             {"name": "ruff", "passed": False, "message": "E501"},
         ])
         feature = _make_feature()
         feature.metadata.gate_retry = 1
-        feature.metadata.gate_retry_models = [""]
+        feature.metadata.gate_retry_models = [None]
         phase = PhaseRecord(name="fixing")
         # ruff-only → FAST via selector.
         assert resolve_model(feature, phase) == ModelTier.FAST

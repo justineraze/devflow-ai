@@ -356,7 +356,8 @@ def install(
 
     With --check, only runs the diagnostic (no install or init).
     """
-    from devflow.setup.doctor import render_doctor_report, run_doctor
+    from devflow.setup.doctor import run_doctor
+    from devflow.ui.rendering import render_doctor_report
 
     if check_only:
         render_header(subtitle="Doctor diagnostic")
@@ -493,7 +494,8 @@ def log_cmd(
 def doctor_cmd() -> None:
     """(Deprecated) Use ``devflow install --check``."""
     _deprecation_hint("doctor", "devflow install --check")
-    from devflow.setup.doctor import render_doctor_report, run_doctor
+    from devflow.setup.doctor import run_doctor
+    from devflow.ui.rendering import render_doctor_report
 
     render_header(subtitle="Doctor diagnostic")
     report = run_doctor()

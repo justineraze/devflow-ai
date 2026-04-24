@@ -57,7 +57,7 @@ def read_artifact(
     target = artifact_path(feature_id, name, base)
     if not target.exists():
         return None
-    return target.read_text()
+    return target.read_text(encoding="utf-8")
 
 
 def read_json_artifact(

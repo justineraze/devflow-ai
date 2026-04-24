@@ -41,6 +41,7 @@ from devflow.orchestration.phase_exec import (
     fail_phase,
     run_phase,
     setup_gate_retry,
+    sync_linear_if_configured,
 )
 from devflow.orchestration.plan_parser import (
     parse_plan_module,
@@ -395,7 +396,6 @@ def _finalize_build(
             )
 
     # Sync Linear status to "completed" (best-effort).
-    from devflow.orchestration.phase_exec import sync_linear_if_configured
     sync_linear_if_configured(final, base)
 
     callbacks.on_build_summary(final, totals, pr_url, branch, None)

@@ -15,6 +15,7 @@ import subprocess
 
 from devflow.core.models import Feature
 
+from .commit_message import MAX_COMMIT_SUBJECT_LEN
 from .commit_message import build_commit_message as _template_commit_message
 
 # Ceiling for diff content sent to the model (roughly 500 lines × ~80 chars).
@@ -138,7 +139,7 @@ def generate_commit_message(feature: Feature, phase: str = "") -> str:
         if result:
             # Take only the first line, strip quotes.
             first_line = result.split("\n", 1)[0].strip().strip('"\'')
-            if first_line and len(first_line) <= 100:
+            if first_line and len(first_line) <= MAX_COMMIT_SUBJECT_LEN:
                 return first_line
 
     # Fallback to deterministic template.

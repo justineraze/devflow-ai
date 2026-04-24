@@ -14,8 +14,10 @@ from rich.text import Text
 
 from devflow.core.console import console
 from devflow.core.formatting import format_cost, format_duration, format_tokens
+from devflow.core.gate_report import GateReport
 from devflow.core.metrics import (
     BuildTotals,
+    CommitInfo,
     PhaseMetrics,
     PhaseResult,
     PhaseSnapshot,
@@ -174,6 +176,42 @@ def render_phase_auto_retry(phase_name: str, elapsed_s: float, message: str) -> 
     console.print()
 
 
+def _commit_line(c: CommitInfo, *, show_files: bool) -> Text:
+    """Format a single commit line with SHA + message + file/insertion/deletion stats."""
+    line = Text("  ")
+    line.append(f"  {c.sha} ", style="cyan dim")
+    line.append(c.message, style="dim")
+    if show_files:
+        detail = f" ({len(c.files)} {_plural(len(c.files), 'file')}, +{c.insertions}"
+        if c.deletions:
+            detail += f", -{c.deletions}"
+        detail += ")"
+        line.append(detail, style="dim")
+    return line
+
+
+def _commit_stat_line(files: int, insertions: int, deletions: int, *, bold: bool = False) -> Text:
+    """Format a stat line with files/insertions/deletions counts."""
+    label_style = "dim bold" if bold else "dim"
+    stat = Text("  ")
+    prefix = "  Total: " if bold else "  "
+    stat.append(
+        f"{prefix}{files} {_plural(files, 'file')} changed",
+        style=label_style,
+    )
+    if insertions:
+        stat.append(
+            f", {insertions} {_plural(insertions, 'insertion')}(+)",
+            style="green dim",
+        )
+    if deletions:
+        stat.append(
+            f", {deletions} {_plural(deletions, 'deletion')}(-)",
+            style="red dim",
+        )
+    return stat
+
+
 def render_phase_commits(phase_result: PhaseResult) -> None:
     """Render a detailed commit summary after an implementing/fixing phase.
 
@@ -184,61 +222,17 @@ def render_phase_commits(phase_result: PhaseResult) -> None:
     if not commits and not phase_result.uncommitted_changes:
         return
 
-    total_ins = sum(c.insertions for c in commits)
-    total_del = sum(c.deletions for c in commits)
-    total_files = len(phase_result.files_changed)
-
     if len(commits) == 1:
         c = commits[0]
-        line = Text("  ")
-        line.append(f"  {c.sha} ", style="cyan dim")
-        line.append(c.message, style="dim")
-        console.print(line)
-        stat = Text("  ")
-        stat.append(
-            f"  {len(c.files)} {_plural(len(c.files), 'file')} changed",
-            style="dim",
-        )
-        if c.insertions:
-            stat.append(
-                f", {c.insertions} {_plural(c.insertions, 'insertion')}(+)",
-                style="green dim",
-            )
-        if c.deletions:
-            stat.append(
-                f", {c.deletions} {_plural(c.deletions, 'deletion')}(-)",
-                style="red dim",
-            )
-        console.print(stat)
+        console.print(_commit_line(c, show_files=False))
+        console.print(_commit_stat_line(len(c.files), c.insertions, c.deletions))
     elif len(commits) > 1:
         for c in commits:
-            line = Text("  ")
-            line.append(f"  {c.sha} ", style="cyan dim")
-            line.append(c.message, style="dim")
-            detail = f" ({len(c.files)} {_plural(len(c.files), 'file')}, +{c.insertions}"
-            if c.deletions:
-                detail += f", -{c.deletions}"
-            detail += ")"
-            line.append(detail, style="dim")
-            console.print(line)
-
-        # Total line.
-        total = Text("  ")
-        total.append(
-            f"  Total: {total_files} {_plural(total_files, 'file')} changed",
-            style="dim bold",
-        )
-        if total_ins:
-            total.append(
-                f", {total_ins} {_plural(total_ins, 'insertion')}(+)",
-                style="green dim",
-            )
-        if total_del:
-            total.append(
-                f", {total_del} {_plural(total_del, 'deletion')}(-)",
-                style="red dim",
-            )
-        console.print(total)
+            console.print(_commit_line(c, show_files=True))
+        total_ins = sum(c.insertions for c in commits)
+        total_del = sum(c.deletions for c in commits)
+        total_files = len(phase_result.files_changed)
+        console.print(_commit_stat_line(total_files, total_ins, total_del, bold=True))
 
     console.print()
 
@@ -473,3 +467,21 @@ def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool)
             )
         return False
     return True
+
+
+def render_doctor_report(report: GateReport) -> None:
+    """Display the doctor diagnostic report using Rich."""
+    lines = Text()
+    for check in report.checks:
+        icon = "✓" if check.passed else "✗"
+        style = "green" if check.passed else "red"
+        lines.append(f"  {icon} ", style=style)
+        lines.append(f"{check.name}: ", style="bold")
+        lines.append(f"{check.message}\n", style=style)
+        if check.details:
+            lines.append(f"    {check.details[:500]}\n", style="dim")
+
+    verdict = "HEALTHY" if report.passed else "ISSUES FOUND"
+    border = "green" if report.passed else "red"
+
+    console.print(Panel(lines, title=f"Doctor — {verdict}", border_style=border))

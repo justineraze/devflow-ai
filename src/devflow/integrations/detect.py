@@ -18,7 +18,9 @@ _EXTENSION_MAP: dict[str, str] = {
 }
 
 # Directories to skip during scanning.
-_IGNORED_DIRS: set[str] = {".git", "node_modules", "__pycache__", ".venv", ".tox", ".mypy_cache"}
+_IGNORED_DIRS: frozenset[str] = frozenset(
+    {".git", "node_modules", "__pycache__", ".venv", ".tox", ".mypy_cache"}
+)
 
 
 def detect_stack(path: Path) -> str | None:

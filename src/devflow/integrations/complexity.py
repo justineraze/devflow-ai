@@ -81,9 +81,9 @@ def _score_via_llm(description: str) -> ComplexityScore | None:
         return None
 
 
-def _clamp(value: object, lo: int = 0, hi: int = 3) -> int:
+def _clamp(value: int | float | str, lo: int = 0, hi: int = 3) -> int:
     """Clamp an integer value to [lo, hi], raising on non-int."""
-    return max(lo, min(int(value), hi))  # type: ignore[arg-type]
+    return max(lo, min(int(value), hi))
 
 
 # ── Heuristic scorer (fallback) ──────────────────────────────────

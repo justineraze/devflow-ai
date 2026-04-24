@@ -6,10 +6,13 @@ parser (verbose mode), the spinner (live mode), and the build summary.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
+
 from devflow.core.metrics import ToolUse
 
 # Canonical icon mapping for Claude Code tools (exact name match).
-TOOL_ICONS: dict[str, str] = {
+_TOOL_ICONS_RAW: dict[str, str] = {
     "Read": "📖",
     "Write": "📝",
     "Edit": "📝",
@@ -22,6 +25,7 @@ TOOL_ICONS: dict[str, str] = {
     "WebSearch": "🌐",
     "Agent": "🤖",
 }
+TOOL_ICONS: Mapping[str, str] = MappingProxyType(_TOOL_ICONS_RAW)
 
 
 def tool_icon(tool_name: str) -> str:

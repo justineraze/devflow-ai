@@ -52,7 +52,7 @@ class TestGateContext:
 class TestBuildContext:
     """Tests for the build_context factory function."""
 
-    @patch("devflow.core.config.load_config")
+    @patch("devflow.integrations.gate.context.load_config")
     def test_audit_mode(self, mock_config, tmp_path: Path) -> None:
         from devflow.core.config import DevflowConfig
         mock_config.return_value = DevflowConfig()
@@ -63,7 +63,7 @@ class TestBuildContext:
         assert ctx.exclude_patterns == []
 
     @patch("devflow.integrations.gate.context._git_diff_files")
-    @patch("devflow.core.config.load_config")
+    @patch("devflow.integrations.gate.context.load_config")
     def test_build_mode_with_sha(self, mock_config, mock_diff, tmp_path: Path) -> None:
         from devflow.core.config import DevflowConfig, GateConfig
         mock_config.return_value = DevflowConfig(
@@ -77,7 +77,7 @@ class TestBuildContext:
         assert ctx.changed_files == [Path("src/app.py"), Path("dist/bundle.js")]
         assert ctx.exclude_patterns == ["dist/**"]
 
-    @patch("devflow.core.config.load_config")
+    @patch("devflow.integrations.gate.context.load_config")
     def test_build_mode_no_sha_gives_empty_files(self, mock_config, tmp_path: Path) -> None:
         from devflow.core.config import DevflowConfig
         mock_config.return_value = DevflowConfig()
@@ -85,7 +85,7 @@ class TestBuildContext:
         ctx = build_context(mode="build", base_sha="", base=tmp_path)
         assert ctx.changed_files == []
 
-    @patch("devflow.core.config.load_config")
+    @patch("devflow.integrations.gate.context.load_config")
     def test_exclude_from_config(self, mock_config, tmp_path: Path) -> None:
         from devflow.core.config import DevflowConfig, GateConfig
         mock_config.return_value = DevflowConfig(

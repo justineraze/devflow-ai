@@ -50,13 +50,13 @@ def _build_command_result(
     parse_output: ParseOutput | None,
 ) -> CheckResult:
     """Interpret a command's exit code and output as a CheckResult."""
-    newline = "\n"
     if parse_output is not None:
         message, details = parse_output(returncode, output)
     elif returncode == 0:
         message, details = "No issues", ""
     else:
-        message = f"{output.count(newline)} issues found"
+        issue_count = output.count("\n")
+        message = f"{issue_count} issues found"
         details = output[:2000]
     return CheckResult(
         name=name, passed=returncode == 0, message=message, details=details,
