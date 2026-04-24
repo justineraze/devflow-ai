@@ -82,22 +82,32 @@ class TestCheckDevflowInit:
     def test_missing_dir(self, tmp_path: Path) -> None:
         result = check_devflow_init(base=tmp_path)
         assert result.passed is False
-        assert "devflow init" in result.message
+        assert "devflow install" in result.message
 
     def test_valid_state(self, tmp_path: Path) -> None:
         devflow_dir = tmp_path / ".devflow"
         devflow_dir.mkdir()
-        state = {"version": 1, "features": {}, "stack": "python"}
+        state = {"version": 1, "features": {}}
         (devflow_dir / "state.json").write_text(json.dumps(state))
+        (devflow_dir / "config.yaml").write_text("stack: python\n")
         result = check_devflow_init(base=tmp_path)
         assert result.passed is True
         assert "0 feature" in result.message
         assert "python" in result.message
 
+    def test_missing_config_only(self, tmp_path: Path) -> None:
+        devflow_dir = tmp_path / ".devflow"
+        devflow_dir.mkdir()
+        (devflow_dir / "state.json").write_text('{"version":1,"features":{}}')
+        result = check_devflow_init(base=tmp_path)
+        assert result.passed is False
+        assert "config.yaml" in result.message
+
     def test_corrupt_json(self, tmp_path: Path) -> None:
         devflow_dir = tmp_path / ".devflow"
         devflow_dir.mkdir()
         (devflow_dir / "state.json").write_text("{broken json!!!")
+        (devflow_dir / "config.yaml").write_text("stack: python\n")
         result = check_devflow_init(base=tmp_path)
         assert result.passed is False
         assert "Invalid" in result.message

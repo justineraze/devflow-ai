@@ -329,7 +329,7 @@ def install(
     from pathlib import Path
 
     from devflow.core.config import load_config, save_config
-    from devflow.core.workflow import ensure_devflow_dir
+    from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
     from devflow.integrations.detect import detect_stack
     from devflow.integrations.git import detect_base_branch
 
@@ -346,6 +346,10 @@ def install(
         config.linear.team = linear_team
 
     save_config(config)
+
+    # Ensure state.json exists (empty state is fine for first run).
+    state = load_state()
+    save_state(state)
 
     if config.stack:
         console.print(f"[green]Stack: {config.stack}[/green]")
@@ -430,39 +434,6 @@ def log_cmd(
         features = list_all_features()
         render_log_table(features)
 
-
-@app.command(name="init", deprecated=True, hidden=True)
-def init_cmd(
-    linear_team: Annotated[
-        str | None,
-        typer.Option("--linear-team", help="Linear team key (e.g. 'ABC') for issue sync"),
-    ] = None,
-) -> None:
-    """(Deprecated) Use ``devflow install``."""
-    _deprecation_hint("init", "devflow install")
-    from pathlib import Path
-
-    from devflow.core.config import load_config, save_config
-    from devflow.core.workflow import ensure_devflow_dir
-    from devflow.integrations.detect import detect_stack
-    from devflow.integrations.git import detect_base_branch
-
-    devflow_dir = ensure_devflow_dir()
-    config = load_config()
-    config.stack = detect_stack(Path.cwd())
-    config.base_branch = detect_base_branch()
-    if linear_team is not None:
-        config.linear.team = linear_team
-    save_config(config)
-
-    console.print(f"[green]Initialized devflow in {devflow_dir}[/green]")
-    if config.stack:
-        console.print(f"[green]Stack detected: {config.stack}[/green]")
-    else:
-        console.print("[yellow]No stack detected.[/yellow]")
-    console.print(f"[green]Base branch: {config.base_branch}[/green]")
-    if config.linear.team:
-        console.print(f"[green]Linear team: {config.linear.team}[/green]")
 
 
 @app.command(name="doctor", deprecated=True, hidden=True)

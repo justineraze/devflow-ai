@@ -94,17 +94,26 @@ def _check_assets_synced(name: str, assets_dir: Path, target_dir: Path) -> Check
 
 
 def check_devflow_init(base: Path | None = None) -> CheckResult:
-    """Check that .devflow/state.json exists and is valid."""
+    """Check that .devflow/ is initialized (config.yaml + state.json)."""
     from devflow.core.models import WorkflowState
 
     root = base or Path.cwd()
-    state_file = root / ".devflow" / "state.json"
+    devflow_dir = root / ".devflow"
+    config_file = devflow_dir / "config.yaml"
+    state_file = devflow_dir / "state.json"
 
+    missing = []
+    if not config_file.exists():
+        missing.append("config.yaml")
     if not state_file.exists():
+        missing.append("state.json")
+
+    if missing:
+        files = " and ".join(missing)
         return CheckResult(
             name="init",
             passed=False,
-            message=".devflow/state.json not found — run: devflow init",
+            message=f".devflow/{files} not found — run: devflow install",
         )
 
     try:
@@ -124,7 +133,7 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
         return CheckResult(
             name="init",
             passed=False,
-            message=f"Invalid state.json: {exc}",
+            message=f"Invalid config/state: {exc}",
         )
 
 

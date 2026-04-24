@@ -103,10 +103,6 @@ class TestDeprecatedCommands:
         result = runner.invoke(app, ["log", "--help"])
         assert result.exit_code == 0
 
-    def test_init_still_registered(self) -> None:
-        result = runner.invoke(app, ["init", "--help"])
-        assert result.exit_code == 0
-
     def test_doctor_still_registered(self) -> None:
         result = runner.invoke(app, ["doctor", "--help"])
         assert result.exit_code == 0
