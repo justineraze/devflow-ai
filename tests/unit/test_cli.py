@@ -20,11 +20,15 @@ class TestDoCommand:
     def test_command_is_registered(self) -> None:
         result = runner.invoke(app, ["do", "--help"])
         assert result.exit_code == 0
-        assert "Quick task on the current branch" in result.output
+        assert "Task on the current branch" in result.output
 
     def test_missing_description_shows_error(self) -> None:
         result = runner.invoke(app, ["do"])
         assert result.exit_code != 0
+
+    def test_has_workflow_flag(self) -> None:
+        result = runner.invoke(app, ["do", "--help"])
+        assert "--workflow" in result.output
 
 
 class TestBuildCommand:

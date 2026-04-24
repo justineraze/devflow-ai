@@ -412,15 +412,21 @@ def execute_build_loop(
     verbose: bool = False,
     base_branch: str = "main",
     worktree: bool = False,
+    create_pr: bool = True,
 ) -> bool:
-    """Run a feature build with plan-first confirmation flow.
+    """Run a feature through its phases end-to-end.
 
-    1. Create git branch (or worktree if ``worktree=True``)
-    2. Run planning phases — show plan, ask confirmation
-    3. If refused → pause, user can resume with feedback
-    4. If confirmed → run remaining phases
-    5. Auto-commit after implementing/fixing
-    6. Create PR on success
+    When ``create_pr=True`` (default — ``devflow build``):
+        1. Create git branch (or worktree)
+        2. Run planning phases — show plan, ask confirmation
+        3. Run remaining phases with auto-commit
+        4. Create PR on success
+
+    When ``create_pr=False`` (``devflow do``):
+        1. Stay on current branch (no branch creation)
+        2. Run all phases identically (planning, confirmation, execution)
+        3. No PR — on success, print the commit SHAs
+        4. On failure, hard-reset to the pre-build HEAD
 
     When ``worktree=True``, the build runs in an isolated git worktree
     under ``.devflow/.worktrees/<feature-id>/``. This allows multiple
@@ -431,8 +437,10 @@ def execute_build_loop(
         branch_name,
         create_branch,
         create_worktree,
+        get_head_sha,
         get_untracked_files,
         main_repo_root,
+        reset_to_sha,
         switch_branch,
     )
     from devflow.orchestration.phase_exec import reset_planning_phases
@@ -446,31 +454,41 @@ def execute_build_loop(
     stack = state.stack
     totals = BuildTotals()
     wt_path: Path | None = None
+    branch = ""
 
-    # ── Branch / Worktree ──
-    if worktree:
-        branch, wt_path = create_worktree(feature.id)
-        initial_untracked = get_untracked_files(cwd=wt_path)
-        if is_resuming:
-            reset_planning_phases(feature.id, base)
-            with mutate_feature(feature.id, base) as tracked:
-                if tracked:
-                    tracked.metadata.feedback = feedback
-                    feature = tracked
+    # Save HEAD for potential revert (do mode).
+    initial_sha = get_head_sha(short=False) if not create_pr else ""
+
+    # ── Branch / Worktree (build mode only) ──
+    if create_pr:
+        if worktree:
+            branch, wt_path = create_worktree(feature.id)
+            initial_untracked = get_untracked_files(cwd=wt_path)
+            if is_resuming:
+                reset_planning_phases(feature.id, base)
+                with mutate_feature(feature.id, base) as tracked:
+                    if tracked:
+                        tracked.metadata.feedback = feedback
+                        feature = tracked
+        else:
+            initial_untracked = get_untracked_files()
+            branch = branch_name(feature.id)
+            if is_resuming:
+                reset_planning_phases(feature.id, base)
+                with mutate_feature(feature.id, base) as tracked:
+                    if tracked:
+                        tracked.metadata.feedback = feedback
+                        feature = tracked
+                switch_branch(branch)
+            else:
+                branch = create_branch(feature.id)
     else:
         initial_untracked = get_untracked_files()
-        branch = branch_name(feature.id)
-        if is_resuming:
-            reset_planning_phases(feature.id, base)
-            with mutate_feature(feature.id, base) as tracked:
-                if tracked:
-                    tracked.metadata.feedback = feedback
-                    feature = tracked
-            switch_branch(branch)
-        else:
-            branch = create_branch(feature.id)
 
-    render_build_banner(feature, branch, stack)
+    if create_pr:
+        render_build_banner(feature, branch, stack)
+    else:
+        console.print(f"[bold]do:[/bold] {feature.description}\n")
     if is_resuming:
         console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
 
@@ -497,9 +515,10 @@ def execute_build_loop(
             console.print()
             console.print("[yellow]Build en pause.[/yellow]")
             console.print(f"[dim]Le plan est sauvegardé dans {feature.id}.[/dim]")
-            console.print()
-            console.print("[bold]Reprendre avec :[/bold]")
-            console.print(f'  devflow build "ton feedback ici" --resume {feature.id}')
+            if create_pr:
+                console.print()
+                console.print("[bold]Reprendre avec :[/bold]")
+                console.print(f'  devflow build "ton feedback ici" --resume {feature.id}')
             return False
 
     # ── Execution ──
@@ -509,13 +528,37 @@ def execute_build_loop(
     if not ok:
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
+        # do mode: revert all commits on failure.
+        if not create_pr and initial_sha:
+            current_sha = get_head_sha(short=False)
+            if current_sha != initial_sha:
+                console.print(
+                    "\n[red bold]Build failed — reverting changes.[/red bold]"
+                )
+                if reset_to_sha(initial_sha):
+                    console.print(f"[dim]Reset to {initial_sha[:7]}.[/dim]\n")
+                else:
+                    console.print(
+                        f"[yellow]Auto-reset failed. "
+                        f"Manual reset: git reset --hard {initial_sha[:7]}[/yellow]\n"
+                    )
         return False
 
-    # ── PR ──
-    return _finalize_build(feature, branch, totals, initial_untracked, base, base_branch)
+    # ── Finalize ──
+    if create_pr:
+        return _finalize_build(feature, branch, totals, initial_untracked, base, base_branch)
 
+    # do mode: print success summary.
+    from devflow.ui.rendering import render_build_summary
 
-MAX_DO_GATE_RETRIES = 3
+    current_sha = get_head_sha()
+    render_build_summary(feature, totals, pr_url=None, branch="")
+    if current_sha != initial_sha[:7]:
+        console.print(
+            f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
+            f"\n[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]\n"
+        )
+    return True
 
 
 def execute_do_loop(
@@ -523,173 +566,9 @@ def execute_do_loop(
     verbose: bool = False,
     base: Path | None = None,
 ) -> bool:
-    """Run a quick task on the current branch: implement → commit → gate.
+    """Run a task on the current branch — no branch, no PR.
 
-    No branch creation, no PR, no plan confirmation.
-    A single commit is created after implementing. If the gate fails
-    after ``MAX_DO_GATE_RETRIES`` fixing→gate cycles, the commit is
-    reverted automatically.
-
-    Returns True when the gate passes.
+    Delegates to :func:`execute_build_loop` with ``create_pr=False``.
+    On failure, all commits made during the build are reverted.
     """
-    from devflow.core.history import append_build_metrics, build_metrics_from
-    from devflow.integrations.git import (
-        build_commit_message,
-        commit_changes,
-        get_head_sha,
-        get_untracked_files,
-        revert_head,
-    )
-    from devflow.orchestration.model_routing import get_phase_agent, resolve_model
-    from devflow.ui.rendering import (
-        BuildTotals,
-        render_phase_failure,
-        render_phase_header,
-        render_phase_success,
-    )
-
-    state = load_state(base)
-    stack = state.stack
-    totals = BuildTotals()
-    initial_untracked = get_untracked_files()
-
-    console.print(f"[bold]do:[/bold] {feature.description}\n")
-
-    # ── Implementing ──
-    phase = run_phase(feature, base)
-    if not phase or phase.name != "implementing":
-        console.print("[red]No implementing phase found.[/red]")
-        return False
-
-    agent_name = get_phase_agent(feature, phase.name, base, stack=stack)
-    tier = resolve_model(feature, phase)
-    model_label = get_backend().model_name(tier)
-    render_phase_header(1, 2, phase.name, model_label)
-
-    start = time.monotonic()
-    success, output, metrics = _execute_phase(
-        feature, phase, agent_name, base, verbose,
-    )
-    elapsed = time.monotonic() - start
-
-    if not success:
-        totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
-        fail_phase(feature.id, phase.name, output, base)
-        render_phase_failure(phase.name, elapsed, output)
-        append_build_metrics(build_metrics_from(feature, totals, success=False), base)
-        return False
-
-    complete_phase(feature.id, phase.name, output, base)
-    render_phase_success(phase.name, elapsed, metrics)
-    totals.add(phase.name, metrics, elapsed, model=model_label)
-
-    # ── Single commit ──
-    msg = build_commit_message(feature, suffix="do")
-    committed = commit_changes(msg, exclude=initial_untracked)
-    if not committed:
-        console.print("[yellow]No changes to commit.[/yellow]")
-        append_build_metrics(
-            build_metrics_from(feature, totals, success=True), base,
-        )
-        return True
-
-    commit_sha = get_head_sha()
-    console.print(f"  [dim]committed {commit_sha}[/dim]\n")
-
-    feature = _refresh_feature(feature.id, base) or feature
-
-    # ── Gate + retry loop ──
-    for attempt in range(1, MAX_DO_GATE_RETRIES + 1):
-        gate_phase = run_phase(feature, base)
-        if not gate_phase:
-            break
-
-        if gate_phase.name == "gate":
-            render_phase_header(2, 2, "gate", "local")
-            start = time.monotonic()
-            ok, gate_out, gate_metrics = _execute_phase(
-                feature, gate_phase, "tester", base, verbose,
-            )
-            elapsed = time.monotonic() - start
-
-            if ok:
-                complete_phase(feature.id, gate_phase.name, gate_out, base)
-                from devflow.ui.gate_panel import render_gate_panel
-                render_gate_panel(feature.id, base)
-                totals.add("gate", gate_metrics, elapsed, model="local")
-                append_build_metrics(
-                    build_metrics_from(feature, totals, success=True), base,
-                )
-                console.print(
-                    f"\n[green bold]Done.[/green bold] Commit {commit_sha}."
-                    f"\n[dim]Pour annuler : git revert {commit_sha}[/dim]\n"
-                )
-                return True
-
-            # Gate failed — set up fixing→gate retry.
-            save_phase_output(feature.id, "gate", gate_out, base)
-            totals.add("gate", gate_metrics, elapsed, model="local", success=False)
-
-            if attempt < MAX_DO_GATE_RETRIES:
-                if not setup_gate_retry(feature.id, base):
-                    break
-                from devflow.ui.gate_panel import render_gate_panel
-                render_gate_panel(feature.id, base)
-                from devflow.ui.rendering import render_phase_auto_retry
-                render_phase_auto_retry("gate", elapsed, "")
-                feature = _refresh_feature(feature.id, base) or feature
-
-                # Run fixing phase.
-                fix_phase = run_phase(feature, base)
-                if not fix_phase or fix_phase.name != "fixing":
-                    break
-
-                fix_agent = get_phase_agent(
-                    feature, "fixing", base, stack=stack,
-                )
-                fix_tier = resolve_model(feature, fix_phase)
-                fix_model = get_backend().model_name(fix_tier)
-                render_phase_header(2, 2, "fixing", fix_model)
-                start = time.monotonic()
-                fix_ok, fix_out, fix_metrics = _execute_phase(
-                    feature, fix_phase, fix_agent, base, verbose,
-                )
-                elapsed = time.monotonic() - start
-
-                if fix_ok:
-                    complete_phase(
-                        feature.id, fix_phase.name, fix_out, base,
-                    )
-                    render_phase_success("fixing", elapsed, fix_metrics)
-                    totals.add("fixing", fix_metrics, elapsed, model=fix_model)
-                    # Amend into the single commit.
-                    commit_changes(msg, exclude=initial_untracked)
-                    feature = _refresh_feature(feature.id, base) or feature
-                    continue
-                else:
-                    fail_phase(
-                        feature.id, fix_phase.name, fix_out, base,
-                    )
-                    render_phase_failure("fixing", elapsed, fix_out)
-                    totals.add(
-                        "fixing", fix_metrics, elapsed,
-                        model=fix_model, success=False,
-                    )
-                    break
-
-    # Gate failed after all retries — revert.
-    console.print(
-        "\n[red bold]Gate failed after retries — reverting commit.[/red bold]"
-    )
-    if revert_head():
-        console.print(f"[dim]Reverted {commit_sha}.[/dim]\n")
-    else:
-        console.print(
-            f"[yellow]Auto-revert failed. "
-            f"Manual revert: git revert {commit_sha}[/yellow]\n"
-        )
-
-    append_build_metrics(
-        build_metrics_from(feature, totals, success=False), base,
-    )
-    return False
+    return execute_build_loop(feature, base=base, verbose=verbose, create_pr=False)

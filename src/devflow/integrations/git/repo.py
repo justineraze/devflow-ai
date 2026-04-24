@@ -205,6 +205,16 @@ def revert_head() -> bool:
     return result.returncode == 0
 
 
+def reset_to_sha(sha: str) -> bool:
+    """Hard-reset HEAD to *sha*, discarding all commits after it.
+
+    Used by ``devflow do`` to revert multiple commits on failure.
+    Returns True if the reset succeeded.
+    """
+    result = _git("reset", "--hard", sha)
+    return result.returncode == 0
+
+
 def get_diff_stat() -> str:
     """Return git diff --stat of the latest commit."""
     result = _git("diff", "--stat", "HEAD~1")

@@ -189,20 +189,24 @@ def build(
 @app.command(name="do")
 def do_task(
     description: Annotated[str, typer.Argument(help="What to do")],
+    workflow: Annotated[
+        str | None, typer.Option("--workflow", "-w", help="Workflow to use (default: auto-detect)")
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,
 ) -> None:
-    """Quick task on the current branch — single commit, revertable.
+    """Task on the current branch — no new branch, no PR.
 
-    Stays on the current branch (no new branch, no PR).
-    Runs implementing → gate. If the gate fails after retries,
-    the commit is automatically reverted.
+    Runs the same phases as ``devflow build`` (planning, implementing,
+    reviewing, gate…) but stays on the current branch.  The workflow
+    is auto-detected from task complexity unless overridden with -w.
+    On failure, all commits are reverted automatically.
     """
     from devflow.orchestration.build import execute_do_loop
     from devflow.orchestration.lifecycle import start_do
 
-    feature = start_do(description)
+    feature = start_do(description, workflow)
     success = execute_do_loop(feature, verbose=verbose)
     if not success:
         raise typer.Exit(1)

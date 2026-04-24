@@ -217,7 +217,7 @@ class TestSkillInjection:
     def test_planning_phase_loads_relevant_skills(self) -> None:
         content = _load_skills_for_phase("planning")
         assert "Context Discipline" in content
-        assert "Planning Rigor" in content
+        assert "Planning Principles" in content
 
     def test_unknown_phase_only_loads_always_on(self) -> None:
         content = _load_skills_for_phase("unknown-phase")

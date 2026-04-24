@@ -1,10 +1,11 @@
-"""Tests for the ``devflow do`` command — quick task on current branch."""
+"""Tests for ``devflow do`` — task on current branch, no PR."""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from devflow.core.models import ComplexityScore
 from devflow.core.workflow import load_state
 from devflow.orchestration.build import execute_do_loop
 from devflow.orchestration.lifecycle import start_do
@@ -19,28 +20,80 @@ def project_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+# ---------------------------------------------------------------------------
+# start_do — auto-detect workflow
+# ---------------------------------------------------------------------------
+
+
 class TestStartDo:
-    def test_uses_quick_workflow(self, project_dir: Path) -> None:
-        feature = start_do("Fix typo in README", project_dir)
+    def test_auto_detects_workflow(self, project_dir: Path) -> None:
+        """Without explicit workflow, complexity scoring is used."""
+        mock_score = ComplexityScore(
+            files_touched=2, integrations=1, security=0, scope=1,
+        )
+        with patch(
+            "devflow.orchestration.lifecycle.score_complexity",
+            return_value=mock_score,
+        ) as mock_scorer:
+            feature = start_do("Refactor module", base=project_dir)
+        mock_scorer.assert_called_once()
+        assert feature.workflow == mock_score.workflow
+
+    def test_explicit_workflow_skips_scoring(self, project_dir: Path) -> None:
+        """When workflow is provided, scoring is skipped."""
+        with patch(
+            "devflow.orchestration.lifecycle.score_complexity",
+        ) as mock_scorer:
+            feature = start_do("Add logging", workflow_name="quick", base=project_dir)
+        mock_scorer.assert_not_called()
         assert feature.workflow == "quick"
+
+    def test_creates_feature_in_state(self, project_dir: Path) -> None:
+        feature = start_do("Add logging", workflow_name="quick", base=project_dir)
+        state = load_state(project_dir)
+        assert state.get_feature(feature.id) is not None
+
+    def test_quick_workflow_has_two_phases(self, project_dir: Path) -> None:
+        feature = start_do("Fix typo", workflow_name="quick", base=project_dir)
         assert len(feature.phases) == 2
         assert feature.phases[0].name == "implementing"
         assert feature.phases[1].name == "gate"
 
-    def test_creates_feature_in_state(self, project_dir: Path) -> None:
-        feature = start_do("Add logging", project_dir)
-        state = load_state(project_dir)
-        assert state.get_feature(feature.id) is not None
+
+# ---------------------------------------------------------------------------
+# execute_do_loop — delegates to execute_build_loop(create_pr=False)
+# ---------------------------------------------------------------------------
 
 
-class TestExecuteDoLoopSuccess:
-    """Gate passes on first try — commit stays, SHA printed."""
+class TestExecuteDoLoopDelegation:
+    """execute_do_loop passes create_pr=False to execute_build_loop."""
 
-    @patch("devflow.integrations.git.get_head_sha", return_value="abc1234")
+    @patch("devflow.orchestration.build.execute_build_loop", return_value=True)
+    def test_delegates_with_create_pr_false(
+        self, mock_build: MagicMock, project_dir: Path,
+    ) -> None:
+        feature = start_do("task", workflow_name="quick", base=project_dir)
+        result = execute_do_loop(feature, base=project_dir)
+
+        assert result is True
+        mock_build.assert_called_once_with(
+            feature, base=project_dir, verbose=False, create_pr=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# execute_build_loop(create_pr=False) — integration-level
+# ---------------------------------------------------------------------------
+
+
+class TestBuildLoopDoMode:
+    """Test execute_build_loop with create_pr=False (do mode)."""
+
+    @patch("devflow.integrations.git.get_head_sha", return_value="abc1234def")
     @patch("devflow.integrations.git.commit_changes", return_value=True)
     @patch("devflow.integrations.git.get_untracked_files", return_value=[])
     @patch("devflow.orchestration.build._execute_phase")
-    def test_success_flow(
+    def test_success_no_branch_no_pr(
         self,
         mock_exec: MagicMock,
         mock_untracked: MagicMock,
@@ -49,89 +102,45 @@ class TestExecuteDoLoopSuccess:
         project_dir: Path,
     ) -> None:
         mock_exec.side_effect = [_PHASE_OK, _PHASE_OK]  # implementing, gate
+        from devflow.orchestration.build import execute_build_loop
 
-        feature = start_do("Add feature X", project_dir)
-        result = execute_do_loop(feature, base=project_dir)
+        feature = start_do("Add feature X", workflow_name="quick", base=project_dir)
+        result = execute_build_loop(feature, base=project_dir, create_pr=False)
 
         assert result is True
-        mock_commit.assert_called_once()
-        mock_sha.assert_called_once()
 
-
-class TestExecuteDoLoopGateFailRevert:
-    """Gate fails after retries — commit is reverted."""
-
-    @patch("devflow.integrations.git.revert_head", return_value=True)
-    @patch("devflow.integrations.git.get_head_sha", return_value="bad1234")
+    @patch("devflow.orchestration.build.setup_gate_retry", return_value=False)
+    @patch("devflow.integrations.git.reset_to_sha", return_value=True)
+    @patch("devflow.integrations.git.get_head_sha")
     @patch("devflow.integrations.git.commit_changes", return_value=True)
     @patch("devflow.integrations.git.get_untracked_files", return_value=[])
     @patch("devflow.orchestration.build._execute_phase")
-    def test_revert_after_gate_failures(
+    def test_failure_reverts_to_initial_sha(
         self,
         mock_exec: MagicMock,
         mock_untracked: MagicMock,
         mock_commit: MagicMock,
         mock_sha: MagicMock,
-        mock_revert: MagicMock,
+        mock_reset: MagicMock,
+        mock_gate_retry: MagicMock,
         project_dir: Path,
     ) -> None:
-        # implementing OK, then gate fails 3 times with fixing in between.
-        mock_exec.side_effect = [
-            _PHASE_OK,   # implementing
-            _PHASE_FAIL, # gate attempt 1
-            _PHASE_OK,   # fixing 1
-            _PHASE_FAIL, # gate attempt 2
-            _PHASE_OK,   # fixing 2
-            _PHASE_FAIL, # gate attempt 3
-        ]
+        # First call: initial SHA save. Subsequent: changed SHA.
+        mock_sha.side_effect = ["initial_sha_full", "changed_sha_full"]
+        mock_exec.side_effect = [_PHASE_OK, _PHASE_FAIL]  # implementing ok, gate fail
 
-        feature = start_do("Broken change", project_dir)
-        result = execute_do_loop(feature, base=project_dir)
+        from devflow.orchestration.build import execute_build_loop
+
+        feature = start_do("Broken change", workflow_name="quick", base=project_dir)
+        result = execute_build_loop(feature, base=project_dir, create_pr=False)
 
         assert result is False
-        mock_revert.assert_called_once()
+        mock_reset.assert_called_once_with("initial_sha_full")
 
 
-class TestExecuteDoLoopImplementingFails:
-    """Implementing phase fails — no commit, no revert."""
-
-    @patch("devflow.integrations.git.revert_head", return_value=True)
-    @patch("devflow.integrations.git.commit_changes", return_value=False)
-    @patch("devflow.integrations.git.get_untracked_files", return_value=[])
-    @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_FAIL)
-    def test_implementing_fail_no_revert(
-        self,
-        mock_exec: MagicMock,
-        mock_untracked: MagicMock,
-        mock_commit: MagicMock,
-        mock_revert: MagicMock,
-        project_dir: Path,
-    ) -> None:
-        feature = start_do("Bad task", project_dir)
-        result = execute_do_loop(feature, base=project_dir)
-
-        assert result is False
-        mock_commit.assert_not_called()
-        mock_revert.assert_not_called()
-
-
-class TestExecuteDoLoopNoChanges:
-    """Implementing succeeds but nothing to commit."""
-
-    @patch("devflow.integrations.git.commit_changes", return_value=False)
-    @patch("devflow.integrations.git.get_untracked_files", return_value=[])
-    @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_OK)
-    def test_no_changes_is_success(
-        self,
-        mock_exec: MagicMock,
-        mock_untracked: MagicMock,
-        mock_commit: MagicMock,
-        project_dir: Path,
-    ) -> None:
-        feature = start_do("No-op task", project_dir)
-        result = execute_do_loop(feature, base=project_dir)
-
-        assert result is True
+# ---------------------------------------------------------------------------
+# Quick workflow instructions — unchanged behavior
+# ---------------------------------------------------------------------------
 
 
 class TestQuickInstructions:

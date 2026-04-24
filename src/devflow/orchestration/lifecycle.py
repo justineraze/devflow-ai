@@ -164,11 +164,16 @@ def start_fix(description: str, base: Path | None = None) -> Feature:
     return start_build(description, workflow_name="quick", base=base)
 
 
-def start_do(description: str, base: Path | None = None) -> Feature:
-    """Start a quick task on the current branch (no branch, no PR).
+def start_do(
+    description: str,
+    workflow_name: str | None = None,
+    base: Path | None = None,
+) -> Feature:
+    """Start a task on the current branch (no branch, no PR).
 
-    Always uses ``quick`` — complexity scoring is intentionally skipped.
+    When *workflow_name* is ``None``, the workflow is auto-selected via
+    :func:`score_complexity` — exactly like :func:`start_build`.
     The feature is created but no git branch is created; the caller
-    (execute_do_loop) handles committing and potential revert.
+    handles committing and potential revert.
     """
-    return start_build(description, workflow_name="quick", base=base)
+    return start_build(description, workflow_name=workflow_name, base=base)
