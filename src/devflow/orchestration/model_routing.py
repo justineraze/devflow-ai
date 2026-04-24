@@ -20,7 +20,7 @@ from devflow.core.artifacts import read_json_artifact
 from devflow.core.backend import ModelTier
 from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
-from devflow.core.workflow import load_state, load_workflow
+from devflow.core.workflow import load_workflow
 
 DEFAULT_TIER = ModelTier.STANDARD
 
@@ -169,7 +169,11 @@ def get_phase_agent(
         pass
 
     if agent == "developer":
-        resolved_stack = stack if stack is not None else load_state(base).stack
+        if stack is not None:
+            resolved_stack = stack
+        else:
+            from devflow.core.config import load_config
+            resolved_stack = load_config(base).stack
         specialized = agent_for_stack(resolved_stack)
         if specialized:
             agent = specialized

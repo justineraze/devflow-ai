@@ -96,8 +96,9 @@ def run_sync(
         )
 
     # Step 2 — switch base branch + pull.
-    state = load_state(cwd)
-    main = state.base_branch
+    from devflow.core.config import load_config
+
+    main = load_config(cwd).base_branch
     if dry_run:
         result.actions.append(f"would: git switch {main} && git pull --ff-only")
     else:

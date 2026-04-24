@@ -114,8 +114,8 @@ def _execute_phase(
     from devflow.orchestration.runner import execute_phase
 
     if phase.name == "gate":
-        state = load_state(base)
-        return run_gate_phase(base, stack=state.stack, feature_id=feature.id)
+        from devflow.core.config import load_config
+        return run_gate_phase(base, stack=load_config(base).stack, feature_id=feature.id)
     return execute_phase(feature, phase, agent_name, verbose=verbose)
 
 
@@ -386,10 +386,13 @@ def _finalize_build(
             )
 
     # Sync Linear status to "completed" (best-effort).
-    if final.metadata.linear_issue_id and state.linear_team_id:
+    if final.metadata.linear_issue_id:
+        from devflow.core.config import load_config
         from devflow.integrations.linear.sync import sync_single_feature
 
-        sync_single_feature(final, state.linear_team_id, base)
+        linear_team = load_config(base).linear.team
+        if linear_team:
+            sync_single_feature(final, linear_team, base)
 
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
@@ -452,8 +455,10 @@ def execute_build_loop(
     # When using worktrees, state always lives in the main repo root.
     if worktree and base is None:
         base = main_repo_root()
-    state = load_state(base)
-    stack = state.stack
+    from devflow.core.config import load_config
+
+    config = load_config(base)
+    stack = config.stack
     totals = BuildTotals()
     wt_path: Path | None = None
     branch = ""

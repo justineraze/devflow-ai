@@ -1,37 +1,31 @@
-"""Load optional per-project gate configuration from .devflow/gate.yaml."""
+"""Load optional per-project gate configuration.
+
+Reads from the unified ``.devflow/config.yaml`` (``gate:`` section).
+Falls back to the legacy ``.devflow/gate.yaml`` for migration
+(the migration itself is handled by :func:`devflow.core.config.load_config`).
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
-import yaml
-
-_VALID_KEYS = {"lint", "test"}
 
 
 def load_gate_config(base: Path | None = None) -> dict[str, str] | None:
-    """Load custom gate commands from ``.devflow/gate.yaml``.
+    """Load custom gate commands from the unified config.
 
     Returns a dict mapping check names (``"lint"``, ``"test"``) to shell
-    commands, or *None* when the file is absent — in which case the gate
-    falls back to stack-based auto-detection.
-
-    Raises ``ValueError`` for invalid keys (anything outside ``lint`` / ``test``).
+    commands, or *None* when no custom commands are configured — in which
+    case the gate falls back to stack-based auto-detection.
     """
-    root = base or Path.cwd()
-    config_path = root / ".devflow" / "gate.yaml"
+    from devflow.core.config import load_config
 
-    if not config_path.is_file():
-        return None
+    config = load_config(base)
+    gate = config.gate
 
-    data: Any = yaml.safe_load(config_path.read_text())
-    if not isinstance(data, dict) or not data:
-        return None
+    result: dict[str, str] = {}
+    if gate.lint:
+        result["lint"] = gate.lint
+    if gate.test:
+        result["test"] = gate.test
 
-    unknown = set(data.keys()) - _VALID_KEYS
-    if unknown:
-        msg = f"Unknown keys in gate.yaml: {', '.join(sorted(unknown))}"
-        raise ValueError(msg)
-
-    return {k: str(v) for k, v in data.items()}
+    return result or None

@@ -169,6 +169,41 @@ class ClaudeCodeBackend:
                 "Install it: https://docs.anthropic.com/en/docs/claude-code"
             ), PhaseMetrics()
 
+    def one_shot(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        timeout: int,
+    ) -> str | None:
+        """Run a one-shot Claude prompt and return trimmed text, or None."""
+        from devflow.core.paths import venv_env
+
+        cmd = [
+            "claude", "-p", "-",
+            "--model", model,
+            "--output-format", "text",
+        ]
+        if system:
+            cmd.extend(["--system-prompt", system])
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=user,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(Path.cwd()),
+                env=venv_env(Path.cwd()),
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            pass
+        return None
+
     def check_available(self) -> tuple[bool, str]:
         """Verify the ``claude`` CLI is installed and reachable."""
         try:

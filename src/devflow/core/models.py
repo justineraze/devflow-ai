@@ -331,13 +331,18 @@ class Feature(BaseModel):
 
 
 class WorkflowState(BaseModel):
-    """Top-level project state persisted in .devflow/state.json."""
+    """Top-level project state persisted in .devflow/state.json.
+
+    Contains only runtime state (features + timestamps).  Project
+    configuration (stack, base_branch, linear, backend) lives in
+    ``.devflow/config.yaml`` — see :mod:`devflow.core.config`.
+    """
+
+    model_config = {"extra": "ignore"}
+    """Ignore legacy config fields (stack, base_branch, linear_team_id)
+    that may still be present in old state.json files."""
 
     version: int = 1
-    stack: str | None = None
-    base_branch: str = "main"
-    linear_team_id: str | None = None
-    """Linear team ID (e.g. 'ABC'). Set via devflow init --linear-team. Optional."""
     features: dict[str, Feature] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

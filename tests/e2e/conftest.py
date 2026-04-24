@@ -17,7 +17,6 @@ import pytest
 
 from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
-from devflow.core.workflow import load_state, save_state
 
 # Fixture project shipped with the tests.
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "mini_python"
@@ -82,9 +81,8 @@ def mini_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.chdir(project)
 
-    state = load_state(project)
-    state.stack = "python"
-    save_state(state, project)
+    from devflow.core.config import DevflowConfig, save_config
+    save_config(DevflowConfig(stack="python"), project)
 
     return project
 

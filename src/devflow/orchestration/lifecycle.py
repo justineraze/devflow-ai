@@ -83,12 +83,15 @@ def start_build(
         feature.metadata.complexity = complexity
 
     # Auto-create Linear issue if configured.
-    if state.linear_team_id:
+    from devflow.core.config import load_config
+
+    linear_team = load_config(base).linear.team
+    if linear_team:
         from devflow.integrations.linear.client import is_configured
         from devflow.integrations.linear.sync import create_issue_for_feature
 
         if is_configured():
-            key = create_issue_for_feature(feature, state.linear_team_id)
+            key = create_issue_for_feature(feature, linear_team)
             if key:
                 console.print(f"[dim]Linear: {key}[/dim]")
 

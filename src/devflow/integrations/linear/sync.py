@@ -179,14 +179,17 @@ def sync_all(base: Path | None = None) -> SyncResult:
         result.errors.append("LINEAR_API_KEY not set")
         return result
 
-    state = load_state(base)
-    if not state.linear_team_id:
+    from devflow.core.config import load_config
+
+    config = load_config(base)
+    if not config.linear.team:
         result.errors.append(
-            "No linear_team_id in state. Run: devflow init --linear-team <ID>"
+            "No linear team configured. Run: devflow install --linear-team <ID>"
         )
         return result
 
-    team_id = state.linear_team_id
+    state = load_state(base)
+    team_id = config.linear.team
     state_cache: dict[str, dict[str, str]] = {}
 
     # First pass: sync epics (so we have their Linear IDs for children).

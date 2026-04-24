@@ -1,56 +1,44 @@
-"""AI-generated git messages via Claude Haiku one-shot calls.
+"""AI-generated git messages via backend one-shot calls.
 
 Every public function has a deterministic fallback so the build never
 crashes because of a message-generation failure.
+
+Messages are generated through the Backend Protocol's ``one_shot()``
+method — the concrete backend (Claude, Gemini, OpenAI…) handles the
+actual API/CLI call.
 """
 
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 from devflow.core.models import Feature
 
 from .commit_message import build_commit_message as _template_commit_message
 
-# Ceiling for diff content sent to Haiku (roughly 500 lines × ~80 chars).
+# Ceiling for diff content sent to the model (roughly 500 lines × ~80 chars).
 _MAX_DIFF_LINES = 500
 
-# Timeout for Haiku one-shot calls (seconds).
-_HAIKU_TIMEOUT = 30
+# Timeout for one-shot calls (seconds).
+_ONE_SHOT_TIMEOUT = 30
 
 
-def _call_haiku(system: str, user: str) -> str | None:
-    """Run a one-shot Claude Haiku call and return the trimmed output.
+def _call_one_shot(system: str, user: str) -> str | None:
+    """Run a one-shot prompt via the active backend and return trimmed output.
 
     Returns ``None`` on any failure — the caller is responsible for
     falling back to a deterministic template.
     """
-    from devflow.core.paths import venv_env
+    from devflow.core.backend import ModelTier, get_backend
 
-    cmd = [
-        "claude", "-p", "-",
-        "--model", "haiku",
-        "--output-format", "text",
-    ]
-    if system:
-        cmd.extend(["--system-prompt", system])
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            input=user,
-            capture_output=True,
-            text=True,
-            timeout=_HAIKU_TIMEOUT,
-            cwd=str(Path.cwd()),
-            env=venv_env(Path.cwd()),
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return None
+    backend = get_backend()
+    model = backend.model_name(ModelTier.FAST)
+    return backend.one_shot(
+        system=system,
+        user=user,
+        model=model,
+        timeout=_ONE_SHOT_TIMEOUT,
+    )
 
 
 def _truncate_diff(diff: str, max_lines: int = _MAX_DIFF_LINES) -> str:
@@ -79,7 +67,7 @@ def generate_feature_title(prompt: str) -> str:
 
     Falls back to the first 80 characters of the prompt on failure.
     """
-    result = _call_haiku(_TITLE_SYSTEM, prompt)
+    result = _call_one_shot(_TITLE_SYSTEM, prompt)
     if result:
         # Strip quotes/period the model might add.
         result = result.strip('"\'').rstrip(".")
@@ -141,7 +129,7 @@ def generate_commit_message(feature: Feature, phase: str = "") -> str:
         user_parts.append(f"Diff:\n```\n{_truncate_diff(diff)}\n```")
         user_prompt = "\n\n".join(user_parts)
 
-        result = _call_haiku(_COMMIT_SYSTEM, user_prompt)
+        result = _call_one_shot(_COMMIT_SYSTEM, user_prompt)
         if result:
             # Take only the first line, strip quotes.
             first_line = result.split("\n", 1)[0].strip().strip('"\'')
@@ -187,7 +175,7 @@ def generate_pr_body(feature: Feature, plan: str = "", diff_stat: str = "") -> s
         user_parts.append(f"Diff stat:\n```\n{diff_stat}\n```")
 
     if user_parts:
-        result = _call_haiku(_PR_BODY_SYSTEM, "\n\n".join(user_parts))
+        result = _call_one_shot(_PR_BODY_SYSTEM, "\n\n".join(user_parts))
         if result:
             # Append the devflow footer.
             footer = (

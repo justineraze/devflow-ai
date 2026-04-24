@@ -179,7 +179,7 @@ class TestBuildPrBody:
 
 
 class TestPushAndCreatePr:
-    @patch("devflow.integrations.git.smart_messages._call_haiku", return_value=None)
+    @patch("devflow.integrations.git.smart_messages._call_one_shot", return_value=None)
     @patch("devflow.integrations.git.smart_messages._get_staged_diff", return_value="")
     @patch("devflow.integrations.git.repo.subprocess.run")
     def test_uses_conventional_commit_title(

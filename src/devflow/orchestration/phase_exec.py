@@ -81,12 +81,12 @@ def fail_phase(
 
         # Sync Linear status to "canceled" (best-effort).
         if feature.metadata.linear_issue_id:
-            from devflow.core.workflow import load_state
+            from devflow.core.config import load_config
             from devflow.integrations.linear.sync import sync_single_feature
 
-            state = load_state(base)
-            if state.linear_team_id:
-                sync_single_feature(feature, state.linear_team_id, base)
+            linear_team = load_config(base).linear.team
+            if linear_team:
+                sync_single_feature(feature, linear_team, base)
 
 
 def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:

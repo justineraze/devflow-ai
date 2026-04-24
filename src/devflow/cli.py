@@ -106,11 +106,11 @@ def status(
 # ---------------------------------------------------------------------------
 
 def _resolve_base_branch(override: str | None) -> str:
-    """Resolve base branch: CLI flag > state.json > 'main'."""
+    """Resolve base branch: CLI flag > config.yaml > 'main'."""
     if override:
         return override
-    state = get_state()
-    return state.base_branch
+    from devflow.core.config import load_config
+    return load_config().base_branch
 
 
 @app.command()
@@ -325,36 +325,33 @@ def install(
     result = install_all()
     render_install_report(result)
 
-    # --- init: detect stack + base branch (skip if already initialized) ---
+    # --- init: detect stack + base branch → config.yaml ---
     from pathlib import Path
 
-    from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
+    from devflow.core.config import load_config, save_config
+    from devflow.core.workflow import ensure_devflow_dir
     from devflow.integrations.detect import detect_stack
     from devflow.integrations.git import detect_base_branch
 
     ensure_devflow_dir()
-    state = load_state()
+    config = load_config()
 
-    if not state.stack:
-        stack = detect_stack(Path.cwd())
-        state.stack = stack
-    else:
-        stack = state.stack
+    if not config.stack:
+        config.stack = detect_stack(Path.cwd())
 
-    if state.base_branch == "main":
-        detected = detect_base_branch()
-        state.base_branch = detected
+    if config.base_branch == "main":
+        config.base_branch = detect_base_branch()
 
     if linear_team is not None:
-        state.linear_team_id = linear_team
+        config.linear.team = linear_team
 
-    save_state(state)
+    save_config(config)
 
-    if stack:
-        console.print(f"[green]Stack: {stack}[/green]")
-    console.print(f"[green]Base branch: {state.base_branch}[/green]")
-    if state.linear_team_id:
-        console.print(f"[green]Linear team: {state.linear_team_id}[/green]")
+    if config.stack:
+        console.print(f"[green]Stack: {config.stack}[/green]")
+    console.print(f"[green]Base branch: {config.base_branch}[/green]")
+    if config.linear.team:
+        console.print(f"[green]Linear team: {config.linear.team}[/green]")
 
     # --- doctor ---
     render_header(subtitle="Doctor diagnostic")
@@ -445,28 +442,27 @@ def init_cmd(
     _deprecation_hint("init", "devflow install")
     from pathlib import Path
 
-    from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
+    from devflow.core.config import load_config, save_config
+    from devflow.core.workflow import ensure_devflow_dir
     from devflow.integrations.detect import detect_stack
     from devflow.integrations.git import detect_base_branch
 
     devflow_dir = ensure_devflow_dir()
-    stack = detect_stack(Path.cwd())
-    base_branch = detect_base_branch()
-    state = load_state()
-    state.stack = stack
-    state.base_branch = base_branch
+    config = load_config()
+    config.stack = detect_stack(Path.cwd())
+    config.base_branch = detect_base_branch()
     if linear_team is not None:
-        state.linear_team_id = linear_team
-    save_state(state)
+        config.linear.team = linear_team
+    save_config(config)
 
     console.print(f"[green]Initialized devflow in {devflow_dir}[/green]")
-    if stack:
-        console.print(f"[green]Stack detected: {stack}[/green]")
+    if config.stack:
+        console.print(f"[green]Stack detected: {config.stack}[/green]")
     else:
         console.print("[yellow]No stack detected.[/yellow]")
-    console.print(f"[green]Base branch: {base_branch}[/green]")
-    if state.linear_team_id:
-        console.print(f"[green]Linear team: {state.linear_team_id}[/green]")
+    console.print(f"[green]Base branch: {config.base_branch}[/green]")
+    if config.linear.team:
+        console.print(f"[green]Linear team: {config.linear.team}[/green]")
 
 
 @app.command(name="doctor", deprecated=True, hidden=True)

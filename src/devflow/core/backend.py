@@ -68,6 +68,25 @@ class Backend(Protocol):
         """
         ...
 
+    def one_shot(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        timeout: int,
+    ) -> str | None:
+        """Run a quick one-shot prompt and return the text result.
+
+        Used for lightweight tasks (commit messages, titles, PR bodies)
+        that don't need streaming or tool use.  Returns ``None`` on any
+        failure — callers must provide a deterministic fallback.
+
+        Default implementation returns ``None`` (not abstract) so existing
+        backends that don't override it still satisfy the protocol.
+        """
+        return None
+
     def check_available(self) -> tuple[bool, str]:
         """Verify the backend CLI/API is reachable.
 

@@ -19,8 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from devflow.core.workflow import load_state, save_state
-
 FIXTURE_DIR = Path(__file__).parent.parent / "e2e" / "fixtures" / "mini_python"
 
 
@@ -59,9 +57,8 @@ def mini_python_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.chdir(project)
 
-    state = load_state(project)
-    state.stack = "python"
-    save_state(state, project)
+    from devflow.core.config import DevflowConfig, save_config
+    save_config(DevflowConfig(stack="python"), project)
 
     monkeypatch.setattr(
         "devflow.integrations.git.push_and_create_pr",

@@ -110,8 +110,11 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
     try:
         raw = state_file.read_text()
         state = WorkflowState.model_validate_json(raw)
+        from devflow.core.config import load_config
+
         n_features = len(state.features)
-        stack_info = f", stack={state.stack}" if state.stack else ""
+        config = load_config(base)
+        stack_info = f", stack={config.stack}" if config.stack else ""
         return CheckResult(
             name="init",
             passed=True,

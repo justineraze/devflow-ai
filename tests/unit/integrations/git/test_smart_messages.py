@@ -40,32 +40,32 @@ class TestTruncateDiff:
 
 
 class TestGenerateFeatureTitle:
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_returns_haiku_result(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = "add dark mode toggle"
         result = generate_feature_title("Ajouter le dark mode avec un toggle dans les settings")
         assert result == "add dark mode toggle"
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_strips_quotes_and_period(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = '"add dark mode toggle."'
         result = generate_feature_title("something long")
         assert result == "add dark mode toggle"
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_fallback_on_failure(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = None
         result = generate_feature_title("First line of the prompt\nSecond line")
         assert result == "First line of the prompt"
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_fallback_truncates_to_80(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = None
         long_prompt = "A" * 120
         result = generate_feature_title(long_prompt)
         assert len(result) == 80
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_fallback_when_haiku_returns_too_long(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = "x" * 100  # > 80 chars
         result = generate_feature_title("Short prompt")
@@ -86,7 +86,7 @@ class TestGenerateCommitMessage:
         return Feature(**defaults)
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_returns_haiku_message(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -96,7 +96,7 @@ class TestGenerateCommitMessage:
         assert result == "feat(auth): add login endpoint"
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_fallback_on_haiku_failure(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -112,7 +112,7 @@ class TestGenerateCommitMessage:
         assert result == "feat: add auth — fixing"
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_strips_quotes_from_haiku(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -122,7 +122,7 @@ class TestGenerateCommitMessage:
         assert result == "feat: add auth"
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_rejects_too_long_haiku_result(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -133,7 +133,7 @@ class TestGenerateCommitMessage:
         assert result == "feat: add auth"
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_takes_only_first_line(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -143,7 +143,7 @@ class TestGenerateCommitMessage:
         assert result == "feat: add auth"
 
     @patch("devflow.integrations.git.smart_messages._get_staged_diff")
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_no_phase_suffix_in_fallback(
         self, mock_haiku: MagicMock, mock_diff: MagicMock,
     ) -> None:
@@ -164,14 +164,14 @@ class TestGeneratePrBody:
         defaults.update(kwargs)
         return Feature(**defaults)
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_returns_haiku_body_with_footer(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = "## Summary\n- Added auth\n"
         result = generate_pr_body(self._feature(), plan="some plan", diff_stat="+10 -2")
         assert "## Summary" in result
         assert "devflow-ai" in result
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_fallback_on_failure(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = None
         result = generate_pr_body(self._feature())
@@ -179,7 +179,7 @@ class TestGeneratePrBody:
         assert "## Summary" in result
         assert "Add auth" in result
 
-    @patch("devflow.integrations.git.smart_messages._call_haiku")
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
     def test_sends_plan_and_diff_stat(self, mock_haiku: MagicMock) -> None:
         mock_haiku.return_value = "## Summary\n- Done"
         generate_pr_body(self._feature(), plan="Plan text", diff_stat="+5 files")

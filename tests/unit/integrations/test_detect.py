@@ -75,14 +75,12 @@ class TestDetectStack:
 class TestResolveStack:
     """Tests for resolve_stack — saved state takes precedence over detection."""
 
-    def test_uses_saved_state_when_present(self, tmp_path: Path) -> None:
-        from devflow.core.models import WorkflowState
-        from devflow.core.workflow import save_state
+    def test_uses_saved_config_when_present(self, tmp_path: Path) -> None:
+        from devflow.core.config import DevflowConfig, save_config
         from devflow.integrations.detect import resolve_stack
 
         # Saved stack is "typescript" — but no .ts files exist on disk.
-        state = WorkflowState(stack="typescript")
-        save_state(state, tmp_path)
+        save_config(DevflowConfig(stack="typescript"), tmp_path)
 
         assert resolve_stack(tmp_path) == "typescript"
 

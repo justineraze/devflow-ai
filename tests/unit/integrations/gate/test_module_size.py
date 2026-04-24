@@ -34,7 +34,8 @@ class TestModifiedPyFiles:
     def test_filters_src_py_files(self, mock_run: patch, tmp_path: Path) -> None:
         mock_run.return_value = type("R", (), {
             "returncode": 0,
-            "stdout": "src/devflow/cli.py\nsrc/devflow/core/models.py\nREADME.md\ntests/test_x.py\n",
+            "stdout": "src/devflow/cli.py\nsrc/devflow/core/models.py\n"
+                      "README.md\ntests/test_x.py\n",
         })()
         files = _modified_py_files(tmp_path)
         assert files == ["src/devflow/cli.py", "src/devflow/core/models.py"]

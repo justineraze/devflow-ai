@@ -13,8 +13,9 @@ _MODULE_SIZE_OK = CheckResult(name="module_size", passed=True, message="ok")
 
 def _patch_structural(fn):
     """Decorator to mock the two structural checks alongside secrets."""
-    fn = patch("devflow.integrations.gate.runner.check_module_size", return_value=_MODULE_SIZE_OK)(fn)
-    fn = patch("devflow.integrations.gate.runner.check_complexity", return_value=_COMPLEXITY_OK)(fn)
+    _mod = "devflow.integrations.gate.runner"
+    fn = patch(f"{_mod}.check_module_size", return_value=_MODULE_SIZE_OK)(fn)
+    fn = patch(f"{_mod}.check_complexity", return_value=_COMPLEXITY_OK)(fn)
     return fn
 
 

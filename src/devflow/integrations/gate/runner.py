@@ -10,14 +10,14 @@ from devflow.integrations.gate.checks import _checks_for_stack, _run_command_che
 from devflow.integrations.gate.complexity import check_complexity
 from devflow.integrations.gate.config import load_gate_config
 from devflow.integrations.gate.module_size import check_module_size
-from devflow.integrations.gate.report import GateReport
+from devflow.integrations.gate.report import CheckResult, GateReport
 from devflow.integrations.gate.secrets import scan_secrets
 
 # Default timeouts for custom gate commands (seconds).
 _CUSTOM_TIMEOUTS: dict[str, int] = {"lint": 60, "test": 120}
 
 
-def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> "CheckResult":  # noqa: F821
+def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
     """Run a custom shell command and return a CheckResult."""
     import subprocess
 

@@ -271,18 +271,19 @@ class TestFailPhase:
 
 
 class TestGetPhaseAgent:
+    def _set_stack(self, project_dir: Path, stack: str) -> None:
+        from devflow.core.config import DevflowConfig, save_config
+        config = DevflowConfig(stack=stack)
+        save_config(config, project_dir)
+
     def test_returns_developer_python_for_python_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        state = load_state(project_dir)
-        state.stack = "python"
-        save_state(state, project_dir)
+        self._set_stack(project_dir, "python")
         assert get_phase_agent(feature, "implementing", project_dir) == "developer-python"
 
     def test_returns_developer_typescript_for_ts_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        state = load_state(project_dir)
-        state.stack = "typescript"
-        save_state(state, project_dir)
+        self._set_stack(project_dir, "typescript")
         assert get_phase_agent(feature, "implementing", project_dir) == "developer-typescript"
 
     def test_returns_developer_when_no_stack(self, project_dir: Path) -> None:
@@ -291,22 +292,18 @@ class TestGetPhaseAgent:
 
     def test_non_developer_agent_unchanged_with_stack(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        state = load_state(project_dir)
-        state.stack = "python"
-        save_state(state, project_dir)
+        self._set_stack(project_dir, "python")
         assert get_phase_agent(feature, "planning", project_dir) == "planner"
 
     def test_stack_kwarg_avoids_state_read(self, project_dir: Path) -> None:
-        """Passing stack= directly skips load_state — no state.json needed."""
+        """Passing stack= directly skips load_config — no config.yaml needed."""
         feature = start_build("test", "standard", project_dir)
         result = get_phase_agent(feature, "implementing", stack="python")
         assert result == "developer-python"
 
-    def test_stack_none_falls_back_to_state(self, project_dir: Path) -> None:
+    def test_stack_none_falls_back_to_config(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
-        state = load_state(project_dir)
-        state.stack = "typescript"
-        save_state(state, project_dir)
+        self._set_stack(project_dir, "typescript")
         agent = get_phase_agent(feature, "implementing", project_dir, stack=None)
         assert agent == "developer-typescript"
 

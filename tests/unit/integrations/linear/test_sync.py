@@ -18,6 +18,12 @@ from devflow.integrations.linear.sync import (
 )
 
 
+def _set_linear_team(project_dir: Path, team: str) -> None:
+    """Write a config.yaml with the given Linear team."""
+    from devflow.core.config import DevflowConfig, LinearConfig, save_config
+    save_config(DevflowConfig(linear=LinearConfig(team=team)), project_dir)
+
+
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(tmp_path)
@@ -51,7 +57,7 @@ class TestSyncAllGuards:
 
         result = sync_all(base=project_dir)
         assert len(result.errors) == 1
-        assert "linear_team_id" in result.errors[0]
+        assert "linear team" in result.errors[0].lower()
 
 
 _MOCK_STATES = [
@@ -76,8 +82,9 @@ class TestSyncAllCreates:
     ) -> None:
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
         mock_create.return_value = {"id": "uuid-1", "identifier": "ABC-1"}
+        _set_linear_team(project_dir, "team-1")
 
-        state = WorkflowState(linear_team_id="team-1")
+        state = WorkflowState()
         feat = Feature(
             id="feat-001", description="test feature",
             status=FeatureStatus.IMPLEMENTING, phases=[],
@@ -108,7 +115,8 @@ class TestSyncAllCreates:
     ) -> None:
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
 
-        state = WorkflowState(linear_team_id="team-1")
+        _set_linear_team(project_dir, "team-1")
+        state = WorkflowState()
         feat = Feature(
             id="feat-archived", description="old",
             status=FeatureStatus.DONE, phases=[],
@@ -136,7 +144,8 @@ class TestSyncAllUpdates:
     ) -> None:
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
 
-        state = WorkflowState(linear_team_id="team-1")
+        _set_linear_team(project_dir, "team-1")
+        state = WorkflowState()
         feat = Feature(
             id="feat-002", description="existing",
             status=FeatureStatus.DONE, phases=[],
@@ -172,7 +181,8 @@ class TestSyncAllErrorHandling:
             {"id": "uuid-2", "identifier": "ABC-2"},
         ]
 
-        state = WorkflowState(linear_team_id="team-1")
+        _set_linear_team(project_dir, "team-1")
+        state = WorkflowState()
         for fid in ("feat-a", "feat-b"):
             feat = Feature(
                 id=fid, description=fid,
