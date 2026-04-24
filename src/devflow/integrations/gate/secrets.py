@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from devflow.integrations.gate.report import CheckResult
+from devflow.core.gate_report import CheckResult
 
 if TYPE_CHECKING:
     from devflow.integrations.gate.context import GateContext
@@ -44,7 +44,13 @@ def _should_skip(path: Path, root: Path, ctx: GateContext | None) -> bool:
         return True
     if any(skip in path.parts for skip in SKIP_DIRS):
         return True
-    return bool(ctx and ctx.is_excluded(path.relative_to(root)))
+    if ctx is None:
+        return False
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    return ctx.is_excluded(rel)
 
 
 def _scan_file(path: Path, root: Path) -> list[str]:

@@ -18,6 +18,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from devflow.core.paths import atomic_write_text
+from devflow.core.workflow import ensure_devflow_dir
+
 log = logging.getLogger(__name__)
 
 BACKEND_DEFAULT = "claude"
@@ -186,9 +189,6 @@ def save_config(config: DevflowConfig, base: Path | None = None) -> Path:
 
     Returns the path to the config file.
     """
-    from devflow.core.paths import atomic_write_text
-    from devflow.core.workflow import ensure_devflow_dir
-
     ensure_devflow_dir(base)
     path = _config_path(base)
 

@@ -150,7 +150,7 @@ class TestScoreViaLlm:
     )
 
     def test_valid_json_returns_score(self) -> None:
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = self._VALID_JSON
@@ -162,7 +162,7 @@ class TestScoreViaLlm:
         assert result.scope == 3
 
     def test_invalid_json_returns_none(self) -> None:
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = "not json at all"
@@ -170,7 +170,7 @@ class TestScoreViaLlm:
         assert result is None
 
     def test_backend_returns_none(self) -> None:
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = None
@@ -178,7 +178,7 @@ class TestScoreViaLlm:
         assert result is None
 
     def test_backend_exception_returns_none(self) -> None:
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.side_effect = TimeoutError("too slow")
@@ -186,7 +186,7 @@ class TestScoreViaLlm:
         assert result is None
 
     def test_missing_key_returns_none(self) -> None:
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = '{"files_touched": 2}'
@@ -198,7 +198,7 @@ class TestScoreViaLlm:
             '{"files_touched": 5, "integrations": -1,'
             ' "security": 0, "scope": 3}'
         )
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = oob_json
@@ -213,7 +213,7 @@ class TestScoreViaLlm:
             ' "security": 0, "scope": 1}'
         )
         long_desc = "x" * 5000
-        with patch("devflow.core.backend.get_backend") as mock_be:
+        with patch("devflow.integrations.complexity.get_backend") as mock_be:
             backend = mock_be.return_value
             backend.model_name.return_value = "haiku"
             backend.one_shot.return_value = small_json

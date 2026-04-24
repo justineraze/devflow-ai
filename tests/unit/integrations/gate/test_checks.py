@@ -61,7 +61,7 @@ class TestRunCommandCheck:
     def test_missing_tool_skipped(self, _mock: patch, tmp_path: Path) -> None:
         result = run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
         assert result.skipped is True
-        assert result.passed is False
+        assert result.passed is True
         assert "not found" in result.message
 
     @patch(

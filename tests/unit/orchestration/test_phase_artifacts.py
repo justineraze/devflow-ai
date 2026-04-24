@@ -1,7 +1,7 @@
 """Tests for collect_phase_result and _parse_log_numstat."""
 
 from devflow.core.metrics import PhaseMetrics, PhaseResult
-from devflow.integrations.git.repo import _parse_log_numstat, collect_phase_result
+from devflow.orchestration.phase_artifacts import _parse_log_numstat, collect_phase_result
 
 
 class TestParseLogNumstat:

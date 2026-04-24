@@ -9,7 +9,7 @@ from there directly (not from this facade) to avoid circular imports.
 
 from __future__ import annotations
 
-from devflow.integrations.gate.checks import STACK_CHECKS
+from devflow.integrations.gate.checks import STACK_CHECKS, checks_for_stack, run_command_check
 from devflow.integrations.gate.complexity import check_complexity
 from devflow.integrations.gate.config import load_gate_config
 from devflow.integrations.gate.context import GateContext, build_context
@@ -24,20 +24,22 @@ from devflow.integrations.gate.secrets import (
 )
 
 __all__ = [
+    "CheckDef",
     "CheckResult",
     "GateContext",
     "GateReport",
-    "build_context",
-    "load_gate_config",
-    "CheckDef",
     "ParseOutput",
-    "STACK_CHECKS",
     "SECRET_PATTERNS",
-    "SKIP_EXTENSIONS",
     "SKIP_DIRS",
+    "SKIP_EXTENSIONS",
+    "STACK_CHECKS",
+    "build_context",
     "check_complexity",
     "check_module_size",
-    "scan_secrets",
+    "checks_for_stack",
+    "load_gate_config",
+    "run_command_check",
     "run_gate",
     "run_gate_phase",
+    "scan_secrets",
 ]

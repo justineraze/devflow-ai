@@ -10,11 +10,10 @@ from rich.table import Table
 from rich.text import Text
 
 from devflow.core.console import console
+from devflow.core.epics import epic_progress
 from devflow.core.formatting import format_cost, format_duration, format_tokens
 from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
-
-_format_build_duration = format_duration
 
 
 @dataclass
@@ -60,8 +59,6 @@ def render_header(title: str = "devflow-ai", subtitle: str = "") -> None:
 
 def _epic_status_cell(state: WorkflowState, epic_id: str) -> Text:
     """Build a status cell showing epic progress (e.g. '3/5 done')."""
-    from devflow.core.epics import epic_progress
-
     progress = epic_progress(state, epic_id)
     if progress.all_done:
         return Text("done", style="green bold")
@@ -306,7 +303,7 @@ def _render_last_build(record: BuildMetrics) -> None:
         f"[bold]{record.feature_id}[/bold]  "
         f"[{success_style}]{success_icon}[/{success_style}]  "
         f"[yellow]{format_cost(record.cost_usd)}[/yellow]  ·  "
-        f"{_format_build_duration(record.duration_s)}  ·  "
+        f"{format_duration(record.duration_s)}  ·  "
         f"[dim]{record.timestamp[:10]}[/dim]"
     )
     console.print(Panel(header, title="Last build", border_style="dim", padding=(0, 1)))
@@ -345,7 +342,7 @@ def _render_last_build(record: BuildMetrics) -> None:
             format_tokens(p.input_tokens + p.cache_creation + p.cache_read),
             cache_pct,
             changes,
-            _format_build_duration(p.duration_s),
+            format_duration(p.duration_s),
             p_icon,
             style=row_style,
         )
@@ -410,7 +407,7 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
         table.add_row(
             name,
             format_cost(avg_cost),
-            _format_build_duration(avg_duration),
+            format_duration(avg_duration),
             format_tokens(avg_tokens),
             cache_cell,
             str(a.runs),
@@ -427,13 +424,22 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
     table.add_row(
         "[dim]Total avg[/dim]",
         Text(format_cost(total_avg_cost), style="yellow"),
-        _format_build_duration(total_avg_duration),
+        format_duration(total_avg_duration),
         format_tokens(total_avg_tokens),
         total_cache_cell,
         "[dim]—[/dim]",
     )
 
     console.print(table)
+
+
+def _aggregate_model_costs(record: BuildMetrics) -> dict[str, float]:
+    """Sum cost per model tier across all phases of a single build record."""
+    model_costs: dict[str, float] = {}
+    for p in record.phases:
+        tier = p.model or "unknown"
+        model_costs[tier] = model_costs.get(tier, 0.0) + p.cost_usd
+    return model_costs
 
 
 def _render_build_history(records: list[BuildMetrics]) -> None:
@@ -453,7 +459,7 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
         status_icon = Text("✓", style="green") if r.success else Text("✗", style="red")
         cache_pct = f"{int(r.cache_hit_rate * 100)}%"
         cache_style = "green" if r.cache_hit_rate > 0.5 else "yellow"
-        duration = _format_build_duration(r.duration_s)
+        duration = format_duration(r.duration_s)
 
         if r.success:
             gate = "✓" if r.gate_passed_first_try else f"retry ×{r.gate_retries}"
@@ -462,11 +468,7 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
             gate = r.failed_phase or "—"
             gate_style = "red"
 
-        # Aggregate cost per model tier.
-        model_costs: dict[str, float] = {}
-        for p in r.phases:
-            tier = p.model or "unknown"
-            model_costs[tier] = model_costs.get(tier, 0.0) + p.cost_usd
+        model_costs = _aggregate_model_costs(r)
         if model_costs:
             parts = []
             for tier, cost in sorted(model_costs.items(), key=lambda x: -x[1]):

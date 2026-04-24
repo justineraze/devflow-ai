@@ -112,6 +112,20 @@ def no_github(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def callbacks_with_ui_confirm() -> object:
+    """BuildCallbacks pre-wired with the real plan-confirmation renderer.
+
+    Use this fixture in e2e tests that exercise the plan-confirmation flow
+    (acceptance, rejection, resume).  Pass the result via
+    ``execute_build_loop(..., callbacks=callbacks_with_ui_confirm)``.
+    """
+    from devflow.orchestration.events import BuildCallbacks
+    from devflow.ui.rendering import render_plan_confirmation
+
+    return BuildCallbacks(confirm_plan=render_plan_confirmation)
+
+
+@pytest.fixture
 def confirm_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Auto-confirm the plan step (simulates user pressing Enter/y)."""
     monkeypatch.setattr(console, "input", lambda _: "y")

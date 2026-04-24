@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import sys
+
 from rich.console import Group
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
@@ -19,10 +23,15 @@ from devflow.core.metrics import (
 )
 from devflow.core.models import Feature, SyncResult
 
-# Re-export for backwards compatibility (tests, external consumers).
-PhaseMetricSnapshot = PhaseSnapshot
+# Backward-compat alias used by tests; prefer importing PhaseSnapshot from
+# devflow.core.metrics in new code.
+PhaseMetricSnapshot = PhaseSnapshot  # noqa: F401
 
-_fmt_duration = format_duration
+
+def _plural(n: int, word: str) -> str:
+    """Return ``word`` with an 's' appended when ``n`` is not 1."""
+    return f"{word}{'s' if n != 1 else ''}"
+
 
 STACK_ICONS: dict[str, str] = {
     "python": "🐍",
@@ -120,7 +129,7 @@ def render_phase_success(
     chip = Text("  ")
     chip.append("✓ ", style="green bold")
     chip.append(phase_name, style="bold")
-    chip.append(f"   {_fmt_duration(elapsed_s)}", style="dim")
+    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
 
     if metrics.tool_count:
         chip.append(f"   {metrics.tool_count} tools", style="dim")
@@ -144,7 +153,7 @@ def render_phase_failure(phase_name: str, elapsed_s: float, message: str) -> Non
     chip = Text("  ")
     chip.append("✗ ", style="red bold")
     chip.append(phase_name, style="bold")
-    chip.append(f"   {_fmt_duration(elapsed_s)}", style="dim")
+    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
     console.print(chip)
     for line in message.split("\n")[:5]:
         if line.strip():
@@ -157,7 +166,7 @@ def render_phase_auto_retry(phase_name: str, elapsed_s: float, message: str) -> 
     chip = Text("  ")
     chip.append("↻ ", style="yellow bold")
     chip.append(f"{phase_name} failed — auto-retrying via fixing", style="yellow")
-    chip.append(f"   {_fmt_duration(elapsed_s)}", style="dim")
+    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
     console.print(chip)
     for line in message.split("\n")[:8]:
         if line.strip():
@@ -187,22 +196,26 @@ def render_phase_commits(phase_result: PhaseResult) -> None:
         console.print(line)
         stat = Text("  ")
         stat.append(
-            f"  {len(c.files)} file{'s' if len(c.files) != 1 else ''} changed",
+            f"  {len(c.files)} {_plural(len(c.files), 'file')} changed",
             style="dim",
         )
         if c.insertions:
-            ins_s = "s" if c.insertions != 1 else ""
-            stat.append(f", {c.insertions} insertion{ins_s}(+)", style="green dim")
+            stat.append(
+                f", {c.insertions} {_plural(c.insertions, 'insertion')}(+)",
+                style="green dim",
+            )
         if c.deletions:
-            del_s = "s" if c.deletions != 1 else ""
-            stat.append(f", {c.deletions} deletion{del_s}(-)", style="red dim")
+            stat.append(
+                f", {c.deletions} {_plural(c.deletions, 'deletion')}(-)",
+                style="red dim",
+            )
         console.print(stat)
     elif len(commits) > 1:
         for c in commits:
             line = Text("  ")
             line.append(f"  {c.sha} ", style="cyan dim")
             line.append(c.message, style="dim")
-            detail = f" ({len(c.files)} file{'s' if len(c.files) != 1 else ''}, +{c.insertions}"
+            detail = f" ({len(c.files)} {_plural(len(c.files), 'file')}, +{c.insertions}"
             if c.deletions:
                 detail += f", -{c.deletions}"
             detail += ")"
@@ -212,18 +225,64 @@ def render_phase_commits(phase_result: PhaseResult) -> None:
         # Total line.
         total = Text("  ")
         total.append(
-            f"  Total: {total_files} file{'s' if total_files != 1 else ''} changed",
+            f"  Total: {total_files} {_plural(total_files, 'file')} changed",
             style="dim bold",
         )
         if total_ins:
-            ins_s = "s" if total_ins != 1 else ""
-            total.append(f", {total_ins} insertion{ins_s}(+)", style="green dim")
+            total.append(
+                f", {total_ins} {_plural(total_ins, 'insertion')}(+)",
+                style="green dim",
+            )
         if total_del:
-            del_s = "s" if total_del != 1 else ""
-            total.append(f", {total_del} deletion{del_s}(-)", style="red dim")
+            total.append(
+                f", {total_del} {_plural(total_del, 'deletion')}(-)",
+                style="red dim",
+            )
         console.print(total)
 
     console.print()
+
+
+def _render_cost_by_model(snapshots: list[PhaseSnapshot]) -> Text | None:
+    """Build the cost-by-model breakdown line for the summary panel.
+
+    Returns ``None`` when no per-phase cost data is available.
+    """
+    model_costs: dict[str, float] = {}
+    for snap in snapshots:
+        tier = snap.model or "unknown"
+        model_costs[tier] = model_costs.get(tier, 0.0) + snap.cost_usd
+    if not model_costs:
+        return None
+
+    cost_parts = Text()
+    for i, (tier, cost) in enumerate(sorted(model_costs.items(), key=lambda x: -x[1])):
+        if i > 0:
+            cost_parts.append(", ", style="dim")
+        style = MODEL_STYLES.get(tier, "white bold")
+        cost_parts.append(tier, style=style)
+        cost_parts.append(f" {format_cost(cost)}", style="dim")
+    return cost_parts
+
+
+def _render_pr_or_branch(
+    pr_url: str | None, branch: str, feature: Feature,
+) -> Text:
+    """Build the trailing PR-link line, or a branch hint when no PR exists."""
+    if pr_url:
+        link = Text()
+        link.append("🔗 ", style="green")
+        link.append(pr_url, style="blue underline")
+        if feature.metadata.linear_issue_key:
+            link.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
+        return link
+
+    hint = Text()
+    hint.append("branch: ", style="dim")
+    hint.append(branch, style="dim")
+    if feature.metadata.linear_issue_key:
+        hint.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
+    return hint
 
 
 def render_build_summary(
@@ -240,7 +299,7 @@ def render_build_summary(
     grid.add_column(justify="right", style="dim")
     grid.add_column()
 
-    grid.add_row("Duration", _fmt_duration(totals.duration_s))
+    grid.add_row("Duration", format_duration(totals.duration_s))
     grid.add_row("Cost", Text(format_cost(totals.cost_usd), style="yellow bold"))
     grid.add_row("Tools", str(totals.tool_count))
 
@@ -259,19 +318,8 @@ def render_build_summary(
         )
         grid.add_row("Cache", cache_text)
 
-    # Cost breakdown by model tier.
-    model_costs: dict[str, float] = {}
-    for snap in totals.phase_snapshots:
-        tier = snap.model or "unknown"
-        model_costs[tier] = model_costs.get(tier, 0.0) + snap.cost_usd
-    if model_costs:
-        cost_parts = Text()
-        for i, (tier, cost) in enumerate(sorted(model_costs.items(), key=lambda x: -x[1])):
-            if i > 0:
-                cost_parts.append(", ", style="dim")
-            style = MODEL_STYLES.get(tier, "white bold")
-            cost_parts.append(tier, style=style)
-            cost_parts.append(f" {format_cost(cost)}", style="dim")
+    cost_parts = _render_cost_by_model(totals.phase_snapshots)
+    if cost_parts is not None:
         grid.add_row("Cost by model", cost_parts)
 
     rows: list[Text | Table] = [grid, Text()]
@@ -284,22 +332,8 @@ def render_build_summary(
     rows.append(Text())
     rows.append(phase_dots)
 
-    if pr_url:
-        rows.append(Text())
-        link = Text()
-        link.append("🔗 ", style="green")
-        link.append(pr_url, style="blue underline")
-        if feature.metadata.linear_issue_key:
-            link.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
-        rows.append(link)
-    else:
-        rows.append(Text())
-        hint = Text()
-        hint.append("branch: ", style="dim")
-        hint.append(branch, style="dim")
-        if feature.metadata.linear_issue_key:
-            hint.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
-        rows.append(hint)
+    rows.append(Text())
+    rows.append(_render_pr_or_branch(pr_url, branch, feature))
 
     console.print()
     console.print(Panel(
@@ -313,6 +347,7 @@ def render_build_summary(
 def _budget_row(
     label: str, bar: Text, value: str, of_value: str, pct: str,
 ) -> Text:
+    """Compose one cost-budget row: label, progress bar, value, target, and percent."""
     row = Text()
     row.append(label, style="dim")
     row.append_text(bar)
@@ -334,7 +369,7 @@ def _render_phase_timeline(feature: Feature, totals: BuildTotals) -> Table:
         dot = Text(f"● {phase.name}", style=color)
         elapsed = totals.phase_durations.get(phase.name)
         label = Text(
-            _fmt_duration(elapsed) if elapsed else "—",
+            format_duration(elapsed) if elapsed else "—",
             style="dim",
         )
         dots.append(dot)
@@ -395,3 +430,46 @@ def render_sync_summary(result: SyncResult) -> None:
         border_style="yellow" if result.dry_run else "green",
         padding=(1, 2),
     ))
+
+
+def _flush_stdin_buffer() -> None:
+    """Drop any buffered keystrokes accumulated during the previous phase.
+
+    POSIX-only; silently no-ops on Windows or non-tty environments.
+    """
+    try:
+        import termios
+    except ImportError:  # pragma: no cover - Windows fallback
+        return
+    with contextlib.suppress(termios.error, ValueError, OSError):
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
+
+def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool) -> bool:
+    """Display the plan and prompt for confirmation. Returns True to proceed."""
+    console.print()
+    console.print(Panel(
+        Markdown(plan_output),
+        title="Plan proposé",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
+    console.print()
+
+    _flush_stdin_buffer()
+
+    confirm = console.input(
+        "[bold]Lancer l'implémentation ? [Y/n] [/bold]"
+    ).strip().lower()
+    if confirm and confirm not in ("y", "yes", "o", "oui"):
+        console.print()
+        console.print("[yellow]Build en pause.[/yellow]")
+        console.print(f"[dim]Le plan est sauvegardé dans {feature_id}.[/dim]")
+        if create_pr:
+            console.print()
+            console.print("[bold]Reprendre avec :[/bold]")
+            console.print(
+                f'  devflow build "ton feedback ici" --resume {feature_id}'
+            )
+        return False
+    return True

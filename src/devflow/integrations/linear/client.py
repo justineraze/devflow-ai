@@ -25,7 +25,7 @@ class LinearError(Exception):
     """Raised on Linear API errors or missing configuration."""
 
 
-def _api_key() -> str | None:
+def _api_key(base: Path | None = None) -> str | None:
     """Resolve the Linear API key.
 
     Lookup order:
@@ -37,7 +37,8 @@ def _api_key() -> str | None:
     if from_env:
         return from_env.strip()
 
-    key_file = Path.cwd() / ".devflow" / "linear.key"
+    root = base or Path.cwd()
+    key_file = root / ".devflow" / "linear.key"
     if key_file.is_file():
         content = key_file.read_text().strip()
         if content:
@@ -79,8 +80,9 @@ def _request(query: str, variables: dict[str, Any] | None = None) -> dict[str, A
     except urllib.error.URLError as exc:
         raise LinearError(f"Linear API unreachable: {exc.reason}") from exc
 
-    if "errors" in data:
-        msg = data["errors"][0].get("message", str(data["errors"]))
+    errors = data.get("errors", [])
+    if errors:
+        msg = errors[0].get("message", "Unknown Linear API error")
         raise LinearError(f"Linear GraphQL error: {msg}")
 
     return data.get("data", {})

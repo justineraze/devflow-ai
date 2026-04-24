@@ -8,7 +8,6 @@ import pytest
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import ComplexityScore
 from devflow.core.workflow import load_state
-from devflow.orchestration.build import execute_do_loop
 from devflow.orchestration.lifecycle import start_do
 
 _PHASE_OK = (True, "done", PhaseMetrics())
@@ -58,27 +57,6 @@ class TestStartDo:
         assert len(feature.phases) == 2
         assert feature.phases[0].name == "implementing"
         assert feature.phases[1].name == "gate"
-
-
-# ---------------------------------------------------------------------------
-# execute_do_loop — delegates to execute_build_loop(create_pr=False)
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteDoLoopDelegation:
-    """execute_do_loop passes create_pr=False to execute_build_loop."""
-
-    @patch("devflow.orchestration.build.execute_build_loop", return_value=True)
-    def test_delegates_with_create_pr_false(
-        self, mock_build: MagicMock, project_dir: Path,
-    ) -> None:
-        feature = start_do("task", workflow_name="quick", base=project_dir)
-        result = execute_do_loop(feature, base=project_dir)
-
-        assert result is True
-        mock_build.assert_called_once_with(
-            feature, base=project_dir, verbose=False, create_pr=False, callbacks=None,
-        )
 
 
 # ---------------------------------------------------------------------------

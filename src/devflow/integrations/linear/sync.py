@@ -18,9 +18,11 @@ Status mapping (devflow → Linear workflow state *type*):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from devflow.core.models import Feature, FeatureStatus
+from devflow.core.config import load_config
+from devflow.core.models import Feature, FeatureStatus, WorkflowState
 from devflow.core.workflow import load_state, save_state
 from devflow.integrations.linear.client import (
     LinearError,
@@ -30,7 +32,7 @@ from devflow.integrations.linear.client import (
     update_issue_state,
 )
 
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 # Map devflow FeatureStatus → Linear workflow state type.
 _STATUS_TO_LINEAR_TYPE: dict[FeatureStatus, str] = {
@@ -47,14 +49,14 @@ _STATUS_TO_LINEAR_TYPE: dict[FeatureStatus, str] = {
 }
 
 
+@dataclass
 class LinearSyncResult:
     """Accumulates sync outcomes for reporting."""
 
-    def __init__(self) -> None:
-        self.created: list[str] = []
-        self.updated: list[str] = []
-        self.errors: list[str] = []
-        self.skipped: int = 0
+    created: list[str] = field(default_factory=list)
+    updated: list[str] = field(default_factory=list)
+    skipped: int = 0
+    errors: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -66,7 +68,7 @@ def _resolve_state_id(
 ) -> str | None:
     """Find the Linear workflow state ID for a given type (backlog, started, etc.).
 
-    Caches the state list per team to avoid redundant API calls.
+    Uses caller-provided cache to avoid redundant API calls in the same sync run.
     """
     if _cache is None:
         _cache = {}
@@ -111,7 +113,7 @@ def sync_feature_to_linear(
     # Update existing issue state.
     state_id = _resolve_state_id(team_id, target_type, state_cache)
     if state_id is None:
-        log.warning(
+        _log.warning(
             "No Linear workflow state of type %r for team %s — skipping update",
             target_type, team_id,
         )
@@ -136,7 +138,7 @@ def sync_single_feature(
         state_cache: dict[str, dict[str, str]] = {}
         sync_feature_to_linear(feature, team_id, state_cache)
     except LinearError as exc:
-        log.warning("Linear sync failed for %s: %s", feature.id, exc)
+        _log.warning("Linear sync failed for %s: %s", feature.id, exc)
 
 
 def create_issue_for_feature(
@@ -161,54 +163,57 @@ def create_issue_for_feature(
         feature.metadata.linear_issue_key = issue.get("identifier")
         return feature.metadata.linear_issue_key
     except LinearError as exc:
-        log.warning("Linear issue creation failed for %s: %s", feature.id, exc)
+        _log.warning("Linear issue creation failed for %s: %s", feature.id, exc)
         return None
 
 
-def sync_all(base: Path | None = None) -> LinearSyncResult:
-    """Sync all active features to Linear.
+def _sync_epics(
+    state: WorkflowState,
+    team: str,
+    base: Path | None,
+    state_cache: dict[str, dict[str, str]],
+    _log: logging.Logger,
+) -> tuple[list[str], list[str], list[str]]:
+    """Sync epics first so children can reference their Linear IDs.
 
-    Skips features that are archived. Creates issues for features
-    without a Linear ID, updates state for features that already have one.
-
-    Returns a LinearSyncResult with counts of created/updated/errors.
+    Returns ``(created, updated, errors)``.
     """
-    result = LinearSyncResult()
+    created: list[str] = []
+    updated: list[str] = []
+    errors: list[str] = []
 
-    if not is_configured():
-        result.errors.append("LINEAR_API_KEY not set")
-        return result
-
-    from devflow.core.config import load_config
-
-    config = load_config(base)
-    if not config.linear.team:
-        result.errors.append(
-            "No linear team configured. Run: devflow install --linear-team <ID>"
-        )
-        return result
-
-    state = load_state(base)
-    team_id = config.linear.team
-    state_cache: dict[str, dict[str, str]] = {}
-
-    # First pass: sync epics (so we have their Linear IDs for children).
     for feature in state.features.values():
         if feature.metadata.archived:
-            result.skipped += 1
             continue
         if not state.is_epic(feature.id):
             continue
         try:
-            action = sync_feature_to_linear(feature, team_id, state_cache)
+            action = sync_feature_to_linear(feature, team, state_cache)
             if action == "created":
-                result.created.append(feature.id)
+                created.append(feature.id)
             elif action == "updated":
-                result.updated.append(feature.id)
+                updated.append(feature.id)
         except LinearError as exc:
-            result.errors.append(f"{feature.id}: {exc}")
+            errors.append(f"{feature.id}: {exc}")
 
-    # Second pass: sync regular features and sub-features.
+    return created, updated, errors
+
+
+def _sync_features(
+    state: WorkflowState,
+    team: str,
+    base: Path | None,
+    state_cache: dict[str, dict[str, str]],
+    _log: logging.Logger,
+) -> tuple[list[str], list[str], list[str]]:
+    """Sync non-epic features (regular and sub-features).
+
+    Returns ``(created, updated, errors)``.
+    """
+    created: list[str] = []
+    updated: list[str] = []
+    errors: list[str] = []
+
     for feature in state.features.values():
         if feature.metadata.archived:
             continue
@@ -223,15 +228,53 @@ def sync_all(base: Path | None = None) -> LinearSyncResult:
 
         try:
             action = sync_feature_to_linear(
-                feature, team_id, state_cache,
+                feature, team, state_cache,
                 parent_linear_id=parent_linear_id,
             )
             if action == "created":
-                result.created.append(feature.id)
+                created.append(feature.id)
             elif action == "updated":
-                result.updated.append(feature.id)
+                updated.append(feature.id)
         except LinearError as exc:
-            result.errors.append(f"{feature.id}: {exc}")
+            errors.append(f"{feature.id}: {exc}")
+
+    return created, updated, errors
+
+
+def sync_all(base: Path | None = None) -> LinearSyncResult:
+    """Sync all active features to Linear.
+
+    Skips features that are archived. Creates issues for features
+    without a Linear ID, updates state for features that already have one.
+
+    Returns a LinearSyncResult with counts of created/updated/errors.
+    """
+    if not is_configured():
+        return LinearSyncResult(errors=["LINEAR_API_KEY not set"])
+
+    config = load_config(base)
+    if not config.linear.team:
+        return LinearSyncResult(errors=[
+            "No linear team configured. Run: devflow install --linear-team <ID>"
+        ])
+
+    state = load_state(base)
+    team_id = config.linear.team
+    state_cache: dict[str, dict[str, str]] = {}
+
+    epic_created, epic_updated, epic_errors = _sync_epics(
+        state, team_id, base, state_cache, _log,
+    )
+    feat_created, feat_updated, feat_errors = _sync_features(
+        state, team_id, base, state_cache, _log,
+    )
+
+    skipped = sum(1 for f in state.features.values() if f.metadata.archived)
 
     save_state(state, base)
-    return result
+    return LinearSyncResult(
+        created=epic_created + feat_created,
+        updated=epic_updated + feat_updated,
+        skipped=skipped,
+        errors=epic_errors + feat_errors,
+    )

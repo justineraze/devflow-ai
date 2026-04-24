@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from devflow.core.config import load_config
+
 # Extensions mapped to language identifiers.
-EXTENSION_MAP: dict[str, str] = {
+_EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
     ".ts": "typescript",
     ".tsx": "typescript",
@@ -16,7 +18,7 @@ EXTENSION_MAP: dict[str, str] = {
 }
 
 # Directories to skip during scanning.
-IGNORED_DIRS: set[str] = {".git", "node_modules", "__pycache__", ".venv", ".tox", ".mypy_cache"}
+_IGNORED_DIRS: set[str] = {".git", "node_modules", "__pycache__", ".venv", ".tox", ".mypy_cache"}
 
 
 def detect_stack(path: Path) -> str | None:
@@ -32,7 +34,7 @@ def detect_stack(path: Path) -> str | None:
     counts: Counter[str] = Counter()
 
     for item in walk_files(path):
-        lang = EXTENSION_MAP.get(item.suffix)
+        lang = _EXTENSION_MAP.get(item.suffix)
         if lang:
             counts[lang] += 1
 
@@ -49,8 +51,6 @@ def resolve_stack(base: Path | None = None) -> str | None:
     runs `detect_stack()` on the current directory. Returns None when
     nothing can be determined.
     """
-    from devflow.core.config import load_config
-
     root = base or Path.cwd()
     saved = load_config(base).stack
     if saved:
@@ -64,7 +64,7 @@ def walk_files(root: Path) -> list[Path]:
     try:
         for entry in root.iterdir():
             if entry.is_dir():
-                if entry.name in IGNORED_DIRS:
+                if entry.name in _IGNORED_DIRS:
                     continue
                 files.extend(walk_files(entry))
             elif entry.is_file():

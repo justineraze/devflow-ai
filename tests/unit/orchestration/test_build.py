@@ -319,7 +319,8 @@ class TestFinalizeBuildCacheWarning:
 
         from rich.console import Console
 
-        from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
+        from devflow.core.history import BuildMetrics, append_build_metrics
+        from devflow.core.metrics import PhaseSnapshot
         from devflow.orchestration.build import _finalize_build
         from devflow.orchestration.events import BuildCallbacks
         from devflow.ui.rendering import BuildTotals
@@ -369,7 +370,8 @@ class TestFinalizeBuildCacheWarning:
 
         from rich.console import Console
 
-        from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
+        from devflow.core.history import BuildMetrics, append_build_metrics
+        from devflow.core.metrics import PhaseSnapshot
         from devflow.orchestration.build import _finalize_build
         from devflow.orchestration.events import BuildCallbacks
         from devflow.ui.rendering import BuildTotals

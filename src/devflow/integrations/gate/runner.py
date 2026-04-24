@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from devflow.core.gate_report import CheckResult, GateReport
@@ -51,7 +51,7 @@ def _submit_custom_commands(
     pool: ThreadPoolExecutor,
     config: dict[str, str],
     cwd: Path,
-) -> list[object]:
+) -> list[Future[CheckResult]]:
     """Submit custom gate checks to the thread pool."""
     return [
         pool.submit(_run_custom_check, name, cmd, cwd)
@@ -63,7 +63,7 @@ def _submit_stack_commands(
     pool: ThreadPoolExecutor,
     stack: str | None,
     cwd: Path,
-) -> list[object]:
+) -> list[Future[CheckResult]]:
     """Submit stack-specific gate checks to the thread pool."""
     checks = checks_for_stack(stack)
     return [
@@ -121,6 +121,7 @@ def run_gate_phase(
 
     Returns ``(passed, summary_text, metrics)``.
     """
+    # Lazy: keep run_gate() usable without artifact persistence
     from devflow.core.artifacts import write_artifact
 
     ctx = build_context(mode="build", base_sha=base_sha, base=base)

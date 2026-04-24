@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from devflow.core.models import Feature, FeatureStatus, WorkflowState, generate_feature_id
-from devflow.core.workflow import load_state, save_state
+from devflow.core.workflow import create_feature, load_state, save_state
 
 
 @dataclass
@@ -72,8 +72,6 @@ def create_epic(
 
     Returns ``(epic, sub_features)``.
     """
-    from devflow.core.workflow import create_feature
-
     state = load_state(base)
 
     epic_id = generate_feature_id(description)
@@ -103,8 +101,6 @@ def add_sub_feature(
     base: Path | None = None,
 ) -> Feature:
     """Add a sub-feature to an existing epic."""
-    from devflow.core.workflow import create_feature
-
     state = load_state(base)
     epic = state.get_feature(epic_id)
     if epic is None:

@@ -55,12 +55,15 @@ class TestStandardWorkflow:
         mini_python: Path,
         mock_claude: None,
         no_github: None,
+        callbacks_with_ui_confirm: object,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(console, "input", lambda _: "n")
 
         feature = start_build("add subtract function", "standard", mini_python)
-        result = execute_build_loop(feature, base=mini_python)
+        result = execute_build_loop(
+            feature, base=mini_python, callbacks=callbacks_with_ui_confirm,  # type: ignore[arg-type]
+        )
 
         assert result is False
 
@@ -69,12 +72,15 @@ class TestStandardWorkflow:
         mini_python: Path,
         mock_claude: None,
         no_github: None,
+        callbacks_with_ui_confirm: object,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(console, "input", lambda _: "n")
 
         feature = start_build("add subtract function", "standard", mini_python)
-        execute_build_loop(feature, base=mini_python)
+        execute_build_loop(
+            feature, base=mini_python, callbacks=callbacks_with_ui_confirm,  # type: ignore[arg-type]
+        )
 
         state = load_state(mini_python)
         f = state.get_feature(feature.id)
@@ -86,7 +92,7 @@ class TestStandardWorkflow:
         mini_python: Path,
         mock_claude: None,
         no_github: None,
-        confirm_plan: None,
+        callbacks_with_ui_confirm: object,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Reject plan → resume with feedback → planning reruns → feature completes."""
@@ -95,7 +101,9 @@ class TestStandardWorkflow:
         # First build: reject the plan.
         monkeypatch.setattr(console, "input", lambda _: "n")
         feature = start_build("add subtract function", "standard", mini_python)
-        execute_build_loop(feature, base=mini_python)
+        execute_build_loop(
+            feature, base=mini_python, callbacks=callbacks_with_ui_confirm,  # type: ignore[arg-type]
+        )
 
         # Resume with feedback: planning will rerun (mock returns same output).
         # Switch confirm_plan back on.
@@ -103,7 +111,10 @@ class TestStandardWorkflow:
         resumed = resume_build(feature.id, mini_python)
         assert resumed is not None
 
-        result = execute_build_loop(resumed, feedback="please add tests too", base=mini_python)
+        result = execute_build_loop(
+            resumed, feedback="please add tests too", base=mini_python,
+            callbacks=callbacks_with_ui_confirm,  # type: ignore[arg-type]
+        )
         assert result is True
 
         state = load_state(mini_python)

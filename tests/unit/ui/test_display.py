@@ -5,7 +5,8 @@ from io import StringIO
 
 from rich.console import Console
 
-from devflow.core.history import BuildMetrics, PhaseSnapshot
+from devflow.core.history import BuildMetrics
+from devflow.core.metrics import PhaseSnapshot
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.ui.display import (
     _format_elapsed,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from devflow.orchestration.events import BuildCallbacks
 
 from devflow.core.console import console
-from devflow.core.track import get_feature, get_state, list_all_features
+from devflow.core.workflow import load_state
 from devflow.ui.display import (
     render_feature_detail,
     render_header,
@@ -71,6 +72,7 @@ def _build_callbacks() -> BuildCallbacks:
         render_phase_failure,
         render_phase_header,
         render_phase_success,
+        render_plan_confirmation,
     )
 
     return BuildCallbacks(
@@ -82,6 +84,7 @@ def _build_callbacks() -> BuildCallbacks:
         on_phase_commits=render_phase_commits,
         on_gate_panel=render_gate_panel,
         on_build_summary=render_build_summary,
+        confirm_plan=render_plan_confirmation,
     )
 
 
@@ -116,24 +119,24 @@ def status(
 
     if log:
         if feature_id:
-            feat = get_feature(feature_id)
+            feat = load_state().get_feature(feature_id)
             if not feat:
                 console.print(f"[red]Feature {feature_id!r} not found.[/red]")
                 raise typer.Exit(1)
             render_log_detail(feat)
         else:
-            features = list_all_features()
+            features = list(load_state().features.values())
             render_log_table(features)
         return
 
     if feature_id:
-        feat = get_feature(feature_id)
+        feat = load_state().get_feature(feature_id)
         if not feat:
             console.print(f"[red]Feature {feature_id!r} not found.[/red]")
             raise typer.Exit(1)
         render_feature_detail(feat)
     else:
-        state = get_state()
+        state = load_state()
         render_status_table(state, include_archived=archived)
 
 
@@ -242,12 +245,14 @@ def do_task(
     is auto-detected from task complexity unless overridden with -w.
     On failure, all commits are reverted automatically.
     """
-    from devflow.orchestration.build import execute_do_loop
+    from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import start_do
 
     _ensure_backend()
     feature = start_do(description, workflow)
-    success = execute_do_loop(feature, verbose=verbose, callbacks=_build_callbacks())
+    success = execute_build_loop(
+        feature, verbose=verbose, create_pr=False, callbacks=_build_callbacks(),
+    )
     if not success:
         raise typer.Exit(1)
 
@@ -368,8 +373,6 @@ def install(
     render_install_report(result)
 
     # --- init: detect stack + base branch → config.yaml ---
-    from pathlib import Path
-
     from devflow.core.config import load_config, save_config
     from devflow.core.workflow import ensure_devflow_dir, load_state, save_state
     from devflow.integrations.detect import detect_stack
@@ -475,13 +478,13 @@ def log_cmd(
     render_header(subtitle="Feature log")
 
     if feature_id:
-        feat = get_feature(feature_id)
+        feat = load_state().get_feature(feature_id)
         if not feat:
             console.print(f"[red]Feature {feature_id!r} not found.[/red]")
             raise typer.Exit(1)
         render_log_detail(feat)
     else:
-        features = list_all_features()
+        features = list(load_state().features.values())
         render_log_table(features)
 
 

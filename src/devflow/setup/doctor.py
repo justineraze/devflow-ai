@@ -9,9 +9,14 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.backend import get_backend
+from devflow.core.config import load_config
 from devflow.core.console import console
 from devflow.core.gate_report import CheckResult, GateReport
+from devflow.core.models import WorkflowState
 from devflow.core.paths import assets_dir
+from devflow.setup._settings import load_settings
+from devflow.setup.install import HOOK_SCRIPT_NAME, HOOKS_DIR, SETTINGS_FILE
 
 
 def check_python_version() -> CheckResult:
@@ -92,8 +97,6 @@ def _check_assets_synced(name: str, assets_dir: Path, target_dir: Path) -> Check
 
 def check_devflow_init(base: Path | None = None) -> CheckResult:
     """Check that .devflow/ is initialized (config.yaml + state.json)."""
-    from devflow.core.models import WorkflowState
-
     root = base or Path.cwd()
     devflow_dir = root / ".devflow"
     config_file = devflow_dir / "config.yaml"
@@ -116,8 +119,6 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
     try:
         raw = state_file.read_text()
         state = WorkflowState.model_validate_json(raw)
-        from devflow.core.config import load_config
-
         n_features = len(state.features)
         config = load_config(base)
         stack_info = f", stack={config.stack}" if config.stack else ""
@@ -141,8 +142,6 @@ def check_claude_default_model() -> CheckResult:
     general interactive ``claude`` usage outside devflow. Warn when
     the global default is Opus (expensive).
     """
-    from devflow.setup._settings import load_settings
-
     settings = Path.home() / ".claude" / "settings.json"
     if not settings.exists():
         return CheckResult(
@@ -194,9 +193,6 @@ def check_hook_installed(
     - the hook script is missing from ``hooks_dir``, or
     - settings.json is missing / unreadable / lacks the PostCompact entry.
     """
-    from devflow.setup._settings import load_settings
-    from devflow.setup.install import HOOK_SCRIPT_NAME, HOOKS_DIR, SETTINGS_FILE
-
     hooks = hooks_dir or HOOKS_DIR
     cfg = settings_file or SETTINGS_FILE
 
@@ -246,7 +242,6 @@ def check_hook_installed(
 def run_doctor(base: Path | None = None) -> GateReport:
     """Run all diagnostic checks and return the report."""
     report = GateReport()
-    from devflow.core.backend import get_backend
 
     report.add(check_python_version())
 
@@ -267,7 +262,7 @@ def render_doctor_report(report: GateReport) -> None:
     """Display the doctor diagnostic report using Rich."""
     lines = Text()
     for check in report.checks:
-        icon = "\u2713" if check.passed else "\u2717"
+        icon = "✓" if check.passed else "✗"
         style = "green" if check.passed else "red"
         lines.append(f"  {icon} ", style=style)
         lines.append(f"{check.name}: ", style="bold")

@@ -105,6 +105,17 @@ class BuildTotals:
         commits: int = 0, files_changed: int = 0,
         insertions: int = 0, deletions: int = 0,
     ) -> None:
+        """Append a phase snapshot and accumulate totals.
+
+        Args:
+            phase_name: Name of the phase that just completed.
+            metrics: PhaseMetrics from backend execution.
+            elapsed_s: Wall-clock duration in seconds.
+            model: Model tier label used (for cost-by-model breakdown).
+            success: False marks the phase as failed in the snapshot.
+            commits, files_changed, insertions, deletions: Git diff stats
+                extracted from the phase's commits (CODE phases only).
+        """
         self.cost_usd += metrics.cost_usd
         self.input_tokens += metrics.input_tokens
         self.output_tokens += metrics.output_tokens

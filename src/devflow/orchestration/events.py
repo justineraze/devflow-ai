@@ -21,6 +21,11 @@ def _noop(*_args: object, **_kwargs: object) -> None:  # noqa: ARG001
     """Default no-op callback."""
 
 
+def _confirm_yes(*_args: object, **_kwargs: object) -> bool:  # noqa: ARG001
+    """Default plan confirmation callback — auto-approves (used in tests)."""
+    return True
+
+
 @dataclass
 class BuildCallbacks:
     """Event callbacks fired by the build loop.
@@ -53,3 +58,10 @@ class BuildCallbacks:
     on_build_summary: Callable[
         [Feature, BuildTotals, str | None, str, float | None], None
     ] = field(default=_noop)
+    confirm_plan: Callable[[str, str, bool], bool] = field(default=_confirm_yes)
+    """Show *plan_output* and ask whether to proceed.
+
+    Args: (plan_output, feature_id, create_pr). Returns True to proceed,
+    False to pause the build.  Default auto-approves so tests don't need
+    to wire it.
+    """

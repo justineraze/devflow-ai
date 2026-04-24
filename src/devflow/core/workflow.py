@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
+
+# fcntl is POSIX-only; on Windows we degrade _state_lock to a no-op.
+# devflow currently targets POSIX hosts, but the optional import keeps
+# imports of this module from blowing up on Windows in unit tests.
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    _fcntl = None  # type: ignore[assignment]
 
 from devflow.core.models import (
     Feature,
@@ -24,9 +31,6 @@ from devflow.core.paths import workflows_dir as _workflows_dir
 # Default location for project state.
 DEVFLOW_DIR = Path(".devflow")
 STATE_FILE = DEVFLOW_DIR / "state.json"
-
-# Where workflow definitions live (relative to package root).
-WORKFLOWS_DIR = _workflows_dir()
 
 
 _workflow_cache: dict[str, WorkflowDefinition] = {}
@@ -59,7 +63,7 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
     if workflows_dir is None and name in _workflow_cache:
         return _workflow_cache[name]
 
-    base = workflows_dir or WORKFLOWS_DIR
+    base = workflows_dir or _workflows_dir()
     path = base / f"{name}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"Workflow not found: {path}")
@@ -87,6 +91,8 @@ def ensure_devflow_dir(base: Path | None = None) -> Path:
     return devflow
 
 
+# Process-scoped cache, never invalidated at runtime. Not thread-safe —
+# devflow currently runs single-threaded; revisit if async/parallel features land.
 _state_cache: dict[Path, tuple[float, WorkflowState]] = {}
 
 
@@ -129,15 +135,19 @@ def _state_lock(base: Path | None = None) -> Iterator[None]:
     This prevents concurrent builds (e.g. in separate worktrees) from
     corrupting ``state.json`` with interleaved read-modify-write cycles.
     The lock is released when the context exits.
+
+    No-op on platforms without ``fcntl`` (e.g. Windows).
     """
     lock_path = ensure_devflow_dir(base) / "state.lock"
-    lock_file = lock_path.open("w")
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
+    if _fcntl is None:  # pragma: no cover - Windows fallback
         yield
-    finally:
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
-        lock_file.close()
+        return
+    with lock_path.open("w") as lock_file:
+        _fcntl.flock(lock_file, _fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            _fcntl.flock(lock_file, _fcntl.LOCK_UN)
 
 
 @contextmanager

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from devflow.core.paths import atomic_write_text
+from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import ensure_devflow_dir
 
 
@@ -115,8 +116,6 @@ def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
 
 def context_deps_for(phase_name: str) -> tuple[str, ...]:
     """Return the phase names whose outputs should be injected as context."""
-    from devflow.core.phases import UnknownPhase, get_spec
-
     try:
         return tuple(dep.value for dep in get_spec(phase_name).context_deps)
     except UnknownPhase:

@@ -126,14 +126,14 @@ def install_hook(
 
 
 def install_all(
-    assets_dir: Path | None = None,
+    assets_source: Path | None = None,
     claude_dir: Path | None = None,
 ) -> dict[str, list[str]]:
     """Install all agents, skills and the PostCompact hook.
 
     Returns dict with 'agents', 'skills', and 'hook' keys listing installed files.
     """
-    base = assets_dir or ASSETS_DIR
+    base = assets_source or ASSETS_DIR
     claude = claude_dir or CLAUDE_DIR
 
     return {

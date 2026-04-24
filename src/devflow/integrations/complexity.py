@@ -12,6 +12,7 @@ import logging
 import re
 from pathlib import Path
 
+from devflow.core.backend import ModelTier, get_backend
 from devflow.core.models import CRITICAL_PATH_PATTERNS, ComplexityScore
 from devflow.integrations.detect import walk_files
 
@@ -44,8 +45,6 @@ _LLM_TIMEOUT = 15
 
 def _score_via_llm(description: str) -> ComplexityScore | None:
     """Score complexity via a one-shot LLM call.  Returns ``None`` on failure."""
-    from devflow.core.backend import ModelTier, get_backend
-
     backend = get_backend()
     model = backend.model_name(ModelTier.FAST)
     user_prompt = description[:_MAX_PROMPT_CHARS]
@@ -90,25 +89,27 @@ def _clamp(value: object, lo: int = 0, hi: int = 3) -> int:
 # ── Heuristic scorer (fallback) ──────────────────────────────────
 
 # Additional security terms not covered by CRITICAL_PATH_PATTERNS.
-_SECURITY_EXTRA: tuple[str, ...] = ("rbac", "permission", "acl", "privilege", "cors", "csrf")
+_SECURITY_EXTRA: frozenset[str] = frozenset(
+    {"rbac", "permission", "acl", "privilege", "cors", "csrf"}
+)
 
 # External integration keywords.
-_INTEGRATION_KEYWORDS: tuple[str, ...] = (
+_INTEGRATION_KEYWORDS: frozenset[str] = frozenset({
     "api", "database", "webhook", "queue", "oauth", "third-party", "redis",
     "postgres", "mysql", "mongodb", "elasticsearch", "kafka", "rabbitmq",
     "s3", "storage", "email", "smtp", "sms", "twilio", "stripe", "firebase",
     "graphql", "grpc", "rest",
-)
+})
 
 # Action verbs that imply wide scope (each hit adds weight).
-_HIGH_SCOPE_VERBS: tuple[str, ...] = (
+_HIGH_SCOPE_VERBS: frozenset[str] = frozenset({
     "create", "redesign", "migrate", "rewrite", "refactor", "build",
     "add module", "new subsystem", "overhaul", "implement", "new feature",
-)
-_LOW_SCOPE_VERBS: tuple[str, ...] = (
+})
+_LOW_SCOPE_VERBS: frozenset[str] = frozenset({
     "fix", "tweak", "rename", "update", "adjust", "clean", "remove",
     "typo", "comment", "bump", "minor",
-)
+})
 
 # Source file extensions to count when measuring project size.
 _SOURCE_EXTENSIONS: frozenset[str] = frozenset(
@@ -159,7 +160,7 @@ def _score_integrations(description: str) -> int:
 def _score_security(description: str) -> int:
     """Score 0-3: security-sensitive surface area in the description."""
     desc = description.lower()
-    all_patterns = CRITICAL_PATH_PATTERNS + _SECURITY_EXTRA
+    all_patterns = frozenset(CRITICAL_PATH_PATTERNS) | _SECURITY_EXTRA
     hits = sum(1 for pat in all_patterns if pat in desc)
     if hits == 0:
         return 0
@@ -241,7 +242,7 @@ def score_complexity(
     # Apply workflow floor: if the scored workflow ranks below the floor,
     # override the workflow field to the floor value.
     if workflow_floor and workflow_floor in _WORKFLOW_RANK:
-        scored_rank = _WORKFLOW_RANK.get(score.workflow, 0)
+        scored_rank = _WORKFLOW_RANK[score.workflow]
         floor_rank = _WORKFLOW_RANK[workflow_floor]
         if scored_rank < floor_rank:
             score = score.model_copy(update={"workflow": workflow_floor})

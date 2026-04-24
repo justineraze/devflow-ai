@@ -18,6 +18,13 @@ from devflow.core.metrics import BuildTotals, PhaseSnapshot, compute_cache_hit_r
 if TYPE_CHECKING:
     from devflow.core.models import Feature
 
+__all__ = [
+    "BuildMetrics",
+    "append_build_metrics",
+    "build_metrics_from",
+    "read_history",
+]
+
 
 @dataclass
 class BuildMetrics:
@@ -80,6 +87,7 @@ def build_metrics_from(
     from devflow.core.models import PhaseStatus
 
     phases_completed = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
+    # gate_passed_first means no retry was needed (gate succeeded on first attempt)
     gate_passed_first = feature.metadata.gate_retry == 0 and success
 
     # Determine which phase failed (if any).
@@ -162,11 +170,11 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
 
     records: list[BuildMetrics] = []
     for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line:
+        stripped = line.strip()
+        if not stripped:
             continue
         try:
-            data = json.loads(line)
+            data = json.loads(stripped)
             raw_phases = data.pop("phases", [])
             # Filter unknown fields to prevent TypeError on new fields.
             known_data = {k: v for k, v in data.items() if k in _build_fields}

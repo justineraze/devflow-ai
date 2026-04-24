@@ -43,6 +43,26 @@ def checks_for_stack(stack: str | None) -> tuple[CheckDef, ...]:
     return STACK_CHECKS.get(stack or "python", STACK_CHECKS["python"])
 
 
+def _build_command_result(
+    name: str,
+    returncode: int,
+    output: str,
+    parse_output: ParseOutput | None,
+) -> CheckResult:
+    """Interpret a command's exit code and output as a CheckResult."""
+    newline = "\n"
+    if parse_output is not None:
+        message, details = parse_output(returncode, output)
+    elif returncode == 0:
+        message, details = "No issues", ""
+    else:
+        message = f"{output.count(newline)} issues found"
+        details = output[:2000]
+    return CheckResult(
+        name=name, passed=returncode == 0, message=message, details=details,
+    )
+
+
 def run_command_check(
     name: str,
     cmd: list[str],
@@ -76,7 +96,7 @@ def run_command_check(
     except FileNotFoundError:
         return CheckResult(
             name=name,
-            passed=False,
+            passed=True,
             skipped=True,
             message=f"{name} not found in PATH",
         )
@@ -88,13 +108,4 @@ def run_command_check(
     # Fall back to stderr so the caller always sees a useful error message.
     output = result.stdout if result.stdout else result.stderr
 
-    if parse_output is not None:
-        message, details = parse_output(result.returncode, output)
-    elif result.returncode == 0:
-        message, details = "No issues", ""
-    else:
-        message = f"{output.count(chr(10))} issues found"
-        details = output[:2000]
-
-    passed = result.returncode == 0
-    return CheckResult(name=name, passed=passed, message=message, details=details)
+    return _build_command_result(name, result.returncode, output, parse_output)

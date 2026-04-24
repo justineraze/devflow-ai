@@ -53,6 +53,8 @@ def format_duration(seconds: float | None) -> str:
 
 def format_cost(cost_usd: float) -> str:
     """Format a cost in USD for display."""
+    if cost_usd < 0:
+        return f"-{format_cost(-cost_usd)}"
     if cost_usd == 0:
         return "$0.00"
     if cost_usd < 0.01:

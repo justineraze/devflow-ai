@@ -11,7 +11,12 @@ from devflow.core.artifacts import load_phase_output
 from devflow.core.models import Feature
 
 from .commit_message import build_pr_title
-from .repo import _git, commit_changes, get_branch_diff_summary, has_commits_ahead
+from .repo import (
+    commit_changes,
+    get_branch_diff_summary,
+    has_commits_ahead,
+    push_branch,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -71,9 +76,7 @@ def build_pr_body(feature: Feature) -> str:
     summary = parse_plan_summary(plan_output) if plan_output else ""
     changes = parse_plan_changes(plan_output) if plan_output else ""
 
-    parts = ["## Summary", ""]
-    parts.append(summary or feature.description)
-    parts.append("")
+    parts = ["## Summary", "", summary or feature.description, ""]
 
     if changes:
         parts.extend(["## Changes", "", changes, ""])
@@ -87,6 +90,33 @@ def build_pr_body(feature: Feature) -> str:
     return "\n".join(parts)
 
 
+def _format_diff_stat(base_branch: str) -> str:
+    """Format the diff stat block injected into the PR body."""
+    summary = get_branch_diff_summary(base_branch)
+    lines = [
+        f"+{summary['lines_added']} -{summary['lines_removed']} "
+        f"in {summary['files_changed']} files",
+    ]
+    for path in summary.get("paths", [])[:15]:
+        lines.append(f"  {path}")
+    return "\n".join(lines)
+
+
+def _create_gh_pr(
+    title: str, body: str, base_branch: str, cwd: Path,
+) -> str | None:
+    """Invoke ``gh pr create`` and return the PR URL or None on failure."""
+    result = subprocess.run(
+        ["gh", "pr", "create", "--title", title, "--body", body,
+         "--base", base_branch],
+        capture_output=True, text=True, cwd=str(cwd), timeout=120,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    _log.warning("PR creation failed: %s", result.stderr.strip())
+    return None
+
+
 def push_and_create_pr(
     feature: Feature,
     branch: str,
@@ -96,12 +126,10 @@ def push_and_create_pr(
     """Push branch and create a GitHub PR.
 
     Commits any uncommitted changes first as a safety net. *exclude* is
-    forwarded to ``commit_changes`` so user scratch files captured before the
-    build started stay out of the final PR.
+    forwarded to ``commit_changes`` so user scratch files captured before
+    the build started stay out of the final PR.
     Returns the PR URL, or None if creation failed.
     """
-    cwd = str(Path.cwd())
-
     from .smart_messages import generate_commit_message, generate_pr_body
 
     # Safety net: commit anything left uncommitted.
@@ -114,33 +142,12 @@ def push_and_create_pr(
         _log.info("No changes to push — branch is identical to %s", base_branch)
         return None
 
-    # Push.
-    push = _git("push", "-u", "origin", branch, timeout=120)
-    if push.returncode != 0:
-        _log.warning("Push failed: %s", push.stderr.strip())
+    pushed, stderr = push_branch(branch)
+    if not pushed:
+        _log.warning("Push failed: %s", stderr)
         return None
 
-    # Build PR body and title — body via Haiku, title from metadata.
     plan = load_phase_output(feature.id, "planning") or ""
-    diff_summary = get_branch_diff_summary(base_branch)
-    diff_stat_lines = [
-        f"+{diff_summary['lines_added']} -{diff_summary['lines_removed']} "
-        f"in {diff_summary['files_changed']} files",
-    ]
-    for p in diff_summary.get("paths", [])[:15]:
-        diff_stat_lines.append(f"  {p}")
-    diff_stat = "\n".join(diff_stat_lines)
-
-    body = generate_pr_body(feature, plan=plan, diff_stat=diff_stat)
+    body = generate_pr_body(feature, plan=plan, diff_stat=_format_diff_stat(base_branch))
     title = build_pr_title(feature)
-
-    pr = subprocess.run(
-        ["gh", "pr", "create", "--title", title, "--body", body,
-         "--base", base_branch],
-        capture_output=True, text=True, cwd=cwd, timeout=120,
-    )
-    if pr.returncode == 0:
-        return pr.stdout.strip()
-
-    _log.warning("PR creation failed: %s", pr.stderr.strip())
-    return None
+    return _create_gh_pr(title, body, base_branch, Path.cwd())

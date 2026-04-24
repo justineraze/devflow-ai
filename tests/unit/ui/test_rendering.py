@@ -190,4 +190,5 @@ class TestFmtDuration:
         (3661, "61m01s"),
     ])
     def test_format(self, seconds: float | None, expected: str) -> None:
-        assert r._fmt_duration(seconds) == expected
+        from devflow.core.formatting import format_duration
+        assert format_duration(seconds) == expected

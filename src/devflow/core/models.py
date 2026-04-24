@@ -168,48 +168,48 @@ class FeatureStatus(StrEnum):
 _RECOVERY: frozenset[FeatureStatus] = frozenset(
     {FeatureStatus.BLOCKED, FeatureStatus.FAILED},
 )
-VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
-    FeatureStatus.PENDING: {
+VALID_TRANSITIONS: dict[FeatureStatus, frozenset[FeatureStatus]] = {
+    FeatureStatus.PENDING: frozenset({
         FeatureStatus.PLANNING,
         FeatureStatus.IMPLEMENTING,
         *_RECOVERY,
-    },
+    }),
     # PLANNING can skip plan_review in workflows that don't include it.
-    FeatureStatus.PLANNING: {
+    FeatureStatus.PLANNING: frozenset({
         FeatureStatus.PLAN_REVIEW,
         FeatureStatus.IMPLEMENTING,
         *_RECOVERY,
-    },
-    FeatureStatus.PLAN_REVIEW: {
+    }),
+    FeatureStatus.PLAN_REVIEW: frozenset({
         FeatureStatus.IMPLEMENTING,
         FeatureStatus.PLANNING,
         *_RECOVERY,
-    },
+    }),
     # IMPLEMENTING can skip review in light/quick workflows.
-    FeatureStatus.IMPLEMENTING: {
+    FeatureStatus.IMPLEMENTING: frozenset({
         FeatureStatus.REVIEWING,
         FeatureStatus.GATE,
         *_RECOVERY,
-    },
-    FeatureStatus.REVIEWING: {
+    }),
+    FeatureStatus.REVIEWING: frozenset({
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
         FeatureStatus.DONE,
         *_RECOVERY,
-    },
-    FeatureStatus.FIXING: {
+    }),
+    FeatureStatus.FIXING: frozenset({
         FeatureStatus.REVIEWING,
         FeatureStatus.GATE,
         FeatureStatus.DONE,
         *_RECOVERY,
-    },
-    FeatureStatus.GATE: {
+    }),
+    FeatureStatus.GATE: frozenset({
         FeatureStatus.DONE,
         FeatureStatus.FIXING,
         *_RECOVERY,
-    },
-    FeatureStatus.DONE: set(),
-    FeatureStatus.BLOCKED: {
+    }),
+    FeatureStatus.DONE: frozenset(),
+    FeatureStatus.BLOCKED: frozenset({
         FeatureStatus.PENDING,
         FeatureStatus.PLANNING,
         FeatureStatus.PLAN_REVIEW,
@@ -219,9 +219,9 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
         FeatureStatus.GATE,
         FeatureStatus.BLOCKED,
         FeatureStatus.FAILED,
-    },
+    }),
     # FAILED is recoverable via --resume: can go back to any non-terminal state.
-    FeatureStatus.FAILED: {
+    FeatureStatus.FAILED: frozenset({
         FeatureStatus.PENDING,
         FeatureStatus.PLANNING,
         FeatureStatus.PLAN_REVIEW,
@@ -229,7 +229,7 @@ VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
         FeatureStatus.REVIEWING,
         FeatureStatus.FIXING,
         FeatureStatus.GATE,
-    },
+    }),
 }
 
 
@@ -310,7 +310,7 @@ class Feature(BaseModel):
 
     def transition_to(self, target: FeatureStatus) -> None:
         """Transition to a new status, raising InvalidTransition if not allowed."""
-        allowed = VALID_TRANSITIONS.get(self.status, set())
+        allowed = VALID_TRANSITIONS.get(self.status, frozenset())
         if target not in allowed:
             raise InvalidTransition(self.status, target)
         self.status = target
@@ -375,7 +375,7 @@ class WorkflowState(BaseModel):
     def epics(self) -> list[Feature]:
         """Return features that have children (i.e. are epics)."""
         parent_ids = {f.parent_id for f in self.features.values() if f.parent_id}
-        return [f for _, f in self.features.items() if f.id in parent_ids]
+        return [f for f in self.features.values() if f.id in parent_ids]
 
     def is_epic(self, feature_id: str) -> bool:
         """Return True if *feature_id* has any child features."""

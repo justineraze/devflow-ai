@@ -10,6 +10,7 @@ actual API/CLI call.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 
 from devflow.core.models import Feature
@@ -33,12 +34,16 @@ def _call_one_shot(system: str, user: str) -> str | None:
 
     backend = get_backend()
     model = backend.model_name(ModelTier.FAST)
-    return backend.one_shot(
-        system=system,
-        user=user,
-        model=model,
-        timeout=_ONE_SHOT_TIMEOUT,
-    )
+    try:
+        return backend.one_shot(
+            system=system,
+            user=user,
+            model=model,
+            timeout=_ONE_SHOT_TIMEOUT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).debug("one_shot failed: %s", exc)
+        return None
 
 
 def _truncate_diff(diff: str, max_lines: int = _MAX_DIFF_LINES) -> str:
@@ -164,6 +169,7 @@ def generate_pr_body(feature: Feature, plan: str = "", diff_stat: str = "") -> s
 
     Falls back to the deterministic template on failure.
     """
+    # Lazy: avoid circular import (pr_body imports from smart_messages)
     from .pr_body import build_pr_body as _template_pr_body
 
     user_parts = []

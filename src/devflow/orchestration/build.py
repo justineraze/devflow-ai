@@ -13,12 +13,10 @@ Review cycle logic                       → review.py
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from rich.markdown import Markdown
-from rich.panel import Panel
 
 if TYPE_CHECKING:
     from devflow.core.metrics import PhaseResult
@@ -37,6 +35,7 @@ from devflow.core.models import (
 from devflow.core.phases import get_spec
 from devflow.core.workflow import load_state, mutate_feature
 from devflow.orchestration.events import BuildCallbacks
+from devflow.orchestration.model_routing import get_phase_agent, resolve_model
 from devflow.orchestration.phase_exec import (
     complete_phase,
     fail_phase,
@@ -95,8 +94,6 @@ def _run_planning_loop(
     Stops as soon as a non-planning phase is encountered (resetting it
     back to PENDING so the execution loop picks it up).
     """
-    from devflow.orchestration.model_routing import get_phase_agent, resolve_model
-
     total = len(feature.phases)
     plan_output = ""
     phase_num = 0
@@ -173,12 +170,12 @@ def _handle_post_phase_commit(
     base_branch: str,
 ) -> None:
     """Auto-commit after implementing/fixing and record metrics."""
-    from devflow.integrations.git import (
+    from devflow.integrations.git import commit_changes
+    from devflow.integrations.git.smart_messages import generate_commit_message
+    from devflow.orchestration.phase_artifacts import (
         collect_phase_result,
-        commit_changes,
         persist_files_summary,
     )
-    from devflow.integrations.git.smart_messages import generate_commit_message
 
     phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
@@ -205,7 +202,6 @@ def _handle_post_phase_commit(
 def _handle_gate_result(
     feature: Feature,
     phase: PhaseRecord,
-    success: bool,
     output: str,
     metrics: PhaseMetrics,
     elapsed: float,
@@ -213,17 +209,11 @@ def _handle_gate_result(
     totals: BuildTotals,
     callbacks: BuildCallbacks,
     base: Path | None,
-) -> tuple[Feature, bool | None]:
-    """Handle gate success/failure. Returns (feature, should_continue).
+) -> tuple[Feature, bool]:
+    """Handle a gate failure. Returns (feature, should_retry).
 
-    should_continue is True to loop again, False to abort, None to proceed normally.
+    should_retry is True if a gate-retry phase was scheduled; False to abort.
     """
-    if success:
-        callbacks.on_gate_panel(feature.id, base)
-        totals.add(phase.name, metrics, elapsed, model=model_label)
-        return feature, None
-
-    # Gate failed.
     totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
     save_phase_output(feature.id, "gate", output, base)
     if setup_gate_retry(feature.id, base):
@@ -254,7 +244,6 @@ def _run_execution_loop(
     gate retry, and review cycles.
     """
     from devflow.integrations.git import get_head_sha
-    from devflow.orchestration.model_routing import get_phase_agent, resolve_model
 
     total = len(feature.phases)
 
@@ -320,16 +309,12 @@ def _run_execution_loop(
         else:
             # Gate failure with auto-retry.
             if spec.phase_type == PhaseType.GATE:
-                feature, gate_action = _handle_gate_result(
-                    feature, phase, False, output, metrics, elapsed,
+                feature, should_retry = _handle_gate_result(
+                    feature, phase, output, metrics, elapsed,
                     model_label, totals, callbacks, base,
                 )
-                if gate_action is True:
+                if should_retry:
                     continue
-                if gate_action is False:
-                    fail_phase(feature.id, phase.name, output, base)
-                    callbacks.on_phase_failure(phase.name, elapsed, output)
-                    return feature, False
             else:
                 totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
 
@@ -348,8 +333,6 @@ def _save_phase_commits_artifact(
     base: Path | None = None,
 ) -> None:
     """Persist commit summary as a JSON artifact for downstream phases."""
-    import json
-
     from devflow.core.artifacts import write_artifact
 
     data = {
@@ -390,9 +373,8 @@ def _finalize_build(
 
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
-    pr_url = (
-        push_and_create_pr(final, branch, exclude=initial_untracked, base_branch=base_branch)
-        if final else None
+    pr_url = push_and_create_pr(
+        final, branch, exclude=initial_untracked, base_branch=base_branch,
     )
 
     # Persist build metrics for historical tracking.
@@ -499,7 +481,7 @@ def execute_build_loop(
         return False
 
     # ── Plan confirmation ──
-    if plan_output and not _confirm_plan(plan_output, feature.id, create_pr):
+    if plan_output and not cb.confirm_plan(plan_output, feature.id, create_pr):
         return False
 
     # ── Execution ──
@@ -589,48 +571,3 @@ def _get_branch_name(feature: Feature) -> str:
     return branch_name(feature.id)
 
 
-def _confirm_plan(plan_output: str, feature_id: str, create_pr: bool) -> bool:
-    """Show the plan and ask for confirmation. Returns True to proceed."""
-    console.print()
-    console.print(Panel(
-        Markdown(plan_output),
-        title="Plan proposé",
-        border_style="cyan",
-        padding=(1, 2),
-    ))
-    console.print()
-
-    # Flush any buffered stdin (e.g. Enter pressed during planning).
-    import contextlib
-    import sys
-    import termios
-    with contextlib.suppress(termios.error, ValueError, OSError):
-        termios.tcflush(sys.stdin, termios.TCIFLUSH)
-
-    confirm = console.input("[bold]Lancer l'implémentation ? [Y/n] [/bold]").strip().lower()
-    if confirm and confirm not in ("y", "yes", "o", "oui"):
-        console.print()
-        console.print("[yellow]Build en pause.[/yellow]")
-        console.print(f"[dim]Le plan est sauvegardé dans {feature_id}.[/dim]")
-        if create_pr:
-            console.print()
-            console.print("[bold]Reprendre avec :[/bold]")
-            console.print(f'  devflow build "ton feedback ici" --resume {feature_id}')
-        return False
-    return True
-
-
-def execute_do_loop(
-    feature: Feature,
-    verbose: bool = False,
-    base: Path | None = None,
-    callbacks: BuildCallbacks | None = None,
-) -> bool:
-    """Run a task on the current branch — no branch, no PR.
-
-    Delegates to :func:`execute_build_loop` with ``create_pr=False``.
-    On failure, all commits made during the build are reverted.
-    """
-    return execute_build_loop(
-        feature, base=base, verbose=verbose, create_pr=False, callbacks=callbacks,
-    )

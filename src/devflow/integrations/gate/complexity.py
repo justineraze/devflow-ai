@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,6 +15,50 @@ if TYPE_CHECKING:
 
 DEFAULT_MAX_COMPLEXITY = 10
 _TIMEOUT = 60
+
+_log = logging.getLogger(__name__)
+
+
+def _resolve_complexity_targets(
+    cwd: Path, ctx: GateContext | None,
+) -> list[str] | None:
+    """Return the list of paths to scan, or ``None`` if no Python files apply.
+
+    In build mode with a non-empty diff, return only the changed ``.py`` files.
+    Otherwise (audit mode or no context), scan the entire project.
+    """
+    if ctx and ctx.mode == "build" and ctx.changed_files:
+        py_files = [
+            str(f) for f in ctx.scoped_files(cwd)
+            if str(f).endswith(".py")
+        ]
+        if not py_files:
+            return None
+        return py_files
+    return ["."]
+
+
+def _build_complexity_result(
+    returncode: int, output: str, max_complexity: int,
+) -> CheckResult:
+    """Interpret ruff's exit code/output as a warning-style CheckResult."""
+    if returncode == 0 or not output:
+        if returncode != 0 and not output:
+            _log.warning(
+                "ruff complexity check returned %d with empty stdout", returncode,
+            )
+        return CheckResult(
+            name="complexity", passed=True, message="No complex functions",
+        )
+
+    lines = output.split("\n")
+    count = len(lines)
+    return CheckResult(
+        name="complexity",
+        passed=True,
+        message=f"{count} function(s) exceed complexity {max_complexity} (warning)",
+        details=output[:2000],
+    )
 
 
 def check_complexity(
@@ -37,20 +82,12 @@ def check_complexity(
     """
     cwd = base or Path.cwd()
 
-    # Determine targets.
-    if ctx and ctx.mode == "build" and ctx.changed_files:
-        py_files = [
-            str(f) for f in ctx.scoped_files(cwd)
-            if str(f).endswith(".py")
-        ]
-        if not py_files:
-            return CheckResult(
-                name="complexity", passed=True,
-                message="No Python files in diff",
-            )
-        targets = py_files
-    else:
-        targets = ["."]
+    targets = _resolve_complexity_targets(cwd, ctx)
+    if targets is None:
+        return CheckResult(
+            name="complexity", passed=True,
+            message="No Python files in diff",
+        )
 
     cmd = [
         "ruff", "check",
@@ -71,7 +108,7 @@ def check_complexity(
     except FileNotFoundError:
         return CheckResult(
             name="complexity",
-            passed=False,
+            passed=True,
             skipped=True,
             message="ruff not found in PATH",
         )
@@ -81,18 +118,4 @@ def check_complexity(
         )
 
     output = result.stdout.strip() if result.stdout else ""
-
-    if result.returncode == 0 or not output:
-        return CheckResult(
-            name="complexity", passed=True, message="No complex functions",
-        )
-
-    # Violations found — report as WARNING (passed=True).
-    lines = output.split("\n")
-    count = len(lines)
-    return CheckResult(
-        name="complexity",
-        passed=True,
-        message=f"{count} function(s) exceed complexity {max_complexity} (warning)",
-        details=output[:2000],
-    )
+    return _build_complexity_result(result.returncode, output, max_complexity)

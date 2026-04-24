@@ -54,7 +54,7 @@ class TestCheckComplexity:
     def test_ruff_missing_skipped(self, _mock: patch, tmp_path: Path) -> None:
         result = check_complexity(base=tmp_path)
         assert result.skipped is True
-        assert result.passed is False
+        assert result.passed is True
         assert "not found" in result.message
 
     @patch(

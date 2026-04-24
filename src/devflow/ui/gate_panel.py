@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.panel import Panel
 from rich.text import Text
 
+from devflow.core.artifacts import read_json_artifact
 from devflow.core.console import console
 from devflow.core.gate_report import CheckResult, GateReport
 
@@ -66,8 +67,6 @@ def render_gate_report(report: GateReport) -> None:
 
 def render_gate_panel(feature_id: str, base: Path | None = None) -> None:
     """Load gate.json from artifacts and render it as a Rich panel."""
-    from devflow.core.artifacts import read_json_artifact
-
     data = read_json_artifact(feature_id, "gate.json", base)
     if not data:
         return

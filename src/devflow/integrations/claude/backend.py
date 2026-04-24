@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
+import threading
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from devflow.core.backend import ModelTier, OnToolEvent
 from devflow.core.metrics import PhaseMetrics, ToolUse
+from devflow.core.paths import venv_env
 
 # Claude Code model aliases indexed by logical tier.
 _MODEL_MAP: dict[ModelTier, str] = {
@@ -88,6 +91,54 @@ def parse_event(line: str) -> tuple[str, Any] | None:
 # ── Backend implementation ──────────────────────────────────────────
 
 
+def _reader_thread(stream: IO[str], q: queue.Queue[str | None]) -> None:
+    """Drain *stream* line by line into *q*, then push a None sentinel."""
+    try:
+        for line in stream:
+            q.put(line)
+    finally:
+        q.put(None)
+
+
+def _drain_stream(
+    q: queue.Queue[str | None],
+    on_tool: OnToolEvent | None,
+    metrics: PhaseMetrics,
+    *,
+    block: bool,
+) -> tuple[PhaseMetrics, int, bool]:
+    """Pop events from *q* and update *metrics* / fire *on_tool*.
+
+    When ``block`` is True, waits for the reader thread's None sentinel.
+    When False, drains only what's currently available without blocking.
+
+    Returns ``(metrics, tool_count, finished)`` where ``finished`` is True
+    if the reader's None sentinel was observed.
+    """
+    tool_count = metrics.tool_count
+    finished = False
+    while True:
+        try:
+            line = q.get(block=block)
+        except queue.Empty:
+            break
+        if line is None:
+            finished = True
+            break
+        parsed = parse_event(line)
+        if not parsed:
+            continue
+        kind, payload = parsed
+        if kind == "tool":
+            tool_count += 1
+            if on_tool is not None:
+                on_tool(payload)
+        elif kind == "metrics":
+            metrics = payload
+    metrics.tool_count = tool_count
+    return metrics, tool_count, finished
+
+
 class ClaudeCodeBackend:
     """Runs phases via the ``claude`` CLI with stream-json output."""
 
@@ -130,46 +181,49 @@ class ClaudeCodeBackend:
                 cwd=str(cwd),
                 env=env,
             )
-
-            proc.stdin.write(user_prompt)
-            proc.stdin.close()
-
-            metrics = PhaseMetrics()
-            tool_count = 0
-
-            for line in proc.stdout:
-                parsed = parse_event(line)
-                if not parsed:
-                    continue
-                kind, payload = parsed
-                if kind == "tool":
-                    tool_count += 1
-                    if on_tool is not None:
-                        on_tool(payload)
-                elif kind == "metrics":
-                    metrics = payload
-                    metrics.tool_count = tool_count
-
-            try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-                return False, (
-                    f"Phase timed out after {timeout}s. "
-                    "Increase the timeout in your workflow YAML or split the feature."
-                ), metrics
-
-            if proc.returncode == 0:
-                return True, metrics.final_text or "Phase completed", metrics
-            stderr = proc.stderr.read().strip()
-            return False, stderr or metrics.final_text or "Unknown error", metrics
-
         except FileNotFoundError:
             return False, (
                 "Claude Code CLI not found. "
                 "Install it: https://docs.anthropic.com/en/docs/claude-code"
             ), PhaseMetrics()
+
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+
+        proc.stdin.write(user_prompt)
+        proc.stdin.close()
+
+        # Spawn a daemon thread to drain stdout — keeps timeout enforceable
+        # even if the subprocess hangs without closing stdout.
+        events: queue.Queue[str | None] = queue.Queue()
+        reader = threading.Thread(
+            target=_reader_thread, args=(proc.stdout, events), daemon=True,
+        )
+        reader.start()
+
+        metrics = PhaseMetrics()
+
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            # Drain whatever the reader has already enqueued before timing out.
+            metrics, _, _ = _drain_stream(events, on_tool, metrics, block=False)
+            return False, (
+                f"Phase timed out after {timeout}s. "
+                "Increase the timeout in your workflow YAML or split the feature."
+            ), metrics
+
+        # Process exited cleanly — drain remaining events (blocking until the
+        # reader thread emits its None sentinel).
+        metrics, _, _ = _drain_stream(events, on_tool, metrics, block=True)
+        reader.join(timeout=1.0)
+
+        if proc.returncode == 0:
+            return True, metrics.final_text or "Phase completed", metrics
+        stderr = proc.stderr.read().strip() if proc.stderr else ""
+        return False, stderr or metrics.final_text or "Unknown error", metrics
 
     def one_shot(
         self,
@@ -180,8 +234,6 @@ class ClaudeCodeBackend:
         timeout: int,
     ) -> str | None:
         """Run a one-shot Claude prompt and return trimmed text, or None."""
-        from devflow.core.paths import venv_env
-
         cmd = [
             "claude", "-p", "-",
             "--model", model,

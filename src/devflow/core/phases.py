@@ -218,7 +218,6 @@ def is_known_phase(name: str | PhaseName) -> bool:
 __all__ = [
     "INSTRUCTIONS_IMPLEMENTING_QUICK",
     "PHASES",
-    "PhaseName",
     "PhaseSpec",
     "UnknownPhase",
     "get_spec",
