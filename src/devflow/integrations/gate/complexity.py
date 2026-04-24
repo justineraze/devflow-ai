@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from devflow.core.paths import venv_env
 from devflow.integrations.gate.report import CheckResult
+
+if TYPE_CHECKING:
+    from devflow.integrations.gate.context import GateContext
 
 DEFAULT_MAX_COMPLEXITY = 10
 _TIMEOUT = 60
@@ -15,8 +19,12 @@ _TIMEOUT = 60
 def check_complexity(
     base: Path | None = None,
     max_complexity: int = DEFAULT_MAX_COMPLEXITY,
+    ctx: GateContext | None = None,
 ) -> CheckResult:
     """Run ``ruff check --select C901`` and report over-complex functions.
+
+    In build mode, only the changed ``.py`` files are checked.
+    In audit mode (or no context), the entire project is checked.
 
     Returns a **warning-style** result: ``passed`` is always ``True`` so the
     gate doesn't block, but *message* and *details* surface the violations
@@ -25,14 +33,31 @@ def check_complexity(
     Args:
         base: Project root (defaults to cwd).
         max_complexity: McCabe threshold (default 10).
+        ctx: Gate context (build vs audit scoping).
     """
     cwd = base or Path.cwd()
+
+    # Determine targets.
+    if ctx and ctx.mode == "build" and ctx.changed_files:
+        py_files = [
+            str(f) for f in ctx.scoped_files(cwd)
+            if str(f).endswith(".py")
+        ]
+        if not py_files:
+            return CheckResult(
+                name="complexity", passed=True,
+                message="No Python files in diff",
+            )
+        targets = py_files
+    else:
+        targets = ["."]
+
     cmd = [
         "ruff", "check",
         "--select", "C901",
         "--output-format", "text",
         "--config", f"lint.mccabe.max-complexity = {max_complexity}",
-        ".",
+        *targets,
     ]
     try:
         result = subprocess.run(

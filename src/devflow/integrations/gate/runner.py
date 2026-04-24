@@ -9,6 +9,7 @@ from devflow.core.metrics import PhaseMetrics
 from devflow.integrations.gate.checks import _checks_for_stack, _run_command_check
 from devflow.integrations.gate.complexity import check_complexity
 from devflow.integrations.gate.config import load_gate_config
+from devflow.integrations.gate.context import GateContext, build_context
 from devflow.integrations.gate.module_size import check_module_size
 from devflow.integrations.gate.report import CheckResult, GateReport
 from devflow.integrations.gate.secrets import scan_secrets
@@ -46,17 +47,17 @@ def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
     return CheckResult(name=name, passed=result.returncode == 0, message=message, details=details)
 
 
-def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
+def run_gate(
+    ctx: GateContext,
+    base: Path | None = None,
+    stack: str | None = None,
+) -> GateReport:
     """Run all quality gate checks in parallel and return the report.
 
-    When a ``.devflow/gate.yaml`` config exists, its ``lint`` / ``test``
-    commands replace the stack-detected ones. The secrets, complexity, and
-    module-size checks always run regardless.
-
     Args:
+        ctx: Gate context (audit vs build scoping + excludes).
         base: Project root directory (defaults to cwd).
         stack: Tech stack name (e.g. "python", "typescript", "php").
-            Determines which lint/test tools to run. Defaults to "python".
     """
     cwd = base or Path.cwd()
     custom_config = load_gate_config(cwd)
@@ -69,9 +70,9 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
                 (name, pool.submit(_run_custom_check, name, cmd, cwd))
                 for name, cmd in custom_config.items()
             ]
-            secrets_future = pool.submit(scan_secrets, base)
-            complexity_future = pool.submit(check_complexity, base)
-            module_size_future = pool.submit(check_module_size, base)
+            secrets_future = pool.submit(scan_secrets, base, ctx)
+            complexity_future = pool.submit(check_complexity, base, ctx=ctx)
+            module_size_future = pool.submit(check_module_size, base, ctx=ctx)
 
             for _name, fut in command_futures:
                 report.add(fut.result())
@@ -89,9 +90,9 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
                 )
                 for c in checks
             ]
-            secrets_future = pool.submit(scan_secrets, base)
-            complexity_future = pool.submit(check_complexity, base)
-            module_size_future = pool.submit(check_module_size, base)
+            secrets_future = pool.submit(scan_secrets, base, ctx)
+            complexity_future = pool.submit(check_complexity, base, ctx=ctx)
+            module_size_future = pool.submit(check_module_size, base, ctx=ctx)
 
             for fut in command_futures_stack:
                 report.add(fut.result())
@@ -106,21 +107,22 @@ def run_gate_phase(
     base: Path | None = None,
     stack: str | None = None,
     feature_id: str | None = None,
+    base_sha: str = "",
 ) -> tuple[bool, str, PhaseMetrics]:
-    """Run the gate phase locally (ruff + pytest + secrets).
+    """Run the gate phase locally during a build.
 
+    Constructs a **build** context scoped to the diff since *base_sha*.
     When *feature_id* is provided, the structured report is persisted as
-    ``.devflow/<feature_id>/gate.json`` so a follow-up fixing phase can load
-    the exact failures instead of parsing free-form text.
+    ``.devflow/<feature_id>/gate.json``.
 
-    Returns ``(passed, summary_text, metrics)`` — metrics is a blank
-    PhaseMetrics since the gate is local and incurs no model cost.
+    Returns ``(passed, summary_text, metrics)``.
     """
     import json
 
     from devflow.core.artifacts import write_artifact
 
-    report = run_gate(base, stack=stack)
+    ctx = build_context(mode="build", base_sha=base_sha, base=base)
+    report = run_gate(ctx, base, stack=stack)
 
     if feature_id:
         write_artifact(

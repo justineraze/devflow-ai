@@ -108,6 +108,7 @@ def _parse_plan_type(plan_output: str) -> str | None:
 def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str,
     base: Path | None = None, verbose: bool = False,
+    base_sha: str = "",
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a single phase via Claude Code or local gate."""
     from devflow.integrations.gate import run_gate_phase
@@ -115,7 +116,10 @@ def _execute_phase(
 
     if phase.name == "gate":
         from devflow.core.config import load_config
-        return run_gate_phase(base, stack=load_config(base).stack, feature_id=feature.id)
+        return run_gate_phase(
+            base, stack=load_config(base).stack,
+            feature_id=feature.id, base_sha=base_sha,
+        )
     return execute_phase(feature, phase, agent_name, verbose=verbose)
 
 
@@ -203,6 +207,7 @@ def _run_execution_loop(
     base: Path | None = None,
     verbose: bool = False,
     base_branch: str = "main",
+    base_sha: str = "",
 ) -> tuple[Feature, bool]:
     """Run implementation, review, gate, and fixing phases.
 
@@ -241,7 +246,9 @@ def _run_execution_loop(
         model_label = get_backend().model_name(tier)
         render_phase_header(phase_num, total, phase.name, model_label)
         start = time.monotonic()
-        success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
+        success, output, metrics = _execute_phase(
+            feature, phase, agent_name, base, verbose, base_sha=base_sha,
+        )
         elapsed = time.monotonic() - start
 
         if success:
@@ -431,7 +438,7 @@ def execute_build_loop(
         1. Stay on current branch (no branch creation)
         2. Run all phases identically (planning, confirmation, execution)
         3. No PR — on success, print the commit SHAs
-        4. On failure, hard-reset to the pre-build HEAD
+        4. On failure, changes stay on branch (user decides)
 
     When ``worktree=True``, the build runs in an isolated git worktree
     under ``.devflow/.worktrees/<feature-id>/``. This allows multiple
@@ -445,7 +452,6 @@ def execute_build_loop(
         get_head_sha,
         get_untracked_files,
         main_repo_root,
-        reset_to_sha,
         switch_branch,
     )
     from devflow.orchestration.phase_exec import reset_planning_phases
@@ -463,8 +469,8 @@ def execute_build_loop(
     wt_path: Path | None = None
     branch = ""
 
-    # Save HEAD for potential revert (do mode).
-    initial_sha = get_head_sha(short=False) if not create_pr else ""
+    # Save HEAD as base for gate diff scoping (both modes).
+    initial_sha = get_head_sha(short=False)
 
     # ── Branch / Worktree (build mode only) ──
     if create_pr:
@@ -537,25 +543,24 @@ def execute_build_loop(
 
     # ── Execution ──
     feature, ok = _run_execution_loop(
-        feature, totals, initial_untracked, stack, base, verbose, base_branch,
+        feature, totals, initial_untracked, stack, base, verbose,
+        base_branch, base_sha=initial_sha,
     )
     if not ok:
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
-        # do mode: revert all commits on failure.
         if not create_pr and initial_sha:
             current_sha = get_head_sha(short=False)
             if current_sha != initial_sha:
                 console.print(
-                    "\n[red bold]Build failed — reverting changes.[/red bold]"
+                    "\n[yellow]Gate failed. Changes are still on your branch.[/yellow]"
                 )
-                if reset_to_sha(initial_sha):
-                    console.print(f"[dim]Reset to {initial_sha[:7]}.[/dim]\n")
-                else:
-                    console.print(
-                        f"[yellow]Auto-reset failed. "
-                        f"Manual reset: git reset --hard {initial_sha[:7]}[/yellow]\n"
-                    )
+                console.print(
+                    f"[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]"
+                )
+                console.print(
+                    f"[dim]Pour réessayer : devflow build --retry {feature.id}[/dim]\n"
+                )
         return False
 
     # ── Finalize ──

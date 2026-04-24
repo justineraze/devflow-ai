@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from devflow.integrations.gate.context import GateContext
 from devflow.integrations.gate.secrets import scan_secrets
 
 
@@ -102,4 +103,57 @@ class TestScanSecrets:
 
         monkeypatch.setattr(Path, "read_text", _raise_oserror)
         result = scan_secrets(tmp_path)
+        assert result.passed is True
+
+
+class TestScanSecretsBuildMode:
+    """Tests for scan_secrets with a build GateContext."""
+
+    def test_build_mode_only_scans_changed_files(self, tmp_path: Path) -> None:
+        """Only changed_files are scanned, not the whole repo."""
+        (tmp_path / "clean.py").write_text("print('hello')")
+        (tmp_path / "dirty.py").write_text('key = "AKIAIOSFODNN7EXAMPLE"')
+
+        # Only clean.py is in the diff → dirty.py is ignored.
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("clean.py")],
+        )
+        result = scan_secrets(tmp_path, ctx=ctx)
+        assert result.passed is True
+
+    def test_build_mode_detects_secret_in_changed_file(self, tmp_path: Path) -> None:
+        (tmp_path / "config.py").write_text('key = "AKIAIOSFODNN7EXAMPLE"')
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("config.py")],
+        )
+        result = scan_secrets(tmp_path, ctx=ctx)
+        assert result.passed is False
+
+    def test_build_mode_excludes_patterns(self, tmp_path: Path) -> None:
+        wp = tmp_path / "wp-admin"
+        wp.mkdir()
+        (wp / "config.php").write_text('secret = "AKIAIOSFODNN7EXAMPLE"')
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("wp-admin/config.php")],
+            exclude_patterns=["wp-admin/**"],
+        )
+        result = scan_secrets(tmp_path, ctx=ctx)
+        assert result.passed is True
+
+    def test_audit_mode_scans_everything(self, tmp_path: Path) -> None:
+        """Audit context behaves like the legacy full scan."""
+        (tmp_path / "leaked.py").write_text('key = "AKIAIOSFODNN7EXAMPLE"')
+        ctx = GateContext(mode="audit")
+        result = scan_secrets(tmp_path, ctx=ctx)
+        assert result.passed is False
+
+    def test_audit_mode_respects_excludes(self, tmp_path: Path) -> None:
+        d = tmp_path / "vendor"
+        d.mkdir()
+        (d / "lib.py").write_text('key = "AKIAIOSFODNN7EXAMPLE"')
+        ctx = GateContext(mode="audit", exclude_patterns=["vendor/**"])
+        result = scan_secrets(tmp_path, ctx=ctx)
         assert result.passed is True

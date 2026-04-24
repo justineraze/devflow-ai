@@ -110,18 +110,16 @@ class TestBuildLoopDoMode:
         assert result is True
 
     @patch("devflow.orchestration.build.setup_gate_retry", return_value=False)
-    @patch("devflow.integrations.git.reset_to_sha", return_value=True)
     @patch("devflow.integrations.git.get_head_sha")
     @patch("devflow.integrations.git.commit_changes", return_value=True)
     @patch("devflow.integrations.git.get_untracked_files", return_value=[])
     @patch("devflow.orchestration.build._execute_phase")
-    def test_failure_reverts_to_initial_sha(
+    def test_failure_keeps_changes_on_branch(
         self,
         mock_exec: MagicMock,
         mock_untracked: MagicMock,
         mock_commit: MagicMock,
         mock_sha: MagicMock,
-        mock_reset: MagicMock,
         mock_gate_retry: MagicMock,
         project_dir: Path,
     ) -> None:
@@ -135,7 +133,7 @@ class TestBuildLoopDoMode:
         result = execute_build_loop(feature, base=project_dir, create_pr=False)
 
         assert result is False
-        mock_reset.assert_called_once_with("initial_sha_full")
+        # No auto-revert — changes stay on the branch.
 
 
 # ---------------------------------------------------------------------------

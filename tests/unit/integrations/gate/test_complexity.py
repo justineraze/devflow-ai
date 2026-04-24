@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from devflow.integrations.gate.complexity import check_complexity
+from devflow.integrations.gate.context import GateContext
 
 
 class TestCheckComplexity:
@@ -83,3 +84,42 @@ class TestCheckComplexity:
         )
         result = check_complexity(base=tmp_path)
         assert len(result.details) <= 2000
+
+
+class TestCheckComplexityBuildMode:
+    """Tests for complexity check with build GateContext."""
+
+    @patch("devflow.integrations.gate.complexity.subprocess.run")
+    def test_build_mode_passes_specific_files(self, mock_run: patch, tmp_path: Path) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["ruff"], returncode=0, stdout="", stderr="",
+        )
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("src/app.py"), Path("src/utils.py")],
+        )
+        check_complexity(base=tmp_path, ctx=ctx)
+
+        cmd = mock_run.call_args[0][0]
+        assert "src/app.py" in cmd
+        assert "src/utils.py" in cmd
+        assert "." not in cmd
+
+    def test_build_mode_no_py_files_skips(self, tmp_path: Path) -> None:
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("README.md"), Path("style.css")],
+        )
+        result = check_complexity(base=tmp_path, ctx=ctx)
+        assert result.passed is True
+        assert "No Python" in result.message
+
+    def test_build_mode_excludes_patterns(self, tmp_path: Path) -> None:
+        ctx = GateContext(
+            mode="build",
+            changed_files=[Path("vendor/lib.py")],
+            exclude_patterns=["vendor/**"],
+        )
+        result = check_complexity(base=tmp_path, ctx=ctx)
+        assert result.passed is True
+        assert "No Python" in result.message

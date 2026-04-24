@@ -1,40 +1,17 @@
-"""Module size check — detect oversized Python files in the diff."""
+"""Module size check — detect oversized Python files."""
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from devflow.integrations.gate.report import CheckResult
 
+if TYPE_CHECKING:
+    from devflow.integrations.gate.context import GateContext
+
 DEFAULT_MAX_LINES = 400
 _SRC_DIR = "src"
-
-
-def _modified_py_files(cwd: Path) -> list[str]:
-    """Return .py files modified in the current branch diff (vs HEAD~1).
-
-    Falls back to an empty list if git is unavailable or the repo has no
-    commits yet.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=str(cwd),
-            timeout=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
-
-    if result.returncode != 0:
-        return []
-
-    return [
-        f for f in result.stdout.strip().split("\n")
-        if f.endswith(".py") and f.startswith(_SRC_DIR + "/")
-    ]
 
 
 def _count_non_empty_lines(path: Path) -> int:
@@ -46,11 +23,38 @@ def _count_non_empty_lines(path: Path) -> int:
     return sum(1 for line in text.splitlines() if line.strip())
 
 
+def _collect_py_files(cwd: Path, ctx: GateContext | None) -> list[str]:
+    """Return the list of .py file paths to check.
+
+    Build mode with context → changed .py files under src/.
+    Audit mode or no context → all .py files under src/ (rglob).
+    """
+    if ctx and ctx.mode == "build" and ctx.changed_files:
+        return [
+            str(f) for f in ctx.scoped_files(cwd)
+            if str(f).endswith(".py") and str(f).startswith(_SRC_DIR + "/")
+        ]
+
+    # Audit mode: scan all .py under src/.
+    src = cwd / _SRC_DIR
+    if not src.is_dir():
+        return []
+    return [
+        str(p.relative_to(cwd))
+        for p in src.rglob("*.py")
+        if p.is_file() and not (ctx and ctx.is_excluded(p.relative_to(cwd)))
+    ]
+
+
 def check_module_size(
     base: Path | None = None,
     max_lines: int = DEFAULT_MAX_LINES,
+    ctx: GateContext | None = None,
 ) -> CheckResult:
-    """Check that modified Python modules don't exceed *max_lines* non-empty lines.
+    """Check that Python modules don't exceed *max_lines* non-empty lines.
+
+    In build mode, only changed files are checked.
+    In audit mode, all files under ``src/`` are checked.
 
     Returns a **warning-style** result: ``passed`` is always ``True`` so the
     gate doesn't block, but violations are surfaced for the fixing agent.
@@ -58,17 +62,19 @@ def check_module_size(
     Args:
         base: Project root (defaults to cwd).
         max_lines: Threshold for non-empty lines (default 400).
+        ctx: Gate context (build vs audit scoping).
     """
     cwd = base or Path.cwd()
-    modified = _modified_py_files(cwd)
+    py_files = _collect_py_files(cwd, ctx)
 
-    if not modified:
+    if not py_files:
+        label = "No files to check" if ctx and ctx.mode == "build" else "No modules to check"
         return CheckResult(
-            name="module_size", passed=True, message="No modified modules to check",
+            name="module_size", passed=True, message=label,
         )
 
     violations: list[str] = []
-    for rel_path in modified:
+    for rel_path in py_files:
         full_path = cwd / rel_path
         if not full_path.is_file():
             continue
@@ -78,7 +84,7 @@ def check_module_size(
 
     if not violations:
         return CheckResult(
-            name="module_size", passed=True, message="All modified modules within size limit",
+            name="module_size", passed=True, message="All modules within size limit",
         )
 
     return CheckResult(

@@ -7,6 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from devflow.integrations.gate import CheckResult, GateReport, run_gate
+from devflow.integrations.gate.context import GateContext
+
+_AUDIT_CTX = GateContext(mode="audit")
 
 
 class TestToDict:
@@ -57,7 +60,7 @@ class TestParallelExecution:
             side_effect=slow_check,
         ):
             start = time.monotonic()
-            report = run_gate(base=tmp_path, stack="python")
+            report = run_gate(_AUDIT_CTX, base=tmp_path, stack="python")
             elapsed = time.monotonic() - start
 
         assert report.passed is True
@@ -90,7 +93,7 @@ class TestParallelExecution:
             "devflow.integrations.gate.runner.check_module_size",
             side_effect=named("module_size"),
         ):
-            report = run_gate(base=tmp_path, stack="python")
+            report = run_gate(_AUDIT_CTX, base=tmp_path, stack="python")
 
         names = [c.name for c in report.checks]
         assert names == ["ruff", "pytest", "secrets", "complexity", "module_size"]

@@ -221,10 +221,12 @@ def check() -> None:
     """Run the quality gate (lint, tests, secrets detection)."""
     from devflow.integrations.detect import resolve_stack
     from devflow.integrations.gate import run_gate
+    from devflow.integrations.gate.context import build_context
     from devflow.ui.gate_panel import render_gate_report
 
     render_header(subtitle="Quality gate")
-    report = run_gate(stack=resolve_stack())
+    ctx = build_context(mode="audit")
+    report = run_gate(ctx, stack=resolve_stack())
     render_gate_report(report)
     if not report.passed:
         raise typer.Exit(1)

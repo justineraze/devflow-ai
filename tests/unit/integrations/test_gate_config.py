@@ -8,8 +8,11 @@ from unittest.mock import patch
 import yaml
 
 from devflow.integrations.gate.config import load_gate_config
+from devflow.integrations.gate.context import GateContext
 from devflow.integrations.gate.report import GateReport
 from devflow.integrations.gate.runner import _run_custom_check, run_gate
+
+_AUDIT_CTX = GateContext(mode="audit")
 
 
 class TestLoadGateConfig:
@@ -99,7 +102,7 @@ class TestRunGateWithCustomConfig:
                 "devflow.integrations.gate.report", fromlist=["CheckResult"]
             ).CheckResult(name="module_size", passed=True),
         ):
-            report = run_gate(base=tmp_path)
+            report = run_gate(_AUDIT_CTX, base=tmp_path)
 
         assert report.custom is True
         assert report.passed is True
@@ -128,7 +131,7 @@ class TestRunGateWithCustomConfig:
             "devflow.integrations.gate.runner.check_module_size",
             return_value=CheckResult(name="module_size", passed=True),
         ):
-            report = run_gate(base=tmp_path, stack="python")
+            report = run_gate(_AUDIT_CTX, base=tmp_path, stack="python")
 
         assert report.custom is False
 

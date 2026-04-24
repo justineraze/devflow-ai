@@ -25,6 +25,8 @@ class GateConfig(BaseModel):
 
     lint: str | None = None
     test: str | None = None
+    exclude: list[str] | None = None
+    """Glob patterns for files/dirs to skip in all gate checks."""
 
 
 class LinearConfig(BaseModel):
@@ -188,11 +190,13 @@ def save_config(config: DevflowConfig, base: Path | None = None) -> Path:
     if config.base_branch != "main":
         data["base_branch"] = config.base_branch
 
-    gate_dict: dict[str, str] = {}
+    gate_dict: dict[str, Any] = {}
     if config.gate.lint:
         gate_dict["lint"] = config.gate.lint
     if config.gate.test:
         gate_dict["test"] = config.gate.test
+    if config.gate.exclude:
+        gate_dict["exclude"] = config.gate.exclude
     if gate_dict:
         data["gate"] = gate_dict
 
