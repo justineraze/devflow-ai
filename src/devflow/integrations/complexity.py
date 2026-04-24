@@ -1,12 +1,93 @@
-"""Complexity scoring — analyse task description and codebase to pick a workflow."""
+"""Complexity scoring — analyse task description to pick a workflow.
+
+Primary scorer uses the backend LLM (Haiku-tier one-shot) to evaluate
+task complexity across four dimensions.  Falls back to the keyword-based
+heuristic if the LLM call fails for any reason.
+"""
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from pathlib import Path
 
 from devflow.core.models import CRITICAL_PATH_PATTERNS, ComplexityScore
 from devflow.integrations.detect import walk_files
+
+log = logging.getLogger(__name__)
+
+# ── LLM scorer ────────────────────────────────────────────────────
+
+_SCORER_SYSTEM = """\
+You are a task complexity scorer for a software build system.
+Given a development task description, score its complexity on 4 dimensions (each 0-3):
+
+- files_touched: how many files will be created or modified
+  0 = 1 file, 1 = 2-3 files, 2 = 4-8 files, 3 = 9+ files
+- integrations: external systems involved
+  0 = none, 1 = 1 system, 2 = 2-3 systems, 3 = 4+ systems
+- security: security-sensitive surface area
+  0 = none, 1 = minor, 2 = auth/tokens/crypto, 3 = critical
+- scope: breadth of change
+  0 = tweak, 1 = small feature, 2 = new module, 3 = multi-module
+
+Respond with ONLY a JSON object, no explanation:
+{"files_touched": N, "integrations": N, "security": N, "scope": N}"""
+
+# Truncate user prompt to keep cost low (~$0.001 per call).
+_MAX_PROMPT_CHARS = 2000
+
+# LLM timeout — fast enough to not stall the build.
+_LLM_TIMEOUT = 15
+
+
+def _score_via_llm(description: str) -> ComplexityScore | None:
+    """Score complexity via a one-shot LLM call.  Returns ``None`` on failure."""
+    from devflow.core.backend import ModelTier, get_backend
+
+    backend = get_backend()
+    model = backend.model_name(ModelTier.FAST)
+    user_prompt = description[:_MAX_PROMPT_CHARS]
+
+    try:
+        raw = backend.one_shot(
+            system=_SCORER_SYSTEM,
+            user=user_prompt,
+            model=model,
+            timeout=_LLM_TIMEOUT,
+        )
+    except Exception:
+        log.debug("LLM complexity scorer: backend call failed", exc_info=True)
+        return None
+
+    if not raw:
+        return None
+
+    try:
+        data = json.loads(raw.strip())
+    except (json.JSONDecodeError, ValueError):
+        log.debug("LLM complexity scorer: invalid JSON response: %s", raw[:200])
+        return None
+
+    try:
+        return ComplexityScore(
+            files_touched=_clamp(data["files_touched"]),
+            integrations=_clamp(data["integrations"]),
+            security=_clamp(data["security"]),
+            scope=_clamp(data["scope"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        log.debug("LLM complexity scorer: bad payload: %s (%s)", data, exc)
+        return None
+
+
+def _clamp(value: object, lo: int = 0, hi: int = 3) -> int:
+    """Clamp an integer value to [lo, hi], raising on non-int."""
+    return max(lo, min(int(value), hi))  # type: ignore[arg-type]
+
+
+# ── Heuristic scorer (fallback) ──────────────────────────────────
 
 # Additional security terms not covered by CRITICAL_PATH_PATTERNS.
 _SECURITY_EXTRA: tuple[str, ...] = ("rbac", "permission", "acl", "privilege", "cors", "csrf")
@@ -79,9 +160,6 @@ def _score_security(description: str) -> int:
     """Score 0-3: security-sensitive surface area in the description."""
     desc = description.lower()
     all_patterns = CRITICAL_PATH_PATTERNS + _SECURITY_EXTRA
-    # Intentional substring match (no word boundary): "auth" should trigger on
-    # "authentication", "token" on "tokenisation", etc.  Security scoring
-    # favours false-positives over false-negatives.
     hits = sum(1 for pat in all_patterns if pat in desc)
     if hits == 0:
         return 0
@@ -99,10 +177,8 @@ def _score_scope(description: str) -> int:
     high_hits = sum(1 for v in _HIGH_SCOPE_VERBS if v in desc)
     low_hits = sum(1 for v in _LOW_SCOPE_VERBS if v in desc)
 
-    # Net verb score.
     net = high_hits - low_hits
 
-    # Description length bonus: longer descriptions imply broader scope.
     words = len(description.split())
     length_bonus = 0
     if words >= 30:
@@ -110,26 +186,64 @@ def _score_scope(description: str) -> int:
     elif words >= 15:
         length_bonus = 1
 
-    # raw may be negative (many low-scope verbs) — clamp to [0, 3].
     raw = net + length_bonus
     return max(0, min(raw, 3))
 
 
-def score_complexity(description: str, base: Path | None = None) -> ComplexityScore:
-    """Analyse *description* (and optionally the project at *base*) to produce
-    a :class:`ComplexityScore` that maps to a recommended workflow.
-
-    Args:
-        description: The feature description string.
-        base: Optional project root used for file-count heuristics.
-
-    Returns:
-        A :class:`ComplexityScore` with individual dimension scores and a
-        ``workflow`` property (``"quick"`` / ``"light"`` / ``"standard"`` / ``"full"``).
-    """
+def _score_heuristic(description: str, base: Path | None = None) -> ComplexityScore:
+    """Keyword-based heuristic scorer (original algorithm, kept as fallback)."""
     return ComplexityScore(
         files_touched=_score_files_touched(description, base),
         integrations=_score_integrations(description),
         security=_score_security(description),
         scope=_score_scope(description),
     )
+
+
+# ── Public API ────────────────────────────────────────────────────
+
+# Workflow ordering for floor comparison.
+_WORKFLOW_RANK: dict[str, int] = {
+    "quick": 0,
+    "light": 1,
+    "standard": 2,
+    "full": 3,
+}
+
+
+def score_complexity(
+    description: str,
+    base: Path | None = None,
+    *,
+    workflow_floor: str | None = None,
+) -> ComplexityScore:
+    """Score task complexity via LLM, falling back to keyword heuristics.
+
+    Args:
+        description: The feature description string.
+        base: Optional project root used for file-count heuristics (fallback only).
+        workflow_floor: Minimum workflow level (from config.workflow).
+            The scorer can upgrade but never downgrade below this floor.
+
+    Returns:
+        A :class:`ComplexityScore` with a ``method`` annotation indicating
+        whether the score came from the LLM or the heuristic fallback.
+    """
+    llm_score = _score_via_llm(description)
+
+    if llm_score is not None:
+        score = llm_score
+        score.method = "llm"
+    else:
+        score = _score_heuristic(description, base)
+        score.method = "heuristic"
+
+    # Apply workflow floor: if the scored workflow ranks below the floor,
+    # override the workflow field to the floor value.
+    if workflow_floor and workflow_floor in _WORKFLOW_RANK:
+        scored_rank = _WORKFLOW_RANK.get(score.workflow, 0)
+        floor_rank = _WORKFLOW_RANK[workflow_floor]
+        if scored_rank < floor_rank:
+            object.__setattr__(score, "workflow", workflow_floor)
+
+    return score

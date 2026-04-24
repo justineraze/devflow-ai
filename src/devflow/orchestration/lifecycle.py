@@ -68,15 +68,21 @@ def start_build(
 
     complexity = None
     if workflow_name is None:
-        complexity = score_complexity(prompt or description, base)
+        from devflow.core.config import load_config
+
+        cfg = load_config(base)
+        complexity = score_complexity(
+            prompt or description, base, workflow_floor=cfg.workflow,
+        )
         workflow_name = complexity.workflow
+        method_label = "scored by LLM" if complexity.method == "llm" else "heuristic fallback"
         console.print(
-            f"[dim]Auto-selected workflow:[/dim] [bold]{workflow_name}[/bold] "
-            f"[dim](score {complexity.total}/12 — "
-            f"files:{complexity.files_touched} "
-            f"integrations:{complexity.integrations} "
-            f"security:{complexity.security} "
-            f"scope:{complexity.scope})[/dim]"
+            f"[dim]Complexity: "
+            f"files={complexity.files_touched} "
+            f"integrations={complexity.integrations} "
+            f"security={complexity.security} "
+            f"scope={complexity.scope} "
+            f"→ {workflow_name} ({method_label})[/dim]"
         )
 
     feature = create_feature(state, feature_id, description, workflow_name)

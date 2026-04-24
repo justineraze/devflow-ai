@@ -55,6 +55,9 @@ class ComplexityScore(BaseModel):
     workflow: str = ""
     """Workflow resolved from total at construction time (never recomputed)."""
 
+    method: str = ""
+    """How the score was produced: ``"llm"`` or ``"heuristic"`` (empty = unknown)."""
+
     def model_post_init(self, __context: object) -> None:
         """Resolve workflow from total once, at construction time."""
         if not self.workflow:

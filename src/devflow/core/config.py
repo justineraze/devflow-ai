@@ -54,6 +54,13 @@ class DevflowConfig(BaseModel):
     backend: str = "claude"
     """AI backend to use (claude | gemini | openai | aider — only claude implemented)."""
 
+    workflow: str | None = None
+    """Workflow floor override (quick | light | standard | full).
+
+    When set, the complexity scorer can upgrade but never downgrade below
+    this level.  ``None`` means fully auto-selected by the scorer.
+    """
+
 
 # ── Paths ──────────────────────────────────────────────────────────
 
@@ -208,6 +215,9 @@ def save_config(config: DevflowConfig, base: Path | None = None) -> Path:
 
     if config.backend != "claude":
         data["backend"] = config.backend
+
+    if config.workflow is not None:
+        data["workflow"] = config.workflow
 
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True) if data else ""
     atomic_write_text(path, content)

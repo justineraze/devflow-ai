@@ -28,7 +28,9 @@ class TestStartBuildAutoWorkflow:
             return_value=mock_score,
         ) as mock_scorer:
             start_build("fix a typo", workflow_name=None, base=project_dir)
-        mock_scorer.assert_called_once_with("fix a typo", project_dir)
+        mock_scorer.assert_called_once_with(
+            "fix a typo", project_dir, workflow_floor=None,
+        )
 
     def test_explicit_workflow_skips_scoring(self, project_dir: Path) -> None:
         """When workflow_name is explicit, score_complexity is NOT called."""
@@ -89,6 +91,5 @@ class TestStartBuildAutoWorkflow:
             lifecycle_mod.console = original
 
         output = buf.getvalue()
-        assert "Auto-selected workflow" in output
+        assert "Complexity:" in output
         assert "quick" in output
-        assert "1/12" in output
