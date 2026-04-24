@@ -54,9 +54,11 @@ def render_gate_report(report: GateReport) -> None:
     else:
         verdict, verdict_style, border = "PASSED", "reverse green bold", "green"
 
+    subtitle = Text("custom (.devflow/gate.yaml)", style="dim") if report.custom else None
     console.print(Panel(
         body,
         title=Text(f" Gate — {verdict} ", style=verdict_style),
+        subtitle=subtitle,
         border_style=border,
         padding=(1, 2),
     ))
@@ -70,14 +72,17 @@ def render_gate_panel(feature_id: str, base: Path | None = None) -> None:
     if not data:
         return
 
-    report = GateReport(checks=[
-        CheckResult(
-            name=c.get("name", "?"),
-            passed=bool(c.get("passed", False)),
-            skipped=bool(c.get("skipped", False)),
-            message=c.get("message", ""),
-            details=c.get("details", ""),
-        )
-        for c in data.get("checks", [])
-    ])
+    report = GateReport(
+        checks=[
+            CheckResult(
+                name=c.get("name", "?"),
+                passed=bool(c.get("passed", False)),
+                skipped=bool(c.get("skipped", False)),
+                message=c.get("message", ""),
+                details=c.get("details", ""),
+            )
+            for c in data.get("checks", [])
+        ],
+        custom=bool(data.get("custom", False)),
+    )
     render_gate_report(report)

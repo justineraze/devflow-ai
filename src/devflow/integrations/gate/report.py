@@ -28,6 +28,7 @@ class GateReport:
     """Aggregated quality gate report."""
 
     checks: list[CheckResult] = field(default_factory=list)
+    custom: bool = False
 
     @property
     def passed(self) -> bool:
@@ -48,6 +49,7 @@ class GateReport:
         return {
             "passed": self.passed,
             "has_skipped": self.has_skipped,
+            "custom": self.custom,
             "checks": [
                 {
                     "name": c.name,
