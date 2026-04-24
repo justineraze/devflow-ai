@@ -78,6 +78,8 @@ def _add_feature_row(
         style = status_style(feature.status.value)
         status_cell = Text(feature.status.value, style=style)
 
+    linear_cell = feature.metadata.linear_issue_key or "—"
+
     label = f"{indent}{feature.id}"
     table.add_row(
         label,
@@ -85,6 +87,7 @@ def _add_feature_row(
         status_cell,
         workflow_cell,
         phase_info,
+        linear_cell,
         feature.updated_at.strftime("%Y-%m-%d %H:%M"),
     )
 
@@ -115,6 +118,7 @@ def render_status_table(
     table.add_column("Status")
     table.add_column("Workflow", style="dim")
     table.add_column("Phase")
+    table.add_column("Linear", style="dim")
     table.add_column("Updated")
 
     # Separate epics, children, and standalone features.

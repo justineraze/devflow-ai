@@ -383,6 +383,12 @@ def _finalize_build(
                 f"Les prompts système ont peut-être changé.[/yellow]"
             )
 
+    # Sync Linear status to "completed" (best-effort).
+    if final.metadata.linear_issue_id and state.linear_team_id:
+        from devflow.integrations.linear.sync import sync_single_feature
+
+        sync_single_feature(final, state.linear_team_id, base)
+
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
         console.print("[yellow]PR creation failed — push manually.[/yellow]\n")

@@ -135,6 +135,10 @@ def render_build_banner(feature: Feature, branch: str, stack: str | None) -> Non
     meta.append("  ·  ", style="dim")
     meta.append(f"{total_phases} phases", style="cyan")
 
+    if feature.metadata.linear_issue_key:
+        meta.append("  ·  ", style="dim")
+        meta.append(f"Linear: {feature.metadata.linear_issue_key}", style="cyan")
+
     branch_line = Text()
     branch_line.append("🌿 ", style="green")
     branch_line.append(branch, style="dim")
@@ -270,12 +274,16 @@ def render_build_summary(
         link = Text()
         link.append("🔗 ", style="green")
         link.append(pr_url, style="blue underline")
+        if feature.metadata.linear_issue_key:
+            link.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
         rows.append(link)
     else:
         rows.append(Text())
         hint = Text()
         hint.append("branch: ", style="dim")
         hint.append(branch, style="dim")
+        if feature.metadata.linear_issue_key:
+            hint.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
         rows.append(hint)
 
     console.print()

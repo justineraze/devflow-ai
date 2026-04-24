@@ -79,6 +79,15 @@ def fail_phase(
             phase.fail(error)
         transition_safe(feature, FeatureStatus.FAILED)
 
+        # Sync Linear status to "canceled" (best-effort).
+        if feature.metadata.linear_issue_id:
+            from devflow.core.workflow import load_state
+            from devflow.integrations.linear.sync import sync_single_feature
+
+            state = load_state(base)
+            if state.linear_team_id:
+                sync_single_feature(feature, state.linear_team_id, base)
+
 
 def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
     """Reset planning phases back to pending for re-planning with feedback."""

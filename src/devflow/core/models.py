@@ -102,7 +102,10 @@ class FeatureMetadata(BaseModel):
     """Complexity score computed at feature creation (auto-select workflow)."""
 
     linear_issue_id: str | None = None
-    """Linear issue ID (e.g. 'ABC-123'). Set when synced to Linear."""
+    """Linear issue UUID. Set when synced to Linear."""
+
+    linear_issue_key: str | None = None
+    """Linear issue identifier for display (e.g. 'ABC-123')."""
 
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""

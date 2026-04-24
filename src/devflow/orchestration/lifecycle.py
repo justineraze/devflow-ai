@@ -71,6 +71,17 @@ def start_build(
     feature = create_feature(state, feature_id, description, workflow_name)
     if complexity is not None:
         feature.metadata.complexity = complexity
+
+    # Auto-create Linear issue if configured.
+    if state.linear_team_id:
+        from devflow.integrations.linear.client import is_configured
+        from devflow.integrations.linear.sync import create_issue_for_feature
+
+        if is_configured():
+            key = create_issue_for_feature(feature, state.linear_team_id)
+            if key:
+                console.print(f"[dim]Linear: {key}[/dim]")
+
     save_state(state, base)
     return feature
 
