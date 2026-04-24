@@ -2,6 +2,9 @@
 
 Split into focused submodules; re-exports preserved for existing consumers.
 """
+
+from __future__ import annotations
+
 from .commit_message import build_commit_message, build_pr_title
 from .pr_body import (
     build_pr_body,

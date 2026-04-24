@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from rich.console import Group
@@ -13,11 +12,20 @@ from rich.text import Text
 
 from devflow.core.console import console
 from devflow.core.formatting import format_cost, format_tokens
-from devflow.core.metrics import PhaseMetrics, PhaseResult
+from devflow.core.metrics import (
+    BuildTotals,
+    PhaseMetrics,
+    PhaseResult,
+    PhaseSnapshot,
+    compute_cache_hit_rate,
+)
 from devflow.core.models import Feature
 
 if TYPE_CHECKING:
     from devflow.orchestration.sync import SyncResult
+
+# Re-export for backwards compatibility (tests, external consumers).
+PhaseMetricSnapshot = PhaseSnapshot
 
 STACK_ICONS: dict[str, str] = {
     "python": "🐍",
@@ -39,72 +47,6 @@ PHASE_DOT_COLORS: dict[str, str] = {
     "pending": "dim",
     "skipped": "dim",
 }
-
-
-@dataclass
-class PhaseMetricSnapshot:
-    """Metrics for a single phase execution — stored in BuildTotals for history."""
-
-    name: str
-    model: str
-    cost_usd: float
-    input_tokens: int
-    output_tokens: int
-    cache_creation: int
-    cache_read: int
-    tool_count: int
-    duration_s: float
-    success: bool
-    commits: int = 0
-    files_changed: int = 0
-    insertions: int = 0
-    deletions: int = 0
-
-
-@dataclass
-class BuildTotals:
-    """Running totals across all phases of a build."""
-
-    cost_usd: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation: int = 0
-    cache_read: int = 0
-    tool_count: int = 0
-    duration_s: float = 0.0
-    phase_durations: dict[str, float] = field(default_factory=dict)
-    phase_snapshots: list[PhaseMetricSnapshot] = field(default_factory=list)
-
-    def add(
-        self, phase_name: str, metrics: PhaseMetrics, elapsed_s: float,
-        model: str = "", success: bool = True,
-        commits: int = 0, files_changed: int = 0,
-        insertions: int = 0, deletions: int = 0,
-    ) -> None:
-        self.cost_usd += metrics.cost_usd
-        self.input_tokens += metrics.input_tokens
-        self.output_tokens += metrics.output_tokens
-        self.cache_creation += metrics.cache_creation
-        self.cache_read += metrics.cache_read
-        self.tool_count += metrics.tool_count
-        self.duration_s += elapsed_s
-        self.phase_durations[phase_name] = elapsed_s
-        self.phase_snapshots.append(PhaseMetricSnapshot(
-            name=phase_name,
-            model=model,
-            cost_usd=metrics.cost_usd,
-            input_tokens=metrics.input_tokens,
-            output_tokens=metrics.output_tokens,
-            cache_creation=metrics.cache_creation,
-            cache_read=metrics.cache_read,
-            tool_count=metrics.tool_count,
-            duration_s=elapsed_s,
-            success=success,
-            commits=commits,
-            files_changed=files_changed,
-            insertions=insertions,
-            deletions=deletions,
-        ))
 
 
 def _model_badge(model: str) -> Text:
@@ -189,9 +131,11 @@ def render_phase_success(
     if metrics.cost_usd:
         chip.append(f"   {format_cost(metrics.cost_usd)}", style="yellow")
 
-    total_in = metrics.input_tokens + metrics.cache_creation + metrics.cache_read
-    if total_in > 0 and metrics.cache_read:
-        pct = int(metrics.cache_read / total_in * 100)
+    cache_rate = compute_cache_hit_rate(
+        metrics.input_tokens, metrics.cache_creation, metrics.cache_read,
+    )
+    if cache_rate > 0:
+        pct = int(cache_rate * 100)
         chip.append(f"   cache {pct}%", style="green" if pct >= 80 else "yellow")
 
     console.print(chip)
@@ -303,10 +247,13 @@ def render_build_summary(
     grid.add_row("Cost", Text(format_cost(totals.cost_usd), style="yellow bold"))
     grid.add_row("Tools", str(totals.tool_count))
 
-    total_in = totals.input_tokens + totals.cache_creation + totals.cache_read
-    if total_in > 0:
-        cache_pct = int(totals.cache_read / total_in * 100)
+    cache_rate = compute_cache_hit_rate(
+        totals.input_tokens, totals.cache_creation, totals.cache_read,
+    )
+    if cache_rate > 0:
+        cache_pct = int(cache_rate * 100)
         cache_style = "green" if cache_pct >= 80 else "yellow"
+        total_in = totals.input_tokens + totals.cache_creation + totals.cache_read
         cache_text = Text()
         cache_text.append(f"{cache_pct}%", style=cache_style)
         cache_text.append(
@@ -330,7 +277,7 @@ def render_build_summary(
             cost_parts.append(f" {format_cost(cost)}", style="dim")
         grid.add_row("Cost by model", cost_parts)
 
-    rows: list = [grid, Text()]
+    rows: list[Text | Table] = [grid, Text()]
 
     if cost_budget and cost_budget > 0:
         ratio = totals.cost_usd / cost_budget
@@ -433,7 +380,7 @@ def render_sync_summary(result: SyncResult) -> None:
     cb_text = Text(result.current_branch or "—", style="cyan")
     grid.add_row("Current branch", cb_text)
 
-    rows: list = [grid]
+    rows: list[Text | Table] = [grid]
 
     if result.dry_run and result.actions:
         rows.append(Text())

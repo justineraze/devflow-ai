@@ -32,6 +32,15 @@ WORKFLOWS_DIR = _workflows_dir()
 _workflow_cache: dict[str, WorkflowDefinition] = {}
 
 
+def clear_workflow_cache() -> None:
+    """Clear the in-memory workflow definition cache.
+
+    Useful in tests that create temporary workflow files and need
+    ``load_workflow`` to re-read from disk.
+    """
+    _workflow_cache.clear()
+
+
 def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefinition:
     """Load a workflow definition from a YAML file.
 

@@ -19,6 +19,9 @@ from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
+BACKEND_DEFAULT = "claude"
+"""Default AI backend identifier."""
+
 
 class GateConfig(BaseModel):
     """Custom gate commands (optional overrides for auto-detection)."""
@@ -51,7 +54,7 @@ class DevflowConfig(BaseModel):
     linear: LinearConfig = Field(default_factory=LinearConfig)
     """Linear integration settings."""
 
-    backend: str = "claude"
+    backend: str = BACKEND_DEFAULT
     """AI backend to use (claude | gemini | openai | aider — only claude implemented)."""
 
     workflow: str | None = None
@@ -213,7 +216,7 @@ def save_config(config: DevflowConfig, base: Path | None = None) -> Path:
     if linear_dict:
         data["linear"] = linear_dict
 
-    if config.backend != "claude":
+    if config.backend != BACKEND_DEFAULT:
         data["backend"] = config.backend
 
     if config.workflow is not None:

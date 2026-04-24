@@ -7,6 +7,8 @@ Feature lifecycle (create/resume/retry) → lifecycle.py
 Phase state machine (run/complete/fail) → phase_exec.py
 Model selection                          → model_routing.py
 Gate execution                           → integrations/gate/
+Plan output parsing                      → plan_parser.py
+Review cycle logic                       → review.py
 """
 
 from __future__ import annotations
@@ -20,15 +22,13 @@ from rich.panel import Panel
 
 if TYPE_CHECKING:
     from devflow.core.metrics import PhaseResult
-    from devflow.ui.rendering import BuildTotals
 
 from devflow.core.artifacts import save_phase_output
 from devflow.core.backend import get_backend
 from devflow.core.console import console
-from devflow.core.metrics import PhaseMetrics
+from devflow.core.metrics import BuildTotals, PhaseMetrics
 from devflow.core.models import (
     Feature,
-    FeatureStatus,
     PhaseRecord,
     PhaseStatus,
 )
@@ -39,6 +39,25 @@ from devflow.orchestration.phase_exec import (
     run_phase,
     setup_gate_retry,
 )
+from devflow.orchestration.plan_parser import (
+    parse_plan_module,
+    parse_plan_title,
+    parse_plan_type,
+)
+from devflow.orchestration.review import (
+    MAX_REVIEW_CYCLES,  # noqa: F401 — re-exported for tests
+    setup_re_fix,
+    setup_re_review,
+    should_re_review,
+)
+
+# Backwards-compat re-exports (tests import the underscore-prefixed names).
+_parse_plan_module = parse_plan_module
+_parse_plan_title = parse_plan_title
+_parse_plan_type = parse_plan_type
+_should_re_review = should_re_review
+_setup_re_review = setup_re_review
+_setup_re_fix = setup_re_fix
 
 PLANNING_PHASES = frozenset({"architecture", "planning", "plan_review"})
 
@@ -49,69 +68,12 @@ def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | Non
     return state.get_feature(feature_id)
 
 
-def _parse_plan_module(plan_output: str) -> str | None:
-    """Extract the module name from the plan's ### Scope section.
-
-    Looks for: ``- Module: <module>``
-    Returns the first word of the value, or None if the line is absent.
-    """
-    import re
-
-    match = re.search(r"^\s*-\s+Module:\s+(\S+)", plan_output, re.MULTILINE)
-    if not match:
-        return None
-    return match.group(1).strip()
-
-
-def _parse_plan_title(plan_output: str) -> str | None:
-    """Extract the concise title from the plan header.
-
-    Looks for: ``## Plan: <feature-id> — <title>``
-    Returns the title part after the em-dash, or None if absent.
-    """
-    import re
-
-    match = re.search(r"^##\s+Plan:\s+\S+\s+[—–-]\s+(.+)$", plan_output, re.MULTILINE)
-    if not match:
-        return None
-    return match.group(1).strip()
-
-
-# Map plan Type: values → Conventional Commits prefixes.
-_PLAN_TYPE_TO_COMMIT: dict[str, str] = {
-    "new-feature": "feat",
-    "extension": "feat",
-    "bugfix": "fix",
-    "refactor": "refactor",
-    "docs": "docs",
-    "ci": "ci",
-    "test": "test",
-    "chore": "chore",
-    "perf": "perf",
-}
-
-
-def _parse_plan_type(plan_output: str) -> str | None:
-    """Extract the Conventional Commits type from the plan's Type: line.
-
-    Looks for: ``- Type: <value>``
-    Maps plan-specific values (new-feature, bugfix…) to commit types (feat, fix…).
-    Returns None if the line is absent or the value is unknown.
-    """
-    import re
-
-    match = re.search(r"^\s*-\s+Type:\s+(\S+)", plan_output, re.MULTILINE)
-    if not match:
-        return None
-    return _PLAN_TYPE_TO_COMMIT.get(match.group(1).strip().lower())
-
-
 def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str,
     base: Path | None = None, verbose: bool = False,
     base_sha: str = "",
 ) -> tuple[bool, str, PhaseMetrics]:
-    """Execute a single phase via Claude Code or local gate."""
+    """Execute a single phase via the backend or local gate."""
     from devflow.integrations.gate import run_gate_phase
     from devflow.orchestration.runner import execute_phase
 
@@ -122,6 +84,9 @@ def _execute_phase(
             feature_id=feature.id, base_sha=base_sha,
         )
     return execute_phase(feature, phase, agent_name, verbose=verbose)
+
+
+# ── Planning loop ─────────────────────────────────────────────────
 
 
 def _run_planning_loop(
@@ -185,19 +150,105 @@ def _run_planning_loop(
             plan_output = output
             with mutate_feature(feature.id, base) as feat:
                 if feat:
-                    module = _parse_plan_module(output)
+                    module = parse_plan_module(output)
                     if module:
                         feat.metadata.scope = module
-                    title = _parse_plan_title(output)
+                    title = parse_plan_title(output)
                     if title:
                         feat.metadata.title = title
-                    commit_type = _parse_plan_type(output)
+                    commit_type = parse_plan_type(output)
                     if commit_type:
                         feat.metadata.commit_type = commit_type
 
         feature = _refresh_feature(feature.id, base) or feature
 
     return feature, plan_output, True
+
+
+# ── Post-phase handlers ───────────────────────────────────────────
+
+
+def _handle_post_phase_commit(
+    feature: Feature,
+    phase: PhaseRecord,
+    pre_phase_sha: str,
+    success: bool,
+    output: str,
+    metrics: PhaseMetrics,
+    elapsed: float,
+    model_label: str,
+    initial_untracked: list[str],
+    totals: BuildTotals,
+    base: Path | None,
+    base_branch: str,
+) -> None:
+    """Auto-commit after implementing/fixing and record metrics."""
+    from devflow.integrations.git import (
+        collect_phase_result,
+        commit_changes,
+        persist_files_summary,
+    )
+    from devflow.integrations.git.smart_messages import generate_commit_message
+    from devflow.ui.rendering import render_phase_commits, render_phase_success
+
+    phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
+
+    # Auto-commit only if agent left uncommitted changes.
+    if phase_result.uncommitted_changes:
+        msg = generate_commit_message(feature, phase=phase.name)
+        if commit_changes(msg, exclude=initial_untracked):
+            phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
+
+    render_phase_success(phase.name, elapsed, metrics)
+    render_phase_commits(phase_result)
+    totals.add(
+        phase.name, metrics, elapsed, model=model_label,
+        commits=len(phase_result.commits),
+        files_changed=len(phase_result.files_changed),
+        insertions=sum(c.insertions for c in phase_result.commits),
+        deletions=sum(c.deletions for c in phase_result.commits),
+    )
+
+    _save_phase_commits_artifact(feature.id, phase.name, phase_result, base)
+    persist_files_summary(feature.id, base, base_branch)
+
+
+def _handle_gate_result(
+    feature: Feature,
+    phase: PhaseRecord,
+    success: bool,
+    output: str,
+    metrics: PhaseMetrics,
+    elapsed: float,
+    model_label: str,
+    totals: BuildTotals,
+    base: Path | None,
+) -> tuple[Feature, bool | None]:
+    """Handle gate success/failure. Returns (feature, should_continue).
+
+    should_continue is True to loop again, False to abort, None to proceed normally.
+    """
+    from devflow.ui.rendering import render_phase_auto_retry
+
+    if success:
+        from devflow.ui.gate_panel import render_gate_panel
+        render_gate_panel(feature.id, base)
+        totals.add(phase.name, metrics, elapsed, model=model_label)
+        return feature, None
+
+    # Gate failed.
+    totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
+    save_phase_output(feature.id, "gate", output, base)
+    if setup_gate_retry(feature.id, base):
+        from devflow.ui.gate_panel import render_gate_panel
+        render_gate_panel(feature.id, base)
+        render_phase_auto_retry(phase.name, elapsed, "")
+        feature = _refresh_feature(feature.id, base) or feature
+        return feature, True
+    return feature, False
+
+
+# ── Execution loop ────────────────────────────────────────────────
 
 
 def _run_execution_loop(
@@ -212,22 +263,12 @@ def _run_execution_loop(
 ) -> tuple[Feature, bool]:
     """Run implementation, review, gate, and fixing phases.
 
-    Returns (feature, success). Handles auto-commit after implementing/fixing
-    and the gate auto-retry loop.
+    Returns (feature, success). Dispatches to handlers for auto-commit,
+    gate retry, and review cycles.
     """
-    from devflow.integrations.git import (
-        collect_phase_result,
-        commit_changes,
-        get_head_sha,
-        persist_files_summary,
-    )
-    from devflow.integrations.git.smart_messages import (
-        generate_commit_message,
-    )
+    from devflow.integrations.git import get_head_sha
     from devflow.orchestration.model_routing import get_phase_agent, resolve_model
     from devflow.ui.rendering import (
-        render_phase_auto_retry,
-        render_phase_commits,
         render_phase_failure,
         render_phase_header,
         render_phase_success,
@@ -266,70 +307,48 @@ def _run_execution_loop(
                 from devflow.ui.gate_panel import render_gate_panel
                 render_gate_panel(feature.id, base)
                 totals.add(phase.name, metrics, elapsed, model=model_label)
-            elif phase.name in ("implementing", "fixing"):
-                phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
-
-                # Auto-commit only if agent left uncommitted changes.
-                if phase_result.uncommitted_changes:
-                    msg = generate_commit_message(feature, phase=phase.name)
-                    if commit_changes(msg, exclude=initial_untracked):
-                        # Re-collect to include the auto-commit.
-                        phase_result = collect_phase_result(
-                            pre_phase_sha, success, output, metrics,
-                        )
-
-                render_phase_success(phase.name, elapsed, metrics)
-                render_phase_commits(phase_result)
-                totals.add(
-                    phase.name, metrics, elapsed, model=model_label,
-                    commits=len(phase_result.commits),
-                    files_changed=len(phase_result.files_changed),
-                    insertions=sum(c.insertions for c in phase_result.commits),
-                    deletions=sum(c.deletions for c in phase_result.commits),
+            elif is_code_phase:
+                _handle_post_phase_commit(
+                    feature, phase, pre_phase_sha, success, output, metrics,
+                    elapsed, model_label, initial_untracked, totals, base, base_branch,
                 )
-
-                # Persist commit summary as structured artifact.
-                _save_phase_commits_artifact(feature.id, phase.name, phase_result, base)
-
-                persist_files_summary(feature.id, base, base_branch)
             else:
                 render_phase_success(phase.name, elapsed, metrics)
                 totals.add(phase.name, metrics, elapsed, model=model_label)
 
-            # Review loop: after fixing, re-run reviewing if the workflow
-            # includes it and we haven't exhausted the review cycle budget.
+            # Review cycle: after fixing, re-review if budget allows.
             if phase.name == "fixing":
                 feature = _refresh_feature(feature.id, base) or feature
-                if _should_re_review(feature, base):
-                    _setup_re_review(feature.id, base)
+                if should_re_review(feature, base):
+                    setup_re_review(feature.id, base)
                     feature = _refresh_feature(feature.id, base) or feature
                     total = len(feature.phases)
                     continue
 
-            # Review loop: after reviewing, check if reviewer approved.
-            # If REQUEST_CHANGES, reset fixing to PENDING and loop.
-            if phase.name == "reviewing" and feature.metadata.review_cycles > 0:
-                if "APPROVE" in output.upper():
-                    # Reviewer approved — proceed to gate normally.
-                    pass
-                else:
-                    # REQUEST_CHANGES — re-do fixing.
-                    feature = _refresh_feature(feature.id, base) or feature
-                    _setup_re_fix(feature.id, base)
-                    feature = _refresh_feature(feature.id, base) or feature
-                    total = len(feature.phases)
-                    continue
+            # Review cycle: after reviewing, check if reviewer approved.
+            if (phase.name == "reviewing"
+                    and feature.metadata.review_cycles > 0
+                    and "APPROVE" not in output.upper()):
+                feature = _refresh_feature(feature.id, base) or feature
+                setup_re_fix(feature.id, base)
+                feature = _refresh_feature(feature.id, base) or feature
+                total = len(feature.phases)
+                continue
         else:
-            totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
-
+            # Gate failure with auto-retry.
             if phase.name == "gate":
-                save_phase_output(feature.id, "gate", output, base)
-                if setup_gate_retry(feature.id, base):
-                    from devflow.ui.gate_panel import render_gate_panel
-                    render_gate_panel(feature.id, base)
-                    render_phase_auto_retry(phase.name, elapsed, "")
-                    feature = _refresh_feature(feature.id, base) or feature
+                feature, gate_action = _handle_gate_result(
+                    feature, phase, False, output, metrics, elapsed,
+                    model_label, totals, base,
+                )
+                if gate_action is True:
                     continue
+                if gate_action is False:
+                    fail_phase(feature.id, phase.name, output, base)
+                    render_phase_failure(phase.name, elapsed, output)
+                    return feature, False
+            else:
+                totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
 
             fail_phase(feature.id, phase.name, output, base)
             render_phase_failure(phase.name, elapsed, output)
@@ -368,41 +387,7 @@ def _save_phase_commits_artifact(
     write_artifact(feature_id, f"{phase_name}.json", json.dumps(data, indent=2), base)
 
 
-MAX_REVIEW_CYCLES = 2
-
-
-def _should_re_review(feature: Feature, base: Path | None = None) -> bool:
-    """Return True if the workflow has a reviewing phase and review budget remains."""
-    if feature.metadata.review_cycles >= MAX_REVIEW_CYCLES:
-        return False
-    return feature.find_phase("reviewing") is not None
-
-
-def _setup_re_review(feature_id: str, base: Path | None = None) -> None:
-    """Reset reviewing to PENDING after fixing, incrementing review_cycles."""
-    with mutate_feature(feature_id, base) as feature:
-        if not feature:
-            return
-        reviewing = feature.find_phase("reviewing")
-        if reviewing:
-            reviewing.reset()
-        feature.metadata.review_cycles += 1
-
-
-def _setup_re_fix(feature_id: str, base: Path | None = None) -> None:
-    """Reset fixing+gate to PENDING after a reviewer REQUEST_CHANGES."""
-    from devflow.orchestration.lifecycle import transition_safe
-
-    with mutate_feature(feature_id, base) as feature:
-        if not feature:
-            return
-        fixing = feature.find_phase("fixing")
-        if fixing:
-            fixing.reset()
-        gate = feature.find_phase("gate")
-        if gate:
-            gate.reset()
-        transition_safe(feature, FeatureStatus.FIXING)
+# ── Finalize ──────────────────────────────────────────────────────
 
 
 def _finalize_build(
@@ -445,13 +430,8 @@ def _finalize_build(
             )
 
     # Sync Linear status to "completed" (best-effort).
-    if final.metadata.linear_issue_id:
-        from devflow.core.config import load_config
-        from devflow.integrations.linear.sync import sync_single_feature
-
-        linear_team = load_config(base).linear.team
-        if linear_team:
-            sync_single_feature(final, linear_team, base)
+    from devflow.orchestration.phase_exec import sync_linear_if_configured
+    sync_linear_if_configured(final, base)
 
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
@@ -467,6 +447,9 @@ def _finalize_build(
             )
 
     return True
+
+
+# ── Main entry points ─────────────────────────────────────────────
 
 
 def execute_build_loop(
@@ -491,26 +474,12 @@ def execute_build_loop(
         2. Run all phases identically (planning, confirmation, execution)
         3. No PR — on success, print the commit SHAs
         4. On failure, changes stay on branch (user decides)
-
-    When ``worktree=True``, the build runs in an isolated git worktree
-    under ``.devflow/.worktrees/<feature-id>/``. This allows multiple
-    builds to run in parallel without checkout conflicts.
     """
     from devflow.core.history import append_build_metrics, build_metrics_from
-    from devflow.integrations.git import (
-        branch_name,
-        create_branch,
-        create_worktree,
-        get_head_sha,
-        get_untracked_files,
-        main_repo_root,
-        switch_branch,
-    )
-    from devflow.orchestration.phase_exec import reset_planning_phases
-    from devflow.ui.rendering import BuildTotals, render_build_banner
+    from devflow.integrations.git import get_head_sha, get_untracked_files, main_repo_root
+    from devflow.ui.rendering import render_build_banner
 
     is_resuming = feedback is not None
-    # When using worktrees, state always lives in the main repo root.
     if worktree and base is None:
         base = main_repo_root()
     from devflow.core.config import load_config
@@ -518,35 +487,16 @@ def execute_build_loop(
     config = load_config(base)
     stack = config.stack
     totals = BuildTotals()
-    wt_path: Path | None = None
     branch = ""
 
-    # Save HEAD as base for gate diff scoping (both modes).
     initial_sha = get_head_sha(short=False)
 
     # ── Branch / Worktree (build mode only) ──
     if create_pr:
-        if worktree:
-            branch, wt_path = create_worktree(feature.id)
-            initial_untracked = get_untracked_files(cwd=wt_path)
-            if is_resuming:
-                reset_planning_phases(feature.id, base)
-                with mutate_feature(feature.id, base) as tracked:
-                    if tracked:
-                        tracked.metadata.feedback = feedback
-                        feature = tracked
-        else:
-            initial_untracked = get_untracked_files()
-            branch = branch_name(feature.id)
-            if is_resuming:
-                reset_planning_phases(feature.id, base)
-                with mutate_feature(feature.id, base) as tracked:
-                    if tracked:
-                        tracked.metadata.feedback = feedback
-                        feature = tracked
-                switch_branch(branch)
-            else:
-                branch = create_branch(feature.id)
+        initial_untracked = _setup_branch(
+            feature, base, worktree, is_resuming, feedback,
+        )
+        branch = _get_branch_name(feature, worktree)
     else:
         initial_untracked = get_untracked_files()
 
@@ -565,33 +515,8 @@ def execute_build_loop(
         return False
 
     # ── Plan confirmation ──
-    if plan_output:
-        console.print()
-        console.print(Panel(
-            Markdown(plan_output),
-            title="Plan proposé",
-            border_style="cyan",
-            padding=(1, 2),
-        ))
-        console.print()
-
-        # Flush any buffered stdin (e.g. Enter pressed during planning).
-        import contextlib
-        import sys
-        import termios
-        with contextlib.suppress(termios.error, ValueError, OSError):
-            termios.tcflush(sys.stdin, termios.TCIFLUSH)
-
-        confirm = console.input("[bold]Lancer l'implémentation ? [Y/n] [/bold]").strip().lower()
-        if confirm and confirm not in ("y", "yes", "o", "oui"):
-            console.print()
-            console.print("[yellow]Build en pause.[/yellow]")
-            console.print(f"[dim]Le plan est sauvegardé dans {feature.id}.[/dim]")
-            if create_pr:
-                console.print()
-                console.print("[bold]Reprendre avec :[/bold]")
-                console.print(f'  devflow build "ton feedback ici" --resume {feature.id}')
-            return False
+    if plan_output and not _confirm_plan(plan_output, feature.id, create_pr):
+        return False
 
     # ── Execution ──
     feature, ok = _run_execution_loop(
@@ -619,8 +544,12 @@ def execute_build_loop(
     if create_pr:
         return _finalize_build(feature, branch, totals, initial_untracked, base, base_branch)
 
-    # do mode: print success summary.
+    # do mode: persist metrics and print success summary.
     from devflow.ui.rendering import render_build_summary
+
+    feature = _refresh_feature(feature.id, base) or feature
+    record = build_metrics_from(feature, totals, success=True)
+    append_build_metrics(record, base)
 
     current_sha = get_head_sha()
     render_build_summary(feature, totals, pr_url=None, branch="")
@@ -629,6 +558,83 @@ def execute_build_loop(
             f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
             f"\n[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]\n"
         )
+    return True
+
+
+def _setup_branch(
+    feature: Feature,
+    base: Path | None,
+    worktree: bool,
+    is_resuming: bool,
+    feedback: str | None,
+) -> list[str]:
+    """Set up git branch or worktree, return initial untracked files."""
+    from devflow.integrations.git import (
+        create_branch,
+        create_worktree,
+        get_untracked_files,
+        switch_branch,
+    )
+    from devflow.orchestration.phase_exec import reset_planning_phases
+
+    if worktree:
+        _branch, _wt_path = create_worktree(feature.id)
+        initial_untracked = get_untracked_files(cwd=_wt_path)
+        if is_resuming:
+            reset_planning_phases(feature.id, base)
+            with mutate_feature(feature.id, base) as tracked:
+                if tracked:
+                    tracked.metadata.feedback = feedback
+    else:
+        initial_untracked = get_untracked_files()
+        from devflow.integrations.git import branch_name
+        branch = branch_name(feature.id)
+        if is_resuming:
+            reset_planning_phases(feature.id, base)
+            with mutate_feature(feature.id, base) as tracked:
+                if tracked:
+                    tracked.metadata.feedback = feedback
+            switch_branch(branch)
+        else:
+            create_branch(feature.id)
+
+    return initial_untracked
+
+
+def _get_branch_name(feature: Feature, worktree: bool) -> str:
+    """Return the branch name for the feature."""
+    from devflow.integrations.git import branch_name
+    return branch_name(feature.id)
+
+
+def _confirm_plan(plan_output: str, feature_id: str, create_pr: bool) -> bool:
+    """Show the plan and ask for confirmation. Returns True to proceed."""
+    console.print()
+    console.print(Panel(
+        Markdown(plan_output),
+        title="Plan proposé",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
+    console.print()
+
+    # Flush any buffered stdin (e.g. Enter pressed during planning).
+    import contextlib
+    import sys
+    import termios
+    with contextlib.suppress(termios.error, ValueError, OSError):
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
+    confirm = console.input("[bold]Lancer l'implémentation ? [Y/n] [/bold]").strip().lower()
+    if confirm and confirm not in ("y", "yes", "o", "oui"):
+        console.print()
+        console.print("[yellow]Build en pause.[/yellow]")
+        console.print(f"[dim]Le plan est sauvegardé dans {feature_id}.[/dim]")
+        if create_pr:
+            console.print()
+            console.print("[bold]Reprendre avec :[/bold]")
+            console.print(f'  devflow build "ton feedback ici" --resume {feature_id}')
+        return False
     return True
 
 

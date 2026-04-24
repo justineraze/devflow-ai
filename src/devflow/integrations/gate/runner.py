@@ -63,42 +63,32 @@ def run_gate(
     custom_config = load_gate_config(cwd)
     report = GateReport(custom=custom_config is not None)
 
+    # Build the command check futures — source differs but pattern is the same.
     if custom_config is not None:
-        # Custom gate: run user-defined shell commands.
-        with ThreadPoolExecutor(max_workers=len(custom_config) + 3) as pool:
-            command_futures = [
-                (name, pool.submit(_run_custom_check, name, cmd, cwd))
-                for name, cmd in custom_config.items()
-            ]
-            secrets_future = pool.submit(scan_secrets, base, ctx)
-            complexity_future = pool.submit(check_complexity, base, ctx=ctx)
-            module_size_future = pool.submit(check_module_size, base, ctx=ctx)
-
-            for _name, fut in command_futures:
-                report.add(fut.result())
-            report.add(secrets_future.result())
-            report.add(complexity_future.result())
-            report.add(module_size_future.result())
+        submit_commands = lambda pool: [  # noqa: E731
+            pool.submit(_run_custom_check, name, cmd, cwd)
+            for name, cmd in custom_config.items()
+        ]
+        worker_count = len(custom_config)
     else:
-        # Stack-detected gate: use built-in check definitions.
         checks = _checks_for_stack(stack)
-        with ThreadPoolExecutor(max_workers=len(checks) + 3) as pool:
-            command_futures_stack = [
-                pool.submit(
-                    _run_command_check,
-                    c.name, c.cmd, cwd, c.timeout, c.parse_output,
-                )
-                for c in checks
-            ]
-            secrets_future = pool.submit(scan_secrets, base, ctx)
-            complexity_future = pool.submit(check_complexity, base, ctx=ctx)
-            module_size_future = pool.submit(check_module_size, base, ctx=ctx)
+        submit_commands = lambda pool: [  # noqa: E731
+            pool.submit(_run_command_check, c.name, c.cmd, cwd, c.timeout, c.parse_output)
+            for c in checks
+        ]
+        worker_count = len(checks)
 
-            for fut in command_futures_stack:
-                report.add(fut.result())
-            report.add(secrets_future.result())
-            report.add(complexity_future.result())
-            report.add(module_size_future.result())
+    with ThreadPoolExecutor(max_workers=worker_count + 3) as pool:
+        cmd_futures = submit_commands(pool)
+        secrets_future = pool.submit(scan_secrets, base, ctx)
+        complexity_future = pool.submit(check_complexity, base, ctx=ctx)
+        module_size_future = pool.submit(check_module_size, base, ctx=ctx)
+
+        for fut in cmd_futures:
+            report.add(fut.result())
+        report.add(secrets_future.result())
+        report.add(complexity_future.result())
+        report.add(module_size_future.result())
 
     return report
 

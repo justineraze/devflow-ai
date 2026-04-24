@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
@@ -197,8 +198,9 @@ def _build_retry_context(feature: Feature) -> str:
     try:
         from devflow.integrations.git import get_fix_commit_log
         commit_log = get_fix_commit_log()
-    except Exception:
-        pass
+    except (subprocess.SubprocessError, OSError):
+        import logging
+        logging.getLogger(__name__).warning("Could not read fix commit log")
 
     # Get the current gate.json as the latest failure snapshot.
     gate_json = read_artifact(feature.id, "gate.json")

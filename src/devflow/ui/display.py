@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from rich.panel import Panel
@@ -12,6 +13,18 @@ from devflow.core.console import console
 from devflow.core.formatting import format_cost, format_tokens
 from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
+
+
+@dataclass
+class _PhaseAccumulator:
+    """Running totals for a single phase type across multiple builds."""
+
+    cost: float = 0.0
+    duration: float = 0.0
+    tokens: int = 0
+    runs: int = 0
+    cache_read: int = 0
+    cache_total: int = 0
 
 # Status colors for visual feedback.
 STATUS_COLORS: dict[str, str] = {
@@ -305,6 +318,7 @@ def _render_last_build(record: BuildMetrics) -> None:
     phase_table.add_column("Cost", justify="right")
     phase_table.add_column("Tokens", justify="right")
     phase_table.add_column("Cache%", justify="right")
+    phase_table.add_column("Changes", justify="right", style="dim")
     phase_table.add_column("Duration", justify="right")
     phase_table.add_column("", justify="center")
 
@@ -313,12 +327,22 @@ def _render_last_build(record: BuildMetrics) -> None:
         cache_pct = f"{int(p.cache_read / total_tokens * 100)}%" if total_tokens > 0 else "—"
         p_icon = Text("✓", style="green") if p.success else Text("✗", style="red")
         row_style = "" if p.success else "red"
+
+        # Show commit/change stats if available.
+        changes = ""
+        if p.commits:
+            parts = [f"{p.commits} commit{'s' if p.commits != 1 else ''}"]
+            if p.insertions or p.deletions:
+                parts.append(f"+{p.insertions}/-{p.deletions}")
+            changes = " ".join(parts)
+
         phase_table.add_row(
             Text(p.name, style=row_style or "default"),
             p.model or "—",
             format_cost(p.cost_usd),
             format_tokens(p.input_tokens + p.cache_creation + p.cache_read),
             cache_pct,
+            changes,
             _format_build_duration(p.duration_s),
             p_icon,
             style=row_style,
@@ -329,28 +353,24 @@ def _render_last_build(record: BuildMetrics) -> None:
 
 def _render_phase_averages(records: list[BuildMetrics]) -> None:
     """Render avg cost/duration/tokens per phase type across all builds, sorted by cost."""
-    acc: dict[str, dict[str, float | int]] = {}
+    acc: dict[str, _PhaseAccumulator] = {}
     for r in records:
         for p in r.phases:
-            if p.name not in acc:
-                acc[p.name] = {
-                    "cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0,
-                    "cache_read": 0, "cache_total": 0,
-                }
-            acc[p.name]["cost"] = float(acc[p.name]["cost"]) + p.cost_usd
-            acc[p.name]["duration"] = float(acc[p.name]["duration"]) + p.duration_s
+            a = acc.setdefault(p.name, _PhaseAccumulator())
+            a.cost += p.cost_usd
+            a.duration += p.duration_s
             total_tokens = p.input_tokens + p.cache_creation + p.cache_read
-            acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + total_tokens
-            acc[p.name]["cache_read"] = int(acc[p.name]["cache_read"]) + p.cache_read
-            acc[p.name]["cache_total"] = int(acc[p.name]["cache_total"]) + total_tokens
-            acc[p.name]["runs"] = int(acc[p.name]["runs"]) + 1
+            a.tokens += total_tokens
+            a.cache_read += p.cache_read
+            a.cache_total += total_tokens
+            a.runs += 1
 
     if not acc:
         return
 
     sorted_phases = sorted(
         acc.items(),
-        key=lambda x: float(x[1]["cost"]) / int(x[1]["runs"]) if int(x[1]["runs"]) > 0 else 0.0,
+        key=lambda x: x[1].cost / x[1].runs if x[1].runs > 0 else 0.0,
         reverse=True,
     )
 
@@ -365,25 +385,21 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
     total_avg_cost = 0.0
     total_avg_duration = 0.0
     total_avg_tokens = 0
-
     total_cache_read = 0
     total_cache_total = 0
 
-    for name, data in sorted_phases:
-        runs = int(data["runs"])
-        avg_cost = float(data["cost"]) / runs
-        avg_duration = float(data["duration"]) / runs
-        avg_tokens = int(data["tokens"]) // runs
-        phase_cache_total = int(data["cache_total"])
-        phase_cache_read = int(data["cache_read"])
+    for name, a in sorted_phases:
+        avg_cost = a.cost / a.runs
+        avg_duration = a.duration / a.runs
+        avg_tokens = a.tokens // a.runs
         total_avg_cost += avg_cost
         total_avg_duration += avg_duration
         total_avg_tokens += avg_tokens
-        total_cache_read += phase_cache_read
-        total_cache_total += phase_cache_total
+        total_cache_read += a.cache_read
+        total_cache_total += a.cache_total
 
-        if phase_cache_total > 0:
-            cpct = int(phase_cache_read / phase_cache_total * 100)
+        if a.cache_total > 0:
+            cpct = int(a.cache_read / a.cache_total * 100)
             cache_style = "green" if cpct >= 60 else "yellow"
             cache_cell = Text(f"{cpct}%", style=cache_style)
         else:
@@ -395,7 +411,7 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
             _format_build_duration(avg_duration),
             format_tokens(avg_tokens),
             cache_cell,
-            str(runs),
+            str(a.runs),
         )
 
     if total_cache_total > 0:

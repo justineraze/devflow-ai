@@ -15,6 +15,20 @@ from devflow.core.workflow import advance_phase, mutate_feature
 from devflow.orchestration.lifecycle import transition_safe
 
 
+def sync_linear_if_configured(
+    feature: Feature, base: Path | None = None,
+) -> None:
+    """Sync Linear issue status for *feature* (best-effort, no-op if unconfigured)."""
+    if not feature.metadata.linear_issue_id:
+        return
+    from devflow.core.config import load_config
+    from devflow.integrations.linear.sync import sync_single_feature
+
+    linear_team = load_config(base).linear.team
+    if linear_team:
+        sync_single_feature(feature, linear_team, base)
+
+
 def _walk_to_done(feature: Feature) -> None:
     """Transition the feature to DONE after all phases complete.
 
@@ -78,15 +92,7 @@ def fail_phase(
         if phase and phase.status == PhaseStatus.IN_PROGRESS:
             phase.fail(error)
         transition_safe(feature, FeatureStatus.FAILED)
-
-        # Sync Linear status to "canceled" (best-effort).
-        if feature.metadata.linear_issue_id:
-            from devflow.core.config import load_config
-            from devflow.integrations.linear.sync import sync_single_feature
-
-            linear_team = load_config(base).linear.team
-            if linear_team:
-                sync_single_feature(feature, linear_team, base)
+        sync_linear_if_configured(feature, base)
 
 
 def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:

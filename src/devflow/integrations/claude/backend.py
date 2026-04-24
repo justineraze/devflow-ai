@@ -23,25 +23,27 @@ _MODEL_MAP: dict[ModelTier, str] = {
 
 def _summarize_tool_use(tool_name: str, tool_input: dict[str, Any]) -> str:
     """Build a concise one-line summary of a tool invocation."""
-    if tool_name in ("Read", "Write", "Edit"):
-        path = tool_input.get("file_path", "")
-        short = path.rsplit("/", 2)
-        return "/".join(short[-2:]) if len(short) > 1 else path
-    if tool_name == "Bash":
-        cmd = tool_input.get("command", "")
-        return cmd[:60] + ("…" if len(cmd) > 60 else "")
-    if tool_name in ("Grep", "Glob"):
-        return tool_input.get("pattern", "")[:60]
-    if tool_name == "Task":
-        return tool_input.get("description", "")[:60]
-    if tool_name == "TodoWrite":
-        todos = tool_input.get("todos", [])
-        active = next((t for t in todos if t.get("status") == "in_progress"), None)
-        if active:
-            label = active.get("activeForm") or active.get("content", "")
-            return label[:60]
-        return f"{len(todos)} todos"
-    return ""
+    match tool_name:
+        case "Read" | "Write" | "Edit":
+            path = tool_input.get("file_path", "")
+            short = path.rsplit("/", 2)
+            return "/".join(short[-2:]) if len(short) > 1 else path
+        case "Bash":
+            cmd = tool_input.get("command", "")
+            return cmd[:60] + ("…" if len(cmd) > 60 else "")
+        case "Grep" | "Glob":
+            return tool_input.get("pattern", "")[:60]
+        case "Task":
+            return tool_input.get("description", "")[:60]
+        case "TodoWrite":
+            todos = tool_input.get("todos", [])
+            active = next((t for t in todos if t.get("status") == "in_progress"), None)
+            if active:
+                label = active.get("activeForm") or active.get("content", "")
+                return label[:60]
+            return f"{len(todos)} todos"
+        case _:
+            return ""
 
 
 def parse_event(line: str) -> tuple[str, Any] | None:

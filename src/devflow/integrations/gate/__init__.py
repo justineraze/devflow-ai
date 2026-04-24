@@ -7,6 +7,8 @@ any changes after the gate.py monolith was split into focused submodules.
 from there directly (not from this facade) to avoid circular imports.
 """
 
+from __future__ import annotations
+
 from devflow.integrations.gate.checks import STACK_CHECKS
 from devflow.integrations.gate.complexity import check_complexity
 from devflow.integrations.gate.config import load_gate_config

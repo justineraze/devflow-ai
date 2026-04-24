@@ -34,6 +34,44 @@ def transition_safe(feature: Feature, target: FeatureStatus) -> bool:
         return False
 
 
+def _score_workflow(
+    description: str, base: Path | None,
+) -> tuple[str, object | None]:
+    """Score complexity and return (workflow_name, complexity_or_None)."""
+    from devflow.core.config import load_config
+
+    cfg = load_config(base)
+    complexity = score_complexity(description, base, workflow_floor=cfg.workflow)
+    method_label = "scored by LLM" if complexity.method == "llm" else "heuristic fallback"
+    console.print(
+        f"[dim]Complexity: "
+        f"files={complexity.files_touched} "
+        f"integrations={complexity.integrations} "
+        f"security={complexity.security} "
+        f"scope={complexity.scope} "
+        f"→ {complexity.workflow} ({method_label})[/dim]"
+    )
+    return complexity.workflow, complexity
+
+
+def _create_linear_issue_if_configured(
+    feature: Feature, base: Path | None,
+) -> None:
+    """Auto-create a Linear issue for *feature* if the integration is configured."""
+    from devflow.core.config import load_config
+
+    linear_team = load_config(base).linear.team
+    if not linear_team:
+        return
+    from devflow.integrations.linear.client import is_configured
+    from devflow.integrations.linear.sync import create_issue_for_feature
+
+    if is_configured():
+        key = create_issue_for_feature(feature, linear_team)
+        if key:
+            console.print(f"[dim]Linear: {key}[/dim]")
+
+
 def start_build(
     description: str,
     workflow_name: str | None = None,
@@ -68,43 +106,15 @@ def start_build(
 
     complexity = None
     if workflow_name is None:
-        from devflow.core.config import load_config
-
-        cfg = load_config(base)
-        complexity = score_complexity(
-            prompt or description, base, workflow_floor=cfg.workflow,
-        )
-        workflow_name = complexity.workflow
-        method_label = "scored by LLM" if complexity.method == "llm" else "heuristic fallback"
-        console.print(
-            f"[dim]Complexity: "
-            f"files={complexity.files_touched} "
-            f"integrations={complexity.integrations} "
-            f"security={complexity.security} "
-            f"scope={complexity.scope} "
-            f"→ {workflow_name} ({method_label})[/dim]"
-        )
+        workflow_name, complexity = _score_workflow(prompt or description, base)
 
     feature = create_feature(state, feature_id, description, workflow_name)
     if prompt is not None:
         feature.prompt = prompt
-
     if complexity is not None:
         feature.metadata.complexity = complexity
 
-    # Auto-create Linear issue if configured.
-    from devflow.core.config import load_config
-
-    linear_team = load_config(base).linear.team
-    if linear_team:
-        from devflow.integrations.linear.client import is_configured
-        from devflow.integrations.linear.sync import create_issue_for_feature
-
-        if is_configured():
-            key = create_issue_for_feature(feature, linear_team)
-            if key:
-                console.print(f"[dim]Linear: {key}[/dim]")
-
+    _create_linear_issue_if_configured(feature, base)
     save_state(state, base)
     return feature
 

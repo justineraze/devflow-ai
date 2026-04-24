@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import stat
 from pathlib import Path
+from typing import Any
 
 from devflow.core.console import console
 from devflow.core.paths import assets_dir
@@ -104,8 +105,8 @@ def install_hook(
         )
     hook_command = str(dst.resolve())
 
-    hooks_section: dict = data.setdefault("hooks", {})
-    post_compact: list = hooks_section.setdefault("PostCompact", [])
+    hooks_section: dict[str, Any] = data.setdefault("hooks", {})
+    post_compact: list[dict[str, Any]] = hooks_section.setdefault("PostCompact", [])
 
     # Upsert: only add if not already present (match by command path).
     # Claude Code hook format: {"matcher": "...", "hooks": [{"type": "command", "command": "..."}]}

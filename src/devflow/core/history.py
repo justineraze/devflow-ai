@@ -8,34 +8,15 @@ and makes diffs easy to review.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from devflow.core.metrics import BuildTotals, PhaseSnapshot, compute_cache_hit_rate
+
 if TYPE_CHECKING:
     from devflow.core.models import Feature
-    from devflow.ui.rendering import BuildTotals
-
-
-@dataclass
-class PhaseSnapshot:
-    """Metrics snapshot for a single phase execution."""
-
-    name: str
-    model: str = ""
-    cost_usd: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation: int = 0
-    cache_read: int = 0
-    tool_count: int = 0
-    duration_s: float = 0.0
-    success: bool = True
-    commits: int = 0
-    files_changed: int = 0
-    insertions: int = 0
-    deletions: int = 0
 
 
 @dataclass
@@ -64,14 +45,15 @@ class BuildMetrics:
     # Commit stats
     commits_count: int = 0
     commits_by_phase: dict[str, int] = field(default_factory=dict)
+    # Scoring method used for workflow selection (e.g. "llm", "heuristic").
+    scorer_method: str = ""
     # Per-phase breakdown (full detail for dashboard/analysis)
     phases: list[PhaseSnapshot] = field(default_factory=list)
 
     @property
     def cache_hit_rate(self) -> float:
         """Fraction of input tokens served from cache (0.0-1.0)."""
-        total = self.input_tokens + self.cache_creation + self.cache_read
-        return self.cache_read / total if total > 0 else 0.0
+        return compute_cache_hit_rate(self.input_tokens, self.cache_creation, self.cache_read)
 
     @property
     def phase_costs(self) -> dict[str, float]:
@@ -108,23 +90,18 @@ def build_metrics_from(
                 failed_phase = snap.name
                 break
 
-    # Build per-phase records from snapshots.
+    # Round float fields for cleaner JSONL output; snapshots are already
+    # PhaseSnapshot instances so we just copy with rounding.
     phase_records = [
         PhaseSnapshot(
-            name=s.name,
-            model=s.model,
+            name=s.name, model=s.model,
             cost_usd=round(s.cost_usd, 4),
-            input_tokens=s.input_tokens,
-            output_tokens=s.output_tokens,
-            cache_creation=s.cache_creation,
-            cache_read=s.cache_read,
-            tool_count=s.tool_count,
-            duration_s=round(s.duration_s, 1),
-            success=s.success,
-            commits=s.commits,
+            input_tokens=s.input_tokens, output_tokens=s.output_tokens,
+            cache_creation=s.cache_creation, cache_read=s.cache_read,
+            tool_count=s.tool_count, duration_s=round(s.duration_s, 1),
+            success=s.success, commits=s.commits,
             files_changed=s.files_changed,
-            insertions=s.insertions,
-            deletions=s.deletions,
+            insertions=s.insertions, deletions=s.deletions,
         )
         for s in totals.phase_snapshots
     ]
@@ -155,6 +132,11 @@ def build_metrics_from(
         phases_completed=phases_completed,
         commits_count=total_commits,
         commits_by_phase=commits_by_phase,
+        scorer_method=(
+            feature.metadata.complexity.method
+            if feature.metadata.complexity is not None
+            else ""
+        ),
         phases=phase_records,
     )
 
@@ -173,6 +155,11 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
     if not path.exists():
         return []
 
+    # Known fields for forward-compatible deserialization: ignore any
+    # fields added in newer versions that this code doesn't know about.
+    _build_fields = {f.name for f in fields(BuildMetrics)}
+    _phase_fields = {f.name for f in fields(PhaseSnapshot)}
+
     records: list[BuildMetrics] = []
     for line in path.read_text().splitlines():
         line = line.strip()
@@ -180,12 +167,16 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
             continue
         try:
             data = json.loads(line)
-            # Deserialize nested PhaseSnapshot list.
             raw_phases = data.pop("phases", [])
-            rec = BuildMetrics(**data)
-            rec.phases = [PhaseSnapshot(**p) for p in raw_phases]
+            # Filter unknown fields to prevent TypeError on new fields.
+            known_data = {k: v for k, v in data.items() if k in _build_fields}
+            rec = BuildMetrics(**known_data)
+            rec.phases = [
+                PhaseSnapshot(**{k: v for k, v in p.items() if k in _phase_fields})
+                for p in raw_phases
+            ]
             records.append(rec)
-        except (json.JSONDecodeError, TypeError, KeyError):
+        except (json.JSONDecodeError, TypeError, KeyError, ValueError):
             continue
 
     return list(reversed(records[-limit:]))
