@@ -2,11 +2,11 @@
 
 ## Ce qu'est devflow-ai
 
-CLI Python qui installe et orchestre un environnement de développement IA
-pour Claude Code. Il ne réinvente pas Claude Code — il fournit ce que Claude
-Code ne peut pas faire nativement : persistance d'état, state machine,
-tracking projet, quality gate automatisée, PR automatique, reprise après
-échec, affichage live du coût et de l'usage.
+CLI Python qui orchestre un environnement de développement IA
+pour agents de code (Claude Code par défaut, extensible via Backend Protocol).
+Il fournit ce que les agents ne font pas nativement : persistance d'état,
+state machine, quality gate automatisée, PR automatique, reprise après
+échec, tracking coût et usage, boucles de rétroaction autonomes.
 
 ## Architecture — ligne de partage fondamentale
 
@@ -34,35 +34,57 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
 
 ### Ce qui vit dans le Python (irremplaçable)
 
-- `state.json` — persistance entre sessions, crash-safe (tmp + rename)
+- `config.yaml` — configuration projet (stack, gate, linear, backend)
+- `state.json` — état runtime des features, crash-safe (tmp + rename)
+- `backend.py` — Protocol abstrait pour les agents IA (Claude, Gemini, etc.)
 - State machine — transitions validées, recoverable depuis FAILED
-- Quality gate — lint, tests, détection secrets (pas juste comportemental)
-- Multi-features parallèles dans le même state
-- `runner.py` — bridge vers `claude -p` avec prompt structuré et live progress
+- Quality gate — lint, tests, secrets, complexité, taille modules
+- Boucles de rétroaction — gate retry (3×, escalade modèle), review cycle (2×)
+- `runner.py` — bridge vers le backend avec prompt structuré et live progress
+- `smart_messages.py` — commit/PR messages générés par le backend (one-shot)
 - `git.py` — branch, atomic commits, PR via `gh`
 - `detect.py` — détection stack pour sélectionner l'agent spécialisé
-- `devflow install` — sync assets vers ~/.claude/
+
+## Trois tiers d'exécution
+
+    devflow do "..."    → branche courante, pas de PR, revert si gate fail
+    devflow build "..." → nouvelle branche + PR, workflow auto-détecté
+    devflow epic "..."  → (à venir) décomposition en sub-features
+
+`do` et `build` utilisent le même moteur (mêmes phases, même gate,
+mêmes agents). Seule différence : `do` reste sur la branche courante
+et ne crée pas de PR. Le workflow (quick/light/standard/full) est
+auto-sélectionné par le complexity scorer dans les deux cas.
 
 ## Flow de build (plan-first)
 
-1. `devflow build "..."` crée une feature + branche git
-2. Phase planning → affiche le plan dans un panel Rich
-3. L'utilisateur valide (`y`) ou donne du feedback (`n` puis `--resume`)
-4. Phases suivantes exécutent silencieusement, output live (tools + tokens)
-5. Auto-commit après implementing/fixing
-6. Gate locale (ruff/pytest/secrets)
-7. PR créée automatiquement via `gh` avec plan en description
+1. Création feature + branche git (`build`) ou pas (`do`)
+2. Titre généré par le backend (one-shot, fast tier) si prompt long
+3. Phase planning → affiche le plan dans un panel Rich
+4. L'utilisateur valide (`y`) ou donne du feedback (`n` puis `--resume`)
+5. Phases suivantes exécutent silencieusement, output live (tools + tokens)
+6. Auto-commit après implementing/fixing (messages générés par le backend)
+7. Gate locale (lint/tests/secrets + checks structurels)
+8. Boucle retry si gate fail (3× avec escalade de modèle)
+9. PR créée via `gh` (titre + body générés par le backend)
+
+## Boucles de rétroaction
+
+- **Gate → fix → gate** : 3 retries max avec escalade de modèle.
+  Chaque retry reçoit le diff et les erreurs des tentatives précédentes.
+- **Review → fix → re-review** : max 2 cycles. Le reviewer re-vérifie
+  que ses issues sont résolues après fixing.
 
 ## Commandes
 
-    devflow do "..."                 → quick task, current branch (single commit, revertable)
+    devflow do "..."                 → tâche sur la branche courante (revert si fail)
     devflow build "..."              → build plan-first avec PR
     devflow build "feedback" --resume feat-001  → reprendre avec feedback
     devflow build --retry feat-001   → relancer la dernière phase failed
     devflow check                    → quality gate locale
     devflow status [feat-001]        → état courant (+ --log, --metrics, --archived)
-    devflow sync [--dry-run]         → post-merge cleanup (switch main, prune branches, archive)
-    devflow install                  → install assets + init projet + diagnostic (+ --check, --linear-team)
+    devflow sync [--dry-run]         → post-merge cleanup (+ --linear pour Linear)
+    devflow install                  → install assets + init + diagnostic (+ --check, --linear-team)
     devflow --version                → version
 
 ## Structure des fichiers
@@ -71,33 +93,48 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
     ├── src/devflow/
     │   ├── cli.py                      — commandes Typer, zéro logique métier
     │   ├── core/                       — état & domaine
-    │   │   ├── models.py               — Pydantic : Feature, PhaseName, PhaseStatus…
+    │   │   ├── config.py               — DevflowConfig (Pydantic) + load/save config.yaml
+    │   │   ├── backend.py              — Backend Protocol + ModelTier + registry
+    │   │   ├── models.py               — Feature, PhaseName, PhaseStatus, WorkflowState
     │   │   ├── phases.py               — registry unifié (PhaseSpec + PHASES)
     │   │   ├── metrics.py              — DTOs PhaseMetrics / ToolUse
+    │   │   ├── history.py              — BuildMetrics + persistence JSONL
     │   │   ├── workflow.py             — chargement YAML + persistance state.json
     │   │   ├── track.py                — lecture/écriture state (haut niveau)
     │   │   └── artifacts.py            — I/O atomique sur .devflow/<feat-id>/
     │   ├── orchestration/              — le moteur
-    │   │   ├── build.py                — plan-first + boucle + auto-retry gate
-    │   │   ├── runner.py               — bridge claude -p + build_prompt
-    │   │   ├── model_routing.py        — routing mod. (YAML > sélecteur > défaut)
+    │   │   ├── build.py                — build loop + do loop + boucles retry/review
+    │   │   ├── lifecycle.py            — création/resume/retry features
+    │   │   ├── phase_exec.py           — state machine des phases + gate retry
+    │   │   ├── runner.py               — bridge backend + build_prompt
+    │   │   ├── model_routing.py        — routing modèle (YAML > sélecteur > défaut)
     │   │   └── stream.py               — parser stream-json
     │   ├── integrations/               — ponts vers l'extérieur
-    │   │   ├── gate.py                 — quality gate (parallèle)
-    │   │   ├── git.py                  — branch, commit, PR, diff summary
+    │   │   ├── claude/                 — ClaudeCodeBackend (implémente Backend Protocol)
+    │   │   ├── gate/                   — quality gate (lint, test, secrets, complexité, taille)
+    │   │   ├── git/                    — branch, commit, PR, smart_messages
+    │   │   ├── linear/                 — client GraphQL + sync bidirectionnel
     │   │   └── detect.py               — détection stack
     │   ├── setup/
     │   │   ├── install.py              — sync assets vers ~/.claude/
     │   │   └── doctor.py               — checks de santé
     │   └── ui/
-    │       ├── display.py              — composants Rich (status, log, listings)
-    │       └── rendering.py            — banner, phase chip, gate panel, summary
+    │       ├── display.py              — composants Rich (status, log, metrics)
+    │       ├── rendering.py            — banner, phase chip, summary
+    │       └── gate_panel.py           — affichage gate results
     ├── assets/
     │   ├── agents/                     — 9 agents (.md)
-    │   └── skills/                     — 8 skills (.md)
+    │   └── skills/                     — 9 skills (.md)
     ├── workflows/                      — 4 YAML (quick / light / standard / full)
-    ├── tests/                          — mirror de src/devflow/ (~250 tests)
+    ├── tests/                          — mirror de src/devflow/ (~740 tests)
     └── pyproject.toml
+
+## Configuration (.devflow/)
+
+    config.yaml  — configuration projet (stack, base_branch, gate, linear, backend)
+    state.json   — état runtime des features uniquement
+    <feat-id>/   — artefacts par feature (planning.md, gate.json, etc.)
+    metrics.jsonl — historique des builds (coût, tokens, cache, durée)
 
 ## Artefacts par feature (.devflow/<feat-id>/)
 
@@ -130,7 +167,8 @@ Plusieurs features coexistent dans state.json avec leur état isolé.
 ## Stack
 
 Python 3.11+, Typer, Rich, Pydantic v2, PyYAML, pytest, ruff.
-Dépendances CLI externes : `claude` (Claude Code), `gh` (GitHub CLI), `uv`.
+Dépendances CLI externes : `gh` (GitHub CLI), `uv`.
+Backend par défaut : `claude` (Claude Code). Extensible via Backend Protocol.
 
 ## Principes de code
 
@@ -142,6 +180,11 @@ Dépendances CLI externes : `claude` (Claude Code), `gh` (GitHub CLI), `uv`.
 - Conventional Commits pour les PR (feat: / fix:)
 - Squash-merge sur main
 
-**Pydantic vs dataclass** : `BaseModel` Pydantic pour tout modèle sérialisé dans `state.json`
-(Feature, WorkflowState, PhaseSpec, BuildMetrics) — on profite de la validation et du round-trip JSON.
-`@dataclass` pour les DTO internes jamais persistés (PhaseMetrics, ToolUse, BuildTotals, SyncResult, CheckResult).
+**Pydantic vs dataclass** : `BaseModel` Pydantic pour tout modèle sérialisé
+(Feature, WorkflowState, DevflowConfig, PhaseSpec) — validation + round-trip JSON/YAML.
+`@dataclass` pour les DTO internes jamais persistés (PhaseMetrics, ToolUse,
+BuildTotals, BuildMetrics, SyncResult, CheckResult).
+
+**Config vs State** : `config.yaml` contient la configuration projet (stack,
+gate, linear, backend) — stable entre les sessions. `state.json` contient
+uniquement l'état runtime des features — change à chaque phase.
