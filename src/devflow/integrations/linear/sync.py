@@ -47,7 +47,7 @@ _STATUS_TO_LINEAR_TYPE: dict[FeatureStatus, str] = {
 }
 
 
-class SyncResult:
+class LinearSyncResult:
     """Accumulates sync outcomes for reporting."""
 
     def __init__(self) -> None:
@@ -165,15 +165,15 @@ def create_issue_for_feature(
         return None
 
 
-def sync_all(base: Path | None = None) -> SyncResult:
+def sync_all(base: Path | None = None) -> LinearSyncResult:
     """Sync all active features to Linear.
 
     Skips features that are archived. Creates issues for features
     without a Linear ID, updates state for features that already have one.
 
-    Returns a SyncResult with counts of created/updated/errors.
+    Returns a LinearSyncResult with counts of created/updated/errors.
     """
-    result = SyncResult()
+    result = LinearSyncResult()
 
     if not is_configured():
         result.errors.append("LINEAR_API_KEY not set")

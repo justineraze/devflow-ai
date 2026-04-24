@@ -6,9 +6,6 @@ parser (verbose mode), the spinner (live mode), and the build summary.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from devflow.core.metrics import ToolUse
 
 # Canonical icon mapping for Claude Code tools (exact name match).
@@ -42,14 +39,6 @@ def tool_icon(tool_name: str) -> str:
     return "🔧"
 
 
-def safe_json_loads(text: str, default: Any = None) -> Any:
-    """Parse JSON safely, returning *default* on decode error."""
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, ValueError):
-        return default
-
-
 def format_duration(seconds: float | None) -> str:
     """Format seconds as human-readable duration (e.g. '42ms', '3s', '1m30s')."""
     if seconds is None:
@@ -60,11 +49,6 @@ def format_duration(seconds: float | None) -> str:
         return f"{int(round(seconds))}s"
     m, s = divmod(int(seconds), 60)
     return f"{m}m{s:02d}s"
-
-
-def plural(count: int, word: str) -> str:
-    """Return word with 's' appended if count != 1."""
-    return f"{word}s" if count != 1 else word
 
 
 def format_cost(cost_usd: float) -> str:

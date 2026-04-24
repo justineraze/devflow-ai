@@ -7,8 +7,8 @@ import io
 import pytest
 from rich.console import Console
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
-from devflow.orchestration.stream import PhaseMetrics
 from devflow.ui import rendering as r
 
 

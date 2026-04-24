@@ -17,8 +17,8 @@ def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
     return last_line or "Tests failed", stdout[:2000]
 
 
-STACK_CHECKS: dict[str, list[CheckDef]] = {
-    "python": [
+STACK_CHECKS: dict[str, tuple[CheckDef, ...]] = {
+    "python": (
         CheckDef("ruff", ["ruff", "check", "."]),
         CheckDef(
             "pytest",
@@ -26,24 +26,24 @@ STACK_CHECKS: dict[str, list[CheckDef]] = {
             timeout=120,
             parse_output=_parse_pytest,
         ),
-    ],
-    "typescript": [
+    ),
+    "typescript": (
         CheckDef("biome", ["npx", "biome", "check", "."]),
         CheckDef("vitest", ["npx", "vitest", "run", "--reporter=verbose"], timeout=120),
-    ],
-    "php": [
+    ),
+    "php": (
         CheckDef("pint", ["./vendor/bin/pint", "--test"]),
         CheckDef("pest", ["./vendor/bin/pest", "--compact"], timeout=120),
-    ],
+    ),
 }
 
 
-def _checks_for_stack(stack: str | None) -> list[CheckDef]:
+def checks_for_stack(stack: str | None) -> tuple[CheckDef, ...]:
     """Return the check definitions for *stack*, defaulting to python."""
     return STACK_CHECKS.get(stack or "python", STACK_CHECKS["python"])
 
 
-def _run_command_check(
+def run_command_check(
     name: str,
     cmd: list[str],
     cwd: Path,

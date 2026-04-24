@@ -38,10 +38,16 @@ def epic_progress(state: WorkflowState, epic_id: str) -> EpicProgress:
     """Compute the progress of an epic from its children's statuses."""
     children = state.children_of(epic_id)
     done = sum(1 for c in children if c.status == FeatureStatus.DONE)
-    failed = sum(1 for c in children if c.status == FeatureStatus.BLOCKED)
+    failed = sum(
+        1 for c in children
+        if c.status in (FeatureStatus.FAILED, FeatureStatus.BLOCKED)
+    )
     in_progress = sum(
         1 for c in children
-        if c.status not in (FeatureStatus.PENDING, FeatureStatus.DONE, FeatureStatus.BLOCKED)
+        if c.status not in (
+            FeatureStatus.PENDING, FeatureStatus.DONE,
+            FeatureStatus.FAILED, FeatureStatus.BLOCKED,
+        )
     )
     pending = sum(1 for c in children if c.status == FeatureStatus.PENDING)
     return EpicProgress(

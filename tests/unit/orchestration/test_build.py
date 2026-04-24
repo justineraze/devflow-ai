@@ -5,14 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import FeatureStatus, PhaseStatus
 from devflow.core.workflow import load_state, save_state
-from devflow.orchestration.build import (
-    _parse_plan_module,
-    _parse_plan_title,
-    _parse_plan_type,
-    execute_build_loop,
-)
+from devflow.orchestration.build import execute_build_loop
 from devflow.orchestration.lifecycle import (
     _generate_feature_id,
     resume_build,
@@ -26,7 +22,11 @@ from devflow.orchestration.phase_exec import (
     fail_phase,
     run_phase,
 )
-from devflow.orchestration.stream import PhaseMetrics
+from devflow.orchestration.plan_parser import (
+    parse_plan_module,
+    parse_plan_title,
+    parse_plan_type,
+)
 
 _PHASE_OK = (True, "done", PhaseMetrics())
 
@@ -39,80 +39,80 @@ def project_dir(tmp_path: Path) -> Path:
 class TestParsePlanModule:
     def test_extracts_module_name(self) -> None:
         plan = "### Scope\n- Type: extension\n- Module: runner\n"
-        assert _parse_plan_module(plan) == "runner"
+        assert parse_plan_module(plan) == "runner"
 
     def test_returns_none_when_absent(self) -> None:
         plan = "### Scope\n- Type: extension\n- Complexity: low\n"
-        assert _parse_plan_module(plan) is None
+        assert parse_plan_module(plan) is None
 
     def test_ignores_extra_words_after_module(self) -> None:
         plan = "- Module: gate (parallel execution)\n"
-        assert _parse_plan_module(plan) == "gate"
+        assert parse_plan_module(plan) == "gate"
 
     def test_empty_string_returns_none(self) -> None:
-        assert _parse_plan_module("") is None
+        assert parse_plan_module("") is None
 
 
 class TestParsePlanTitle:
     def test_extracts_title_after_em_dash(self) -> None:
         plan = "## Plan: feat-001 — Document Pydantic vs dataclass convention\n"
-        assert _parse_plan_title(plan) == "Document Pydantic vs dataclass convention"
+        assert parse_plan_title(plan) == "Document Pydantic vs dataclass convention"
 
     def test_extracts_title_after_en_dash(self) -> None:
         plan = "## Plan: feat-001 – Move console to core\n"
-        assert _parse_plan_title(plan) == "Move console to core"
+        assert parse_plan_title(plan) == "Move console to core"
 
     def test_extracts_title_after_hyphen(self) -> None:
         plan = "## Plan: feat-001 - Add metrics display\n"
-        assert _parse_plan_title(plan) == "Add metrics display"
+        assert parse_plan_title(plan) == "Add metrics display"
 
     def test_returns_none_when_absent(self) -> None:
         plan = "### Scope\n- Type: extension\n"
-        assert _parse_plan_title(plan) is None
+        assert parse_plan_title(plan) is None
 
     def test_returns_none_for_empty(self) -> None:
-        assert _parse_plan_title("") is None
+        assert parse_plan_title("") is None
 
     def test_strips_whitespace(self) -> None:
         plan = "## Plan: feat-001 —   Add caching layer  \n"
-        assert _parse_plan_title(plan) == "Add caching layer"
+        assert parse_plan_title(plan) == "Add caching layer"
 
 
 class TestParsePlanType:
     def test_maps_new_feature_to_feat(self) -> None:
         plan = "- Type: new-feature\n"
-        assert _parse_plan_type(plan) == "feat"
+        assert parse_plan_type(plan) == "feat"
 
     def test_maps_extension_to_feat(self) -> None:
         plan = "- Type: extension\n"
-        assert _parse_plan_type(plan) == "feat"
+        assert parse_plan_type(plan) == "feat"
 
     def test_maps_bugfix_to_fix(self) -> None:
         plan = "- Type: bugfix\n"
-        assert _parse_plan_type(plan) == "fix"
+        assert parse_plan_type(plan) == "fix"
 
     def test_maps_refactor(self) -> None:
         plan = "- Type: refactor\n"
-        assert _parse_plan_type(plan) == "refactor"
+        assert parse_plan_type(plan) == "refactor"
 
     def test_maps_docs(self) -> None:
         plan = "- Type: docs\n"
-        assert _parse_plan_type(plan) == "docs"
+        assert parse_plan_type(plan) == "docs"
 
     def test_maps_ci(self) -> None:
         plan = "- Type: ci\n"
-        assert _parse_plan_type(plan) == "ci"
+        assert parse_plan_type(plan) == "ci"
 
     def test_returns_none_when_absent(self) -> None:
         plan = "- Module: runner\n"
-        assert _parse_plan_type(plan) is None
+        assert parse_plan_type(plan) is None
 
     def test_returns_none_for_unknown_type(self) -> None:
         plan = "- Type: banana\n"
-        assert _parse_plan_type(plan) is None
+        assert parse_plan_type(plan) is None
 
     def test_returns_none_for_empty(self) -> None:
-        assert _parse_plan_type("") is None
+        assert parse_plan_type("") is None
 
 
 class TestGenerateFeatureId:
@@ -417,35 +417,35 @@ class TestReviewLoop:
     def test_should_re_review_true_when_budget_remains(
         self, project_dir: Path,
     ) -> None:
-        from devflow.orchestration.build import _should_re_review
+        from devflow.orchestration.review import should_re_review
 
         feature = start_build("test", "standard", project_dir)
         assert feature.find_phase("reviewing") is not None
-        assert _should_re_review(feature) is True
+        assert should_re_review(feature) is True
 
     def test_should_re_review_false_after_max_cycles(
         self, project_dir: Path,
     ) -> None:
-        from devflow.orchestration.build import MAX_REVIEW_CYCLES, _should_re_review
+        from devflow.orchestration.review import MAX_REVIEW_CYCLES, should_re_review
 
         feature = start_build("test", "standard", project_dir)
         feature.metadata.review_cycles = MAX_REVIEW_CYCLES
-        assert _should_re_review(feature) is False
+        assert should_re_review(feature) is False
 
     def test_should_re_review_false_without_reviewing_phase(
         self, project_dir: Path,
     ) -> None:
-        from devflow.orchestration.build import _should_re_review
+        from devflow.orchestration.review import should_re_review
 
         feature = start_build("test", "quick", project_dir)
         # quick workflow has no reviewing phase.
         assert feature.find_phase("reviewing") is None
-        assert _should_re_review(feature) is False
+        assert should_re_review(feature) is False
 
     def test_setup_re_review_resets_and_increments(
         self, project_dir: Path,
     ) -> None:
-        from devflow.orchestration.build import _setup_re_review
+        from devflow.orchestration.review import setup_re_review
 
         feature = start_build("test", "standard", project_dir)
         # Simulate reviewing done.
@@ -454,7 +454,7 @@ class TestReviewLoop:
         reviewing.complete("LGTM")
         save_state(load_state(project_dir), project_dir)
 
-        _setup_re_review(feature.id, project_dir)
+        setup_re_review(feature.id, project_dir)
 
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
@@ -465,7 +465,7 @@ class TestReviewLoop:
     def test_setup_re_fix_resets_fixing_and_gate(
         self, project_dir: Path,
     ) -> None:
-        from devflow.orchestration.build import _setup_re_fix
+        from devflow.orchestration.review import setup_re_fix
 
         feature = start_build("test", "standard", project_dir)
         # Simulate fixing + gate done.
@@ -492,7 +492,7 @@ class TestReviewLoop:
         state.features[feature.id] = feature
         save_state(state, project_dir)
 
-        _setup_re_fix(feature.id, project_dir)
+        setup_re_fix(feature.id, project_dir)
 
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)

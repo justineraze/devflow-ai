@@ -186,9 +186,9 @@ class TestVenvEnvUvToolInstallScenario:
         assert result.returncode == 0
 
     def test_gate_ruff_resolves_via_project_venv(self, tmp_path: Path) -> None:
-        """_run_command_check finds a project-local stub even without a system ruff."""
+        """run_command_check finds a project-local stub even without a system ruff."""
 
-        from devflow.integrations.gate.checks import _run_command_check
+        from devflow.integrations.gate.checks import run_command_check
 
         bin_dir = tmp_path / ".venv" / "bin"
         bin_dir.mkdir(parents=True)
@@ -197,7 +197,7 @@ class TestVenvEnvUvToolInstallScenario:
 
         # Verify that the command succeeds (tool resolved from project venv)
         # rather than raising FileNotFoundError.
-        result = _run_command_check(stub_name, [stub_name], cwd=tmp_path)
+        result = run_command_check(stub_name, [stub_name], cwd=tmp_path)
         assert result.passed is True
         assert not result.skipped, "tool should be found, not skipped"
 

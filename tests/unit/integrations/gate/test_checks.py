@@ -1,6 +1,6 @@
 """Tests for devflow.integrations.gate.checks.
 
-Covers: _parse_pytest, _run_command_check, _checks_for_stack, STACK_CHECKS.
+Covers: _parse_pytest, run_command_check, checks_for_stack, STACK_CHECKS.
 """
 
 import subprocess
@@ -10,9 +10,9 @@ from unittest.mock import patch
 from devflow.integrations.gate import STACK_CHECKS
 from devflow.integrations.gate.checks import (
     CheckDef,
-    _checks_for_stack,
     _parse_pytest,
-    _run_command_check,
+    checks_for_stack,
+    run_command_check,
 )
 
 
@@ -37,14 +37,14 @@ class TestParsePytest:
 
 
 class TestRunCommandCheck:
-    """Tests for the generic _run_command_check helper."""
+    """Tests for the generic run_command_check helper."""
 
     @patch("devflow.integrations.gate.checks.subprocess.run")
     def test_success(self, mock_run: patch, tmp_path: Path) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["tool"], returncode=0, stdout="all good\n", stderr="",
         )
-        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path)
+        result = run_command_check("tool", ["tool", "check"], cwd=tmp_path)
         assert result.passed is True
         assert result.message == "No issues"
 
@@ -53,13 +53,13 @@ class TestRunCommandCheck:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["tool"], returncode=1, stdout="error line 1\nerror line 2\n", stderr="",
         )
-        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path)
+        result = run_command_check("tool", ["tool", "check"], cwd=tmp_path)
         assert result.passed is False
         assert "issues found" in result.message
 
     @patch("devflow.integrations.gate.checks.subprocess.run", side_effect=FileNotFoundError)
     def test_missing_tool_skipped(self, _mock: patch, tmp_path: Path) -> None:
-        result = _run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
+        result = run_command_check("biome", ["npx", "biome", "check"], cwd=tmp_path)
         assert result.skipped is True
         assert result.passed is False
         assert "not found" in result.message
@@ -69,7 +69,7 @@ class TestRunCommandCheck:
         side_effect=subprocess.TimeoutExpired(cmd=["tool"], timeout=60),
     )
     def test_timeout(self, _mock: patch, tmp_path: Path) -> None:
-        result = _run_command_check("tool", ["tool", "check"], cwd=tmp_path, timeout=60)
+        result = run_command_check("tool", ["tool", "check"], cwd=tmp_path, timeout=60)
         assert result.passed is False
         assert "timed out" in result.message
 
@@ -82,7 +82,7 @@ class TestRunCommandCheck:
         def _parse(rc: int, stdout: str) -> tuple[str, str]:
             return stdout.strip().split("\n")[-1], ""
 
-        result = _run_command_check(
+        result = run_command_check(
             "pytest", ["pytest"], cwd=tmp_path, parse_output=_parse,
         )
         assert result.passed is True
@@ -97,7 +97,7 @@ class TestRunCommandCheck:
             stdout="",
             stderr="ModuleNotFoundError: No module named 'missing_pkg'",
         )
-        result = _run_command_check("pytest", ["python", "-m", "pytest"], cwd=tmp_path)
+        result = run_command_check("pytest", ["python", "-m", "pytest"], cwd=tmp_path)
         assert result.passed is False
         assert "ModuleNotFoundError" in result.details
 
@@ -106,35 +106,35 @@ class TestRunCommandCheck:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["tool"], returncode=0, stdout="", stderr="",
         )
-        _run_command_check("tool", ["tool"], cwd=tmp_path)
+        run_command_check("tool", ["tool"], cwd=tmp_path)
         assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
         assert "env" in mock_run.call_args.kwargs
 
 
 class TestChecksForStack:
-    """Tests for _checks_for_stack stack→tools mapping."""
+    """Tests for checks_for_stack stack→tools mapping."""
 
     def test_python_stack(self) -> None:
-        checks = _checks_for_stack("python")
+        checks = checks_for_stack("python")
         names = [c[0] for c in checks]
         assert names == ["ruff", "pytest"]
 
     def test_typescript_stack(self) -> None:
-        checks = _checks_for_stack("typescript")
+        checks = checks_for_stack("typescript")
         names = [c[0] for c in checks]
         assert names == ["biome", "vitest"]
 
     def test_php_stack(self) -> None:
-        checks = _checks_for_stack("php")
+        checks = checks_for_stack("php")
         names = [c[0] for c in checks]
         assert names == ["pint", "pest"]
 
     def test_none_defaults_to_python(self) -> None:
-        checks = _checks_for_stack(None)
+        checks = checks_for_stack(None)
         assert checks is STACK_CHECKS["python"]
 
     def test_unknown_defaults_to_python(self) -> None:
-        checks = _checks_for_stack("ruby")
+        checks = checks_for_stack("ruby")
         assert checks is STACK_CHECKS["python"]
 
 
@@ -143,8 +143,8 @@ class TestStackChecksRegistry:
 
     def test_all_entries_are_valid_check_defs(self) -> None:
         for stack, checks in STACK_CHECKS.items():
-            assert isinstance(checks, list), f"{stack}: expected list"
-            assert len(checks) > 0, f"{stack}: checks list is empty"
+            assert isinstance(checks, tuple), f"{stack}: expected tuple"
+            assert len(checks) > 0, f"{stack}: checks tuple is empty"
             for check in checks:
                 assert isinstance(check, CheckDef), f"{stack}/{check}: not a CheckDef"
                 assert isinstance(check.cmd, list), f"{stack}/{check.name}: cmd not a list"

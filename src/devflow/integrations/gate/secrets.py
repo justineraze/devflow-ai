@@ -28,14 +28,14 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 # Files to skip when scanning for secrets.
-SKIP_EXTENSIONS: set[str] = {
+SKIP_EXTENSIONS: frozenset[str] = frozenset({
     ".pyc", ".pyo", ".so", ".whl", ".egg", ".lock", ".png", ".jpg", ".gif",
-}
-SKIP_DIRS: set[str] = {
+})
+SKIP_DIRS: frozenset[str] = frozenset({
     ".git", ".venv", "venv", "__pycache__", ".devflow", "node_modules", ".ruff_cache",
     "assets",  # Agent/skill .md files contain code examples with fake secrets.
     "tests",  # Test files contain intentional fake secrets for scanner testing.
-}
+})
 
 
 def _should_skip(path: Path, root: Path, ctx: GateContext | None) -> bool:

@@ -78,7 +78,7 @@ _INSTRUCTIONS_IMPLEMENTING = (
     "Each commit = one plan step, verified green (ruff + pytest pass)."
 )
 
-_INSTRUCTIONS_IMPLEMENTING_QUICK = (
+INSTRUCTIONS_IMPLEMENTING_QUICK = (
     "## Instructions\n\n"
     "Implement the requested change.\n"
     "Write tests alongside the code.\n"
@@ -216,6 +216,7 @@ def is_known_phase(name: str | PhaseName) -> bool:
 
 
 __all__ = [
+    "INSTRUCTIONS_IMPLEMENTING_QUICK",
     "PHASES",
     "PhaseName",
     "PhaseSpec",

@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from devflow.integrations.gate.context import GateContext, build_context
 
 

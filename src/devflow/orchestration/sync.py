@@ -4,24 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
 
-
-class DirtyWorktreeError(Exception):
-    """Raised when the working tree has uncommitted changes."""
-
-
-@dataclass
-class SyncResult:
-    """Summary of what `run_sync` did (or would do in dry-run mode)."""
-
-    branches_deleted: list[str] = field(default_factory=list)
-    features_archived: list[str] = field(default_factory=list)
-    current_branch: str = ""
-    dry_run: bool = False
-    # Human-readable log of actions (populated in dry-run, also in real mode).
-    actions: list[str] = field(default_factory=list)
+from devflow.core.models import DirtyWorktreeError, SyncResult
 
 
 def _current_branch(cwd: Path) -> str:

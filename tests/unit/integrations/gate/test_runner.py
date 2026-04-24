@@ -26,7 +26,7 @@ class TestRunGate:
     """Tests for run_gate stack dispatch."""
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_uses_typescript_tools(
         self, mock_secrets: patch, mock_check: patch,
@@ -42,7 +42,7 @@ class TestRunGate:
         assert call_names == ["biome", "vitest"]
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_default_stack_is_python(
         self, mock_secrets: patch, mock_check: patch,
@@ -57,7 +57,7 @@ class TestRunGate:
         assert call_names == ["ruff", "pytest"]
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_secrets_always_runs(
         self, mock_secrets: patch, mock_check: patch,
@@ -73,7 +73,7 @@ class TestRunGate:
         assert "secrets" in check_names
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_structural_checks_included_in_report(
         self, mock_secrets: patch, mock_check: patch,
@@ -89,7 +89,7 @@ class TestRunGate:
         assert "module_size" in check_names
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_structural_warnings_dont_fail_gate(
         self, mock_secrets: patch, mock_check: patch,
@@ -110,7 +110,7 @@ class TestRunGate:
         assert report.passed is True
 
     @_patch_structural
-    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_context_passed_to_structural_checks(
         self, mock_secrets: patch, mock_check: patch,

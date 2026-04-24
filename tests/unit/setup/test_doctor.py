@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from devflow.core.gate_report import GateReport
 from devflow.setup.doctor import (
-    DoctorReport,
     check_agents_synced,
     check_cli_available,
     check_devflow_init,
@@ -240,7 +240,7 @@ class TestCheckHookInstalled:
 class TestRunDoctor:
     def test_returns_report_with_all_checks(self, tmp_path: Path) -> None:
         report = run_doctor(base=tmp_path)
-        assert isinstance(report, DoctorReport)
+        assert isinstance(report, GateReport)
         names = {c.name for c in report.checks}
         assert "python" in names
         assert "Claude Code" in names
@@ -253,6 +253,6 @@ class TestRunDoctor:
         assert len(report.checks) == 8
 
     def test_empty_report_alias(self) -> None:
-        report = DoctorReport()
+        report = GateReport()
         assert report.passed is True
         assert len(report.checks) == 0

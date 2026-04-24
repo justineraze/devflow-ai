@@ -49,19 +49,10 @@ from devflow.orchestration.plan_parser import (
     parse_plan_type,
 )
 from devflow.orchestration.review import (
-    MAX_REVIEW_CYCLES,  # noqa: F401 — re-exported for tests
     setup_re_fix,
     setup_re_review,
     should_re_review,
 )
-
-# Backwards-compat re-exports (tests import the underscore-prefixed names).
-_parse_plan_module = parse_plan_module
-_parse_plan_title = parse_plan_title
-_parse_plan_type = parse_plan_type
-_should_re_review = should_re_review
-_setup_re_review = setup_re_review
-_setup_re_fix = setup_re_fix
 
 
 def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | None:
@@ -489,7 +480,7 @@ def execute_build_loop(
         initial_untracked = _setup_branch(
             feature, base, worktree, is_resuming, feedback,
         )
-        branch = _get_branch_name(feature, worktree)
+        branch = _get_branch_name(feature)
     else:
         initial_untracked = get_untracked_files()
 
@@ -592,7 +583,7 @@ def _setup_branch(
     return initial_untracked
 
 
-def _get_branch_name(feature: Feature, worktree: bool) -> str:
+def _get_branch_name(feature: Feature) -> str:
     """Return the branch name for the feature."""
     from devflow.integrations.git import branch_name
     return branch_name(feature.id)

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import shlex
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from devflow.core.gate_report import CheckResult, GateReport
 from devflow.core.metrics import PhaseMetrics
-from devflow.integrations.gate.checks import _checks_for_stack, _run_command_check
+from devflow.core.paths import venv_env
+from devflow.integrations.gate.checks import checks_for_stack, run_command_check
 from devflow.integrations.gate.complexity import check_complexity
 from devflow.integrations.gate.config import load_gate_config
 from devflow.integrations.gate.context import GateContext, build_context
 from devflow.integrations.gate.module_size import check_module_size
-from devflow.integrations.gate.report import CheckResult, GateReport
 from devflow.integrations.gate.secrets import scan_secrets
 
 # Default timeouts for custom gate commands (seconds).
@@ -20,11 +24,6 @@ _CUSTOM_TIMEOUTS: dict[str, int] = {"lint": 60, "test": 120}
 
 def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
     """Run a custom shell command and return a CheckResult."""
-    import shlex
-    import subprocess
-
-    from devflow.integrations.gate.report import CheckResult
-
     timeout = _CUSTOM_TIMEOUTS.get(name, 60)
     try:
         result = subprocess.run(
@@ -33,6 +32,7 @@ def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
             text=True,
             cwd=str(cwd),
             timeout=timeout,
+            env=venv_env(cwd),
         )
     except subprocess.TimeoutExpired:
         return CheckResult(name=name, passed=False, message=f"{name} timed out")
@@ -45,6 +45,31 @@ def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
         details = output[:2000]
 
     return CheckResult(name=name, passed=result.returncode == 0, message=message, details=details)
+
+
+def _submit_custom_commands(
+    pool: ThreadPoolExecutor,
+    config: dict[str, str],
+    cwd: Path,
+) -> list[object]:
+    """Submit custom gate checks to the thread pool."""
+    return [
+        pool.submit(_run_custom_check, name, cmd, cwd)
+        for name, cmd in config.items()
+    ]
+
+
+def _submit_stack_commands(
+    pool: ThreadPoolExecutor,
+    stack: str | None,
+    cwd: Path,
+) -> list[object]:
+    """Submit stack-specific gate checks to the thread pool."""
+    checks = checks_for_stack(stack)
+    return [
+        pool.submit(run_command_check, c.name, c.cmd, cwd, c.timeout, c.parse_output)
+        for c in checks
+    ]
 
 
 def run_gate(
@@ -63,23 +88,12 @@ def run_gate(
     custom_config = load_gate_config(cwd)
     report = GateReport(custom=custom_config is not None)
 
-    # Build the command check futures — source differs but pattern is the same.
-    if custom_config is not None:
-        submit_commands = lambda pool: [  # noqa: E731
-            pool.submit(_run_custom_check, name, cmd, cwd)
-            for name, cmd in custom_config.items()
-        ]
-        worker_count = len(custom_config)
-    else:
-        checks = _checks_for_stack(stack)
-        submit_commands = lambda pool: [  # noqa: E731
-            pool.submit(_run_command_check, c.name, c.cmd, cwd, c.timeout, c.parse_output)
-            for c in checks
-        ]
-        worker_count = len(checks)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        if custom_config is not None:
+            cmd_futures = _submit_custom_commands(pool, custom_config, cwd)
+        else:
+            cmd_futures = _submit_stack_commands(pool, stack, cwd)
 
-    with ThreadPoolExecutor(max_workers=worker_count + 3) as pool:
-        cmd_futures = submit_commands(pool)
         secrets_future = pool.submit(scan_secrets, base, ctx)
         complexity_future = pool.submit(check_complexity, base, ctx=ctx)
         module_size_future = pool.submit(check_module_size, base, ctx=ctx)
@@ -107,8 +121,6 @@ def run_gate_phase(
 
     Returns ``(passed, summary_text, metrics)``.
     """
-    import json
-
     from devflow.core.artifacts import write_artifact
 
     ctx = build_context(mode="build", base_sha=base_sha, base=base)

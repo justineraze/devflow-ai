@@ -14,6 +14,8 @@ from devflow.core.formatting import format_cost, format_duration, format_tokens
 from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
 
+_format_build_duration = format_duration
+
 
 @dataclass
 class _PhaseAccumulator:
@@ -228,7 +230,7 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - 1] + "…"
 
 
-def _format_duration(start: datetime, end: datetime) -> str:
+def _format_elapsed(start: datetime, end: datetime) -> str:
     """Format the duration between two datetimes as a human-readable string."""
     total_seconds = int((end - start).total_seconds())
     if total_seconds < 60:
@@ -269,7 +271,7 @@ def render_log_table(features: list[Feature]) -> None:
         style = status_style(feature.status.value)
         total = len(feature.phases)
         done = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
-        duration = _format_duration(feature.created_at, feature.updated_at)
+        duration = _format_elapsed(feature.created_at, feature.updated_at)
         table.add_row(
             feature.id,
             Text(feature.status.value, style=style),
@@ -502,13 +504,11 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
         )
 
 
-_format_build_duration = format_duration
-
 
 def render_log_detail(feature: Feature) -> None:
     """Render detailed log view for a single feature."""
     style = status_style(feature.status.value)
-    duration = _format_duration(feature.created_at, feature.updated_at)
+    duration = _format_elapsed(feature.created_at, feature.updated_at)
 
     console.print(f"\n[bold]{feature.id}[/bold] — {feature.description}")
     console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
@@ -538,7 +538,7 @@ def render_log_detail(feature: Feature) -> None:
         ps = status_style(phase.status.value)
         marker = _phase_marker(phase.status)
         if phase.started_at and phase.completed_at:
-            phase_duration = _format_duration(phase.started_at, phase.completed_at)
+            phase_duration = _format_elapsed(phase.started_at, phase.completed_at)
         else:
             phase_duration = "—"
         error = _truncate(phase.error, 60) if phase.error else ""

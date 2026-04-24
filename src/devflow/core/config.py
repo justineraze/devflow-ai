@@ -10,6 +10,7 @@ defaults (stack auto-detected, base_branch="main", backend="claude").
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -111,8 +112,6 @@ def _migrate_state_json(base: Path | None = None) -> dict[str, Any]:
     Returns a dict of fields to merge into config (may be empty).
     Does NOT modify state.json — the caller handles that.
     """
-    import json
-
     state_path = (base or Path.cwd()) / ".devflow" / "state.json"
     if not state_path.is_file():
         return {}

@@ -47,7 +47,7 @@ class TestParallelExecution:
             return CheckResult(name="fake", passed=True, message="ok")
 
         with patch(
-            "devflow.integrations.gate.runner._run_command_check",
+            "devflow.integrations.gate.runner.run_command_check",
             side_effect=slow_check,
         ), patch(
             "devflow.integrations.gate.runner.scan_secrets",
@@ -81,7 +81,7 @@ class TestParallelExecution:
             return CheckResult(name=check_name, passed=True)
 
         with patch(
-            "devflow.integrations.gate.runner._run_command_check",
+            "devflow.integrations.gate.runner.run_command_check",
             side_effect=capturing,
         ), patch(
             "devflow.integrations.gate.runner.scan_secrets",

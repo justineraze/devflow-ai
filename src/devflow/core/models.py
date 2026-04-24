@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -17,12 +18,12 @@ CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
 )
 
 # Workflow selection thresholds for ComplexityScore.total (0–12).
-_WORKFLOW_THRESHOLDS: list[tuple[int, str]] = [
+_WORKFLOW_THRESHOLDS: tuple[tuple[int, str], ...] = (
     (2, "quick"),
     (5, "light"),
     (8, "standard"),
     (12, "full"),
-]
+)
 
 
 def _resolve_workflow(total: int) -> str:
@@ -61,7 +62,7 @@ class ComplexityScore(BaseModel):
     def model_post_init(self, __context: object) -> None:
         """Resolve workflow from total once, at construction time."""
         if not self.workflow:
-            object.__setattr__(self, "workflow", _resolve_workflow(self.total))
+            self.workflow = _resolve_workflow(self.total)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -374,7 +375,7 @@ class WorkflowState(BaseModel):
     def epics(self) -> list[Feature]:
         """Return features that have children (i.e. are epics)."""
         parent_ids = {f.parent_id for f in self.features.values() if f.parent_id}
-        return [f for fid, f in self.features.items() if fid in parent_ids]
+        return [f for _, f in self.features.items() if f.id in parent_ids]
 
     def is_epic(self, feature_id: str) -> bool:
         """Return True if *feature_id* has any child features."""
@@ -398,3 +399,22 @@ class WorkflowDefinition(BaseModel):
     name: str
     description: str = ""
     phases: list[PhaseDefinition] = Field(default_factory=list)
+
+
+# ── Sync result types ────────────────────────────────────────────
+
+
+class DirtyWorktreeError(Exception):
+    """Raised when the working tree has uncommitted changes."""
+
+
+@dataclass
+class SyncResult:
+    """Summary of what ``run_sync`` did (or would do in dry-run mode)."""
+
+    branches_deleted: list[str] = field(default_factory=list)
+    features_archived: list[str] = field(default_factory=list)
+    current_branch: str = ""
+    dry_run: bool = False
+    # Human-readable log of actions (populated in dry-run, also in real mode).
+    actions: list[str] = field(default_factory=list)

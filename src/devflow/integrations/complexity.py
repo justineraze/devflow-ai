@@ -244,6 +244,6 @@ def score_complexity(
         scored_rank = _WORKFLOW_RANK.get(score.workflow, 0)
         floor_rank = _WORKFLOW_RANK[workflow_floor]
         if scored_rank < floor_rank:
-            object.__setattr__(score, "workflow", workflow_floor)
+            score = score.model_copy(update={"workflow": workflow_floor})
 
     return score

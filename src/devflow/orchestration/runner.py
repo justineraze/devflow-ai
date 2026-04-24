@@ -71,7 +71,7 @@ def _load_md_content(path: Path | None) -> str:
     """Read an .md file and strip YAML frontmatter."""
     if not path:
         return ""
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     if content.startswith("---"):
         end = content.find("---", 3)
         if end != -1:
@@ -83,7 +83,7 @@ def _parse_extends(path: Path | None) -> str | None:
     """Extract the ``extends`` field from a .md frontmatter, if present."""
     if not path:
         return None
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     if not content.startswith("---"):
         return None
     end = content.find("---", 3)
@@ -321,8 +321,8 @@ def _get_phase_instructions(phase_name: str, workflow: str = "") -> str:
     (the caller handles the single commit).
     """
     if workflow == "quick" and phase_name == PhaseName.IMPLEMENTING:
-        from devflow.core.phases import _INSTRUCTIONS_IMPLEMENTING_QUICK
-        return _INSTRUCTIONS_IMPLEMENTING_QUICK
+        from devflow.core.phases import INSTRUCTIONS_IMPLEMENTING_QUICK
+        return INSTRUCTIONS_IMPLEMENTING_QUICK
     try:
         return get_spec(phase_name).instructions
     except UnknownPhase:
@@ -345,6 +345,11 @@ def execute_phase(
     PhaseMetrics — keeps the runner focused on I/O.
     """
     from devflow.core.formatting import format_tool_line
+
+    # Lazy import: PhaseSpinner lives in ui/ which orchestration/ should not
+    # import at module level.  Kept here because the spinner is tightly
+    # coupled to the execute loop and injecting it via callback would add
+    # complexity without real benefit.
     from devflow.ui.spinner import PhaseSpinner
 
     backend = get_backend()

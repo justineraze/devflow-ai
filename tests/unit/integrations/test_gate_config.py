@@ -119,7 +119,7 @@ class TestRunGateWithCustomConfig:
             return CheckResult(name="fake", passed=True)
 
         with patch(
-            "devflow.integrations.gate.runner._run_command_check",
+            "devflow.integrations.gate.runner.run_command_check",
             side_effect=fake_run,
         ), patch(
             "devflow.integrations.gate.runner.scan_secrets",

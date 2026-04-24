@@ -75,6 +75,7 @@ def build_context(
         base_sha: SHA to diff against (build mode only).
         base: Project root directory (defaults to cwd).
     """
+    # Lazy: avoid circular import (gate.context → core.config → gate).
     from devflow.core.config import load_config
 
     cwd = base or Path.cwd()

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from devflow.core.config import load_config
+
 
 def load_gate_config(base: Path | None = None) -> dict[str, str] | None:
     """Load custom gate commands from the unified config.
@@ -17,7 +19,6 @@ def load_gate_config(base: Path | None = None) -> dict[str, str] | None:
     commands, or *None* when no custom commands are configured — in which
     case the gate falls back to stack-based auto-detection.
     """
-    from devflow.core.config import load_config
 
     config = load_config(base)
     gate = config.gate

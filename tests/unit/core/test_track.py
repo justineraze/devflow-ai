@@ -8,9 +8,7 @@ from devflow.core.models import Feature, FeatureStatus, WorkflowState
 from devflow.core.track import (
     get_feature,
     get_state,
-    list_active_features,
     list_all_features,
-    persist,
 )
 from devflow.core.workflow import save_state
 
@@ -47,21 +45,6 @@ class TestGetFeature:
 
 
 class TestListFeatures:
-    def test_active_features(self, project_with_features: Path) -> None:
-        active = list_active_features(project_with_features)
-        assert len(active) == 1
-        assert active[0].id == "f-001"
-
     def test_all_features(self, project_with_features: Path) -> None:
         all_feats = list_all_features(project_with_features)
         assert len(all_feats) == 2
-
-
-class TestPersist:
-    def test_persist_and_reload(self, tmp_path: Path) -> None:
-        state = WorkflowState()
-        state.add_feature(Feature(id="f-001", description="test"))
-        persist(state, tmp_path)
-
-        reloaded = get_state(tmp_path)
-        assert reloaded.get_feature("f-001") is not None

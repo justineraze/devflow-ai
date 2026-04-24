@@ -10,11 +10,8 @@ from rich.panel import Panel
 from rich.text import Text
 
 from devflow.core.console import console
+from devflow.core.gate_report import CheckResult, GateReport
 from devflow.core.paths import assets_dir
-from devflow.integrations.gate import CheckResult, GateReport
-
-# Alias for clarity — doctor uses the same report structure as gate.
-DoctorReport = GateReport
 
 
 def check_python_version() -> CheckResult:
@@ -211,18 +208,18 @@ def check_hook_installed(
             message=f"{HOOK_SCRIPT_NAME} not found — run: devflow install",
         )
 
+    if not cfg.exists():
+        return CheckResult(
+            name="hook",
+            passed=False,
+            message="settings.json missing — run: devflow install",
+        )
     data, err = load_settings(cfg)
     if err:
         return CheckResult(
             name="hook",
             passed=False,
             message=f"settings.json unreadable: {err}",
-        )
-    if not cfg.exists():
-        return CheckResult(
-            name="hook",
-            passed=False,
-            message="settings.json missing — run: devflow install",
         )
 
     hook_command = str(hook_path.resolve())
@@ -246,9 +243,9 @@ def check_hook_installed(
     )
 
 
-def run_doctor(base: Path | None = None) -> DoctorReport:
+def run_doctor(base: Path | None = None) -> GateReport:
     """Run all diagnostic checks and return the report."""
-    report = DoctorReport()
+    report = GateReport()
     from devflow.core.backend import get_backend
 
     report.add(check_python_version())
@@ -266,7 +263,7 @@ def run_doctor(base: Path | None = None) -> DoctorReport:
     return report
 
 
-def render_doctor_report(report: DoctorReport) -> None:
+def render_doctor_report(report: GateReport) -> None:
     """Display the doctor diagnostic report using Rich."""
     lines = Text()
     for check in report.checks:

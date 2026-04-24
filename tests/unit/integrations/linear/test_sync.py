@@ -10,7 +10,7 @@ import pytest
 from devflow.core.models import Feature, FeatureStatus, WorkflowState
 from devflow.core.workflow import load_state, save_state
 from devflow.integrations.linear.sync import (
-    SyncResult,
+    LinearSyncResult,
     create_issue_for_feature,
     sync_all,
     sync_feature_to_linear,
@@ -30,9 +30,9 @@ def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-class TestSyncResult:
+class TestLinearSyncResult:
     def test_total(self) -> None:
-        r = SyncResult()
+        r = LinearSyncResult()
         r.created = ["a", "b"]
         r.updated = ["c"]
         r.skipped = 1

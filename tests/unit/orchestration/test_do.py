@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import ComplexityScore
 from devflow.core.workflow import load_state
 from devflow.orchestration.build import execute_do_loop
 from devflow.orchestration.lifecycle import start_do
-from devflow.orchestration.stream import PhaseMetrics
 
 _PHASE_OK = (True, "done", PhaseMetrics())
 _PHASE_FAIL = (False, "error", PhaseMetrics())

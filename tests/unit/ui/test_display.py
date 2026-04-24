@@ -8,7 +8,7 @@ from rich.console import Console
 from devflow.core.history import BuildMetrics, PhaseSnapshot
 from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
 from devflow.ui.display import (
-    _format_duration,
+    _format_elapsed,
     render_log_detail,
     render_log_table,
     render_metrics_table,
@@ -55,36 +55,36 @@ class TestFormatDuration:
     def test_seconds(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(seconds=45)
-        assert _format_duration(start, end) == "45s"
+        assert _format_elapsed(start, end) == "45s"
 
     def test_zero_seconds(self) -> None:
         t = datetime(2026, 1, 1, tzinfo=UTC)
-        assert _format_duration(t, t) == "0s"
+        assert _format_elapsed(t, t) == "0s"
 
     def test_minutes(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(minutes=12)
-        assert _format_duration(start, end) == "12m"
+        assert _format_elapsed(start, end) == "12m"
 
     def test_hours_and_minutes(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(hours=2, minutes=15)
-        assert _format_duration(start, end) == "2h 15m"
+        assert _format_elapsed(start, end) == "2h 15m"
 
     def test_exact_hours(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(hours=3)
-        assert _format_duration(start, end) == "3h"
+        assert _format_elapsed(start, end) == "3h"
 
     def test_days_and_hours(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(days=3, hours=4)
-        assert _format_duration(start, end) == "3d 4h"
+        assert _format_elapsed(start, end) == "3d 4h"
 
     def test_exact_days(self) -> None:
         start = datetime(2026, 1, 1, tzinfo=UTC)
         end = start + timedelta(days=5)
-        assert _format_duration(start, end) == "5d"
+        assert _format_elapsed(start, end) == "5d"
 
 
 class TestRenderLogTable:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from rich.console import Group
 from rich.panel import Panel
 from rich.rule import Rule
@@ -19,13 +17,12 @@ from devflow.core.metrics import (
     PhaseSnapshot,
     compute_cache_hit_rate,
 )
-from devflow.core.models import Feature
-
-if TYPE_CHECKING:
-    from devflow.orchestration.sync import SyncResult
+from devflow.core.models import Feature, SyncResult
 
 # Re-export for backwards compatibility (tests, external consumers).
 PhaseMetricSnapshot = PhaseSnapshot
+
+_fmt_duration = format_duration
 
 STACK_ICONS: dict[str, str] = {
     "python": "🐍",
@@ -398,6 +395,3 @@ def render_sync_summary(result: SyncResult) -> None:
         border_style="yellow" if result.dry_run else "green",
         padding=(1, 2),
     ))
-
-
-_fmt_duration = format_duration

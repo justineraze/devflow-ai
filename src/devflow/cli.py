@@ -33,7 +33,6 @@ app = typer.Typer(
     name="devflow",
     help="CLI that installs and orchestrates an AI dev environment for Claude Code.",
     no_args_is_help=True,
-    callback=lambda version: None,  # replaced below
 )
 
 

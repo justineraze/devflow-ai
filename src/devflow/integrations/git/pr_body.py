@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import load_phase_output
-from devflow.core.console import console
 from devflow.core.models import Feature
 
 from .commit_message import build_pr_title
 from .repo import _git, commit_changes, get_branch_diff_summary, has_commits_ahead
+
+_log = logging.getLogger(__name__)
 
 
 def parse_plan_summary(plan_output: str) -> str:
@@ -109,15 +111,13 @@ def push_and_create_pr(
     )
 
     if not has_commits_ahead(base_branch):
-        console.print(
-            f"[yellow]No changes to push — branch is identical to {base_branch}.[/yellow]"
-        )
+        _log.info("No changes to push — branch is identical to %s", base_branch)
         return None
 
     # Push.
     push = _git("push", "-u", "origin", branch, timeout=120)
     if push.returncode != 0:
-        console.print(f"[red]Push failed: {push.stderr.strip()}[/red]")
+        _log.warning("Push failed: %s", push.stderr.strip())
         return None
 
     # Build PR body and title — body via Haiku, title from metadata.
@@ -142,5 +142,5 @@ def push_and_create_pr(
     if pr.returncode == 0:
         return pr.stdout.strip()
 
-    console.print(f"[red]PR creation failed: {pr.stderr.strip()}[/red]")
+    _log.warning("PR creation failed: %s", pr.stderr.strip())
     return None
