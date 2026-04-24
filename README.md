@@ -43,8 +43,7 @@ Requires Python 3.11+, [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 
 ```bash
 uv tool install devflow-ai
-devflow install   # sync agents & skills to ~/.claude/
-devflow doctor    # verify setup
+devflow install   # sync assets, detect stack, run diagnostic
 ```
 
 ---
@@ -52,19 +51,18 @@ devflow doctor    # verify setup
 ## Commands
 
 ```
+devflow do "description"                     Quick task on current branch (single commit)
 devflow build "description"                  Plan, implement, review, gate, PR
 devflow build "feedback" --resume feat-001   Resume with feedback on the plan
-devflow build "description" --base develop   Target a specific base branch
-devflow fix "description"                    Quick fix (no planning phase)
-devflow retry feat-001                       Retry from the last failed phase
+devflow build --retry feat-001               Retry from the last failed phase
 devflow check                                Run quality gate locally
 devflow status [feat-001]                    Show tracked features
+devflow status --log [feat-001]              Phase history with timings
 devflow status --metrics                     Build cost and cache history
-devflow log [feat-001]                       Phase history with timings
 devflow sync                                 Post-merge cleanup
-devflow install                              Install/update agents & skills
-devflow init                                 Detect stack, initialize project
-devflow doctor                               Check installation health
+devflow install                              Install assets + init + diagnostic
+devflow install --check                      Diagnostic only
+devflow --version                            Show version
 ```
 
 ---

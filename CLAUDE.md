@@ -55,17 +55,15 @@ tracking projet, quality gate automatisée, PR automatique, reprise après
 
 ## Commandes
 
-    devflow doctor                   → diagnostic de l'installation
-    devflow install                   → install/update agents + skills
-    devflow init                     → détection stack + bootstrap projet
-    devflow build "..."              → build plan-first
+    devflow do "..."                 → quick task, current branch (single commit, revertable)
+    devflow build "..."              → build plan-first avec PR
     devflow build "feedback" --resume feat-001  → reprendre avec feedback
-    devflow retry feat-001           → relancer la dernière phase failed
-    devflow fix "..."                → workflow quick (implement + gate)
+    devflow build --retry feat-001   → relancer la dernière phase failed
     devflow check                    → quality gate locale
-    devflow sync [--dry-run] [--keep-artifacts]  → post-merge cleanup (switch main, prune branches, archive done features)
-    devflow status [--json] [feat-001]  → état courant
-    devflow log [feat-001]           → historique avec durées
+    devflow status [feat-001]        → état courant (+ --log, --metrics, --archived)
+    devflow sync [--dry-run]         → post-merge cleanup (switch main, prune branches, archive)
+    devflow install                  → install assets + init projet + diagnostic (+ --check, --linear-team)
+    devflow --version                → version
 
 ## Structure des fichiers
 
