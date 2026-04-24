@@ -47,6 +47,17 @@ def start_build(
     ``feature.metadata.complexity`` for display in ``devflow status``.
     """
     state = load_state(base)
+
+    # When the prompt is long, summarise it via Haiku and use the
+    # summary for both the feature ID and description.
+    prompt: str | None = None
+    if len(description) > 100:
+        from devflow.integrations.git.smart_messages import generate_feature_title
+
+        title = generate_feature_title(description)
+        prompt = description
+        description = title
+
     feature_id = _generate_feature_id(description)
 
     counter = 1
@@ -57,7 +68,7 @@ def start_build(
 
     complexity = None
     if workflow_name is None:
-        complexity = score_complexity(description, base)
+        complexity = score_complexity(prompt or description, base)
         workflow_name = complexity.workflow
         console.print(
             f"[dim]Auto-selected workflow:[/dim] [bold]{workflow_name}[/bold] "
@@ -68,16 +79,9 @@ def start_build(
             f"scope:{complexity.scope})[/dim]"
         )
 
-    # When the prompt is long, summarise it via Haiku and keep the
-    # original in feature.prompt for the runner's user prompt.
-    if len(description) > 100:
-        from devflow.integrations.git.smart_messages import generate_feature_title
-
-        title = generate_feature_title(description)
-        feature = create_feature(state, feature_id, title, workflow_name)
-        feature.prompt = description
-    else:
-        feature = create_feature(state, feature_id, description, workflow_name)
+    feature = create_feature(state, feature_id, description, workflow_name)
+    if prompt is not None:
+        feature.prompt = prompt
 
     if complexity is not None:
         feature.metadata.complexity = complexity
