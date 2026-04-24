@@ -283,6 +283,9 @@ class Feature(BaseModel):
 
     id: str
     description: str
+    prompt: str | None = None
+    """Original user prompt when description was summarised by Haiku.
+    None when the description *is* the original prompt (short enough)."""
     status: FeatureStatus = FeatureStatus.PENDING
     workflow: str = "standard"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -229,10 +229,14 @@ def build_user_prompt(feature: Feature, phase: PhaseRecord) -> str:
     """
     sections = []
 
+    # Use the full original prompt when available (long prompts are
+    # summarised into feature.description at creation time).
+    task_description = feature.prompt or feature.description
+
     sections.append(f"""# Current task
 
 Feature: {feature.id}
-Description: {feature.description}
+Description: {task_description}
 Workflow: {feature.workflow}
 Current phase: {phase.name}
 Feature status: {feature.status.value}""")

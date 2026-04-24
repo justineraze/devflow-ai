@@ -210,10 +210,12 @@ def _run_execution_loop(
     and the gate auto-retry loop.
     """
     from devflow.integrations.git import (
-        build_commit_message,
         commit_changes,
         get_diff_stat,
         persist_files_summary,
+    )
+    from devflow.integrations.git.smart_messages import (
+        generate_commit_message,
     )
     from devflow.orchestration.model_routing import get_phase_agent, resolve_model
     from devflow.ui.rendering import (
@@ -253,7 +255,7 @@ def _run_execution_loop(
             totals.add(phase.name, metrics, elapsed, model=model_label)
 
             if phase.name in ("implementing", "fixing"):
-                msg = build_commit_message(feature, suffix=phase.name)
+                msg = generate_commit_message(feature, phase=phase.name)
                 if commit_changes(msg, exclude=initial_untracked):
                     console.print("  [dim]💾 auto-committed changes[/dim]")
                 diff = get_diff_stat()

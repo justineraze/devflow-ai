@@ -10,8 +10,8 @@ from devflow.core.artifacts import load_phase_output
 from devflow.core.console import console
 from devflow.core.models import Feature
 
-from .commit_message import build_commit_message, build_pr_title
-from .repo import _git, commit_changes, has_commits_ahead
+from .commit_message import build_pr_title
+from .repo import _git, commit_changes, get_branch_diff_summary, has_commits_ahead
 
 
 def parse_plan_summary(plan_output: str) -> str:
@@ -100,8 +100,13 @@ def push_and_create_pr(
     """
     cwd = str(Path.cwd())
 
+    from .smart_messages import generate_commit_message, generate_pr_body
+
     # Safety net: commit anything left uncommitted.
-    commit_changes(build_commit_message(feature, suffix="leftover changes"), exclude=exclude)
+    commit_changes(
+        generate_commit_message(feature, phase="leftover changes"),
+        exclude=exclude,
+    )
 
     if not has_commits_ahead(base_branch):
         console.print(
@@ -115,8 +120,18 @@ def push_and_create_pr(
         console.print(f"[red]Push failed: {push.stderr.strip()}[/red]")
         return None
 
-    # Build PR body and title using Conventional Commits format.
-    body = build_pr_body(feature)
+    # Build PR body and title — body via Haiku, title from metadata.
+    plan = load_phase_output(feature.id, "planning") or ""
+    diff_summary = get_branch_diff_summary(base_branch)
+    diff_stat_lines = [
+        f"+{diff_summary['lines_added']} -{diff_summary['lines_removed']} "
+        f"in {diff_summary['files_changed']} files",
+    ]
+    for p in diff_summary.get("paths", [])[:15]:
+        diff_stat_lines.append(f"  {p}")
+    diff_stat = "\n".join(diff_stat_lines)
+
+    body = generate_pr_body(feature, plan=plan, diff_stat=diff_stat)
     title = build_pr_title(feature)
 
     pr = subprocess.run(

@@ -179,19 +179,24 @@ class TestBuildPrBody:
 
 
 class TestPushAndCreatePr:
+    @patch("devflow.integrations.git.smart_messages._call_haiku", return_value=None)
+    @patch("devflow.integrations.git.smart_messages._get_staged_diff", return_value="")
     @patch("devflow.integrations.git.repo.subprocess.run")
-    def test_uses_conventional_commit_title(self, mock_run: MagicMock) -> None:
+    def test_uses_conventional_commit_title(
+        self, mock_run: MagicMock, mock_diff: MagicMock, mock_haiku: MagicMock,
+    ) -> None:
         feature = Feature(
             id="feat-test-001", description="Add auth",
             workflow="standard", status=FeatureStatus.DONE, phases=[],
         )
         mock_run.side_effect = [
-            MagicMock(returncode=0),
-            MagicMock(returncode=1),
-            MagicMock(returncode=0),
-            MagicMock(returncode=0, stdout="1\n"),
-            MagicMock(returncode=0),
-            MagicMock(returncode=0, stdout="https://github.com/pr/1\n"),
+            MagicMock(returncode=0),  # git add
+            MagicMock(returncode=1),  # git diff --cached --quiet (has changes)
+            MagicMock(returncode=0),  # git commit
+            MagicMock(returncode=0, stdout="1\n"),  # rev-list --count
+            MagicMock(returncode=0),  # git push
+            MagicMock(returncode=0, stdout="0\t0\t\n"),  # git diff --numstat (branch diff)
+            MagicMock(returncode=0, stdout="https://github.com/pr/1\n"),  # gh pr create
         ]
 
         url = push_and_create_pr(feature, "feat/feat-test-001")
@@ -200,6 +205,6 @@ class TestPushAndCreatePr:
         commit_msg = mock_run.call_args_list[2][0][0][-1]
         assert commit_msg.startswith("feat:")
 
-        pr_args = mock_run.call_args_list[5][0][0]
+        pr_args = mock_run.call_args_list[6][0][0]
         title_idx = pr_args.index("--title") + 1
         assert pr_args[title_idx] == "feat: add auth"

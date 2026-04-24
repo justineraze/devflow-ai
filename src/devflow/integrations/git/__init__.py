@@ -35,6 +35,11 @@ from .repo import (
     switch_and_pull_main,
     switch_branch,
 )
+from .smart_messages import (
+    generate_commit_message,
+    generate_feature_title,
+    generate_pr_body,
+)
 
 __all__ = [
     "DiffSummary",
@@ -65,6 +70,9 @@ __all__ = [
     "switch_and_pull_main",
     "switch_branch",
     "build_pr_body",
+    "generate_commit_message",
+    "generate_feature_title",
+    "generate_pr_body",
     "parse_plan_changes",
     "parse_plan_summary",
 ]

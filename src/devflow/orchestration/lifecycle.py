@@ -68,7 +68,17 @@ def start_build(
             f"scope:{complexity.scope})[/dim]"
         )
 
-    feature = create_feature(state, feature_id, description, workflow_name)
+    # When the prompt is long, summarise it via Haiku and keep the
+    # original in feature.prompt for the runner's user prompt.
+    if len(description) > 100:
+        from devflow.integrations.git.smart_messages import generate_feature_title
+
+        title = generate_feature_title(description)
+        feature = create_feature(state, feature_id, title, workflow_name)
+        feature.prompt = description
+    else:
+        feature = create_feature(state, feature_id, description, workflow_name)
+
     if complexity is not None:
         feature.metadata.complexity = complexity
 
