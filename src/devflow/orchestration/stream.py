@@ -13,7 +13,6 @@ from devflow.core.formatting import (  # noqa: F401
     format_tool_line,
 )
 from devflow.core.metrics import PhaseMetrics, ToolUse  # noqa: F401
-from devflow.integrations.claude.backend import parse_event  # noqa: F401
 
 __all__ = [
     "PhaseMetrics",

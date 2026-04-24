@@ -129,7 +129,7 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
             passed=True,
             message=f"{n_features} feature(s){stack_info}",
         )
-    except Exception as exc:
+    except (OSError, ValueError, KeyError) as exc:
         return CheckResult(
             name="init",
             passed=False,

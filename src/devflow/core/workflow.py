@@ -80,20 +80,34 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
 def ensure_devflow_dir(base: Path | None = None) -> Path:
     """Create .devflow/ directory if it doesn't exist. Returns the path."""
     devflow = (base or Path.cwd()) / ".devflow"
+    created = not devflow.exists()
     devflow.mkdir(parents=True, exist_ok=True)
+    if created:
+        devflow.chmod(0o700)
     return devflow
+
+
+_state_cache: dict[Path, tuple[float, WorkflowState]] = {}
 
 
 def load_state(base: Path | None = None) -> WorkflowState:
     """Load project state from .devflow/state.json.
 
     Returns an empty WorkflowState if the file doesn't exist yet.
+    Uses an mtime-based cache to avoid redundant JSON parsing within
+    the same process (invalidated automatically by save_state/mutate_feature).
     """
     state_file = (base or Path.cwd()) / ".devflow" / "state.json"
     if not state_file.exists():
         return WorkflowState()
+    mtime = state_file.stat().st_mtime
+    cached = _state_cache.get(state_file)
+    if cached and cached[0] == mtime:
+        return cached[1].model_copy(deep=True)
     raw = json.loads(state_file.read_text())
-    return WorkflowState.model_validate(raw)
+    state = WorkflowState.model_validate(raw)
+    _state_cache[state_file] = (mtime, state)
+    return state.model_copy(deep=True)
 
 
 def save_state(state: WorkflowState, base: Path | None = None) -> Path:
@@ -104,6 +118,7 @@ def save_state(state: WorkflowState, base: Path | None = None) -> Path:
     devflow = ensure_devflow_dir(base)
     state_file = devflow / "state.json"
     atomic_write_text(state_file, state.model_dump_json(indent=2))
+    _state_cache.pop(state_file, None)
     return state_file
 
 

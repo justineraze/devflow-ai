@@ -114,6 +114,15 @@ class FeatureMetadata(BaseModel):
     """Allow unknown keys so old state.json files deserialise without error."""
 
 
+class PhaseType(StrEnum):
+    """Semantic category for phases — replaces scattered name checks."""
+
+    PLANNING = "planning"
+    CODE = "code"
+    REVIEW = "review"
+    GATE = "gate"
+
+
 class PhaseStatus(StrEnum):
     """Status of a single phase execution."""
 

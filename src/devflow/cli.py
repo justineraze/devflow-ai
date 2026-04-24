@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    from devflow.orchestration.events import BuildCallbacks
 
 from devflow.core.console import console
 from devflow.core.track import get_feature, get_state, list_all_features
@@ -47,6 +50,40 @@ def main(
 
 def _deprecation_hint(old: str, new: str) -> None:
     console.print(f"[yellow]{old} is deprecated, use: {new}[/yellow]")
+
+
+def _ensure_backend() -> None:
+    """Register the default Claude Code backend if none is set."""
+    from devflow.core.backend import set_backend
+    from devflow.integrations.claude.backend import ClaudeCodeBackend
+
+    set_backend(ClaudeCodeBackend())
+
+
+def _build_callbacks() -> BuildCallbacks:
+    """Wire up UI renderers as build callbacks (lazy import)."""
+    from devflow.orchestration.events import BuildCallbacks
+    from devflow.ui.gate_panel import render_gate_panel
+    from devflow.ui.rendering import (
+        render_build_banner,
+        render_build_summary,
+        render_phase_auto_retry,
+        render_phase_commits,
+        render_phase_failure,
+        render_phase_header,
+        render_phase_success,
+    )
+
+    return BuildCallbacks(
+        on_banner=render_build_banner,
+        on_phase_header=render_phase_header,
+        on_phase_success=render_phase_success,
+        on_phase_failure=render_phase_failure,
+        on_phase_auto_retry=render_phase_auto_retry,
+        on_phase_commits=render_phase_commits,
+        on_gate_panel=render_gate_panel,
+        on_build_summary=render_build_summary,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +186,8 @@ def build(
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import resume_build, retry_build, start_build
 
+    _ensure_backend()
+
     if retry and resume:
         console.print("[red]Cannot use --retry and --resume together.[/red]")
         raise typer.Exit(1)
@@ -177,6 +216,7 @@ def build(
     success = execute_build_loop(
         feature, feedback=feedback, verbose=verbose,
         base_branch=base_branch, worktree=worktree,
+        callbacks=_build_callbacks(),
     )
     if not success:
         raise typer.Exit(1)
@@ -206,8 +246,9 @@ def do_task(
     from devflow.orchestration.build import execute_do_loop
     from devflow.orchestration.lifecycle import start_do
 
+    _ensure_backend()
     feature = start_do(description, workflow)
-    success = execute_do_loop(feature, verbose=verbose)
+    success = execute_do_loop(feature, verbose=verbose, callbacks=_build_callbacks())
     if not success:
         raise typer.Exit(1)
 
@@ -384,9 +425,13 @@ def fix(
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import start_fix
 
+    _ensure_backend()
     feature = start_fix(description)
     base_branch = _resolve_base_branch(base)
-    success = execute_build_loop(feature, verbose=verbose, base_branch=base_branch)
+    success = execute_build_loop(
+        feature, verbose=verbose, base_branch=base_branch,
+        callbacks=_build_callbacks(),
+    )
     if not success:
         raise typer.Exit(1)
 
@@ -406,12 +451,16 @@ def retry_cmd(
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import retry_build
 
+    _ensure_backend()
     feature = retry_build(feature_id)
     if not feature:
         raise typer.Exit(1)
 
     base_branch = _resolve_base_branch(base)
-    success = execute_build_loop(feature, verbose=verbose, base_branch=base_branch)
+    success = execute_build_loop(
+        feature, verbose=verbose, base_branch=base_branch,
+        callbacks=_build_callbacks(),
+    )
     if not success:
         raise typer.Exit(1)
 

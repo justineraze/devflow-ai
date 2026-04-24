@@ -77,7 +77,7 @@ class TestExecuteDoLoopDelegation:
 
         assert result is True
         mock_build.assert_called_once_with(
-            feature, base=project_dir, verbose=False, create_pr=False,
+            feature, base=project_dir, verbose=False, create_pr=False, callbacks=None,
         )
 
 

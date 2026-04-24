@@ -29,10 +29,14 @@ from devflow.core.console import console
 from devflow.core.metrics import BuildTotals, PhaseMetrics
 from devflow.core.models import (
     Feature,
+    PhaseName,
     PhaseRecord,
     PhaseStatus,
+    PhaseType,
 )
+from devflow.core.phases import get_spec
 from devflow.core.workflow import load_state, mutate_feature
+from devflow.orchestration.events import BuildCallbacks
 from devflow.orchestration.phase_exec import (
     complete_phase,
     fail_phase,
@@ -59,8 +63,6 @@ _should_re_review = should_re_review
 _setup_re_review = setup_re_review
 _setup_re_fix = setup_re_fix
 
-PLANNING_PHASES = frozenset({"architecture", "planning", "plan_review"})
-
 
 def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | None:
     """Reload feature from state after a phase completes."""
@@ -77,7 +79,7 @@ def _execute_phase(
     from devflow.integrations.gate import run_gate_phase
     from devflow.orchestration.runner import execute_phase
 
-    if phase.name == "gate":
+    if get_spec(phase.name).phase_type == PhaseType.GATE:
         from devflow.core.config import load_config
         return run_gate_phase(
             base, stack=load_config(base).stack,
@@ -93,6 +95,7 @@ def _run_planning_loop(
     feature: Feature,
     totals: BuildTotals,
     stack: str | None,
+    callbacks: BuildCallbacks,
     base: Path | None = None,
     verbose: bool = False,
 ) -> tuple[Feature, str, bool]:
@@ -102,11 +105,6 @@ def _run_planning_loop(
     back to PENDING so the execution loop picks it up).
     """
     from devflow.orchestration.model_routing import get_phase_agent, resolve_model
-    from devflow.ui.rendering import (
-        render_phase_failure,
-        render_phase_header,
-        render_phase_success,
-    )
 
     total = len(feature.phases)
     plan_output = ""
@@ -121,7 +119,7 @@ def _run_planning_loop(
         agent_name = get_phase_agent(feature, phase.name, base, stack=stack)
 
         # Stop before non-planning phases — wait for confirmation.
-        if phase.name not in PLANNING_PHASES:
+        if get_spec(phase.name).phase_type != PhaseType.PLANNING:
             with mutate_feature(feature.id, base) as tracked:
                 if tracked:
                     p = tracked.find_phase(phase.name)
@@ -131,7 +129,7 @@ def _run_planning_loop(
 
         tier = resolve_model(feature, phase)
         model_label = get_backend().model_name(tier)
-        render_phase_header(phase_num, total, phase.name, model_label)
+        callbacks.on_phase_header(phase_num, total, phase.name, model_label)
         start = time.monotonic()
         success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
         elapsed = time.monotonic() - start
@@ -139,14 +137,14 @@ def _run_planning_loop(
         if not success:
             totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
             fail_phase(feature.id, phase.name, output, base)
-            render_phase_failure(phase.name, elapsed, output)
+            callbacks.on_phase_failure(phase.name, elapsed, output)
             return feature, "", False
 
         complete_phase(feature.id, phase.name, output, base)
-        render_phase_success(phase.name, elapsed, metrics)
+        callbacks.on_phase_success(phase.name, elapsed, metrics)
         totals.add(phase.name, metrics, elapsed, model=model_label)
 
-        if phase.name == "planning":
+        if phase.name == PhaseName.PLANNING:
             plan_output = output
             with mutate_feature(feature.id, base) as feat:
                 if feat:
@@ -179,6 +177,7 @@ def _handle_post_phase_commit(
     model_label: str,
     initial_untracked: list[str],
     totals: BuildTotals,
+    callbacks: BuildCallbacks,
     base: Path | None,
     base_branch: str,
 ) -> None:
@@ -189,7 +188,6 @@ def _handle_post_phase_commit(
         persist_files_summary,
     )
     from devflow.integrations.git.smart_messages import generate_commit_message
-    from devflow.ui.rendering import render_phase_commits, render_phase_success
 
     phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
@@ -199,8 +197,8 @@ def _handle_post_phase_commit(
         if commit_changes(msg, exclude=initial_untracked):
             phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
-    render_phase_success(phase.name, elapsed, metrics)
-    render_phase_commits(phase_result)
+    callbacks.on_phase_success(phase.name, elapsed, metrics)
+    callbacks.on_phase_commits(phase_result)
     totals.add(
         phase.name, metrics, elapsed, model=model_label,
         commits=len(phase_result.commits),
@@ -222,17 +220,15 @@ def _handle_gate_result(
     elapsed: float,
     model_label: str,
     totals: BuildTotals,
+    callbacks: BuildCallbacks,
     base: Path | None,
 ) -> tuple[Feature, bool | None]:
     """Handle gate success/failure. Returns (feature, should_continue).
 
     should_continue is True to loop again, False to abort, None to proceed normally.
     """
-    from devflow.ui.rendering import render_phase_auto_retry
-
     if success:
-        from devflow.ui.gate_panel import render_gate_panel
-        render_gate_panel(feature.id, base)
+        callbacks.on_gate_panel(feature.id, base)
         totals.add(phase.name, metrics, elapsed, model=model_label)
         return feature, None
 
@@ -240,9 +236,8 @@ def _handle_gate_result(
     totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
     save_phase_output(feature.id, "gate", output, base)
     if setup_gate_retry(feature.id, base):
-        from devflow.ui.gate_panel import render_gate_panel
-        render_gate_panel(feature.id, base)
-        render_phase_auto_retry(phase.name, elapsed, "")
+        callbacks.on_gate_panel(feature.id, base)
+        callbacks.on_phase_auto_retry(phase.name, elapsed, "")
         feature = _refresh_feature(feature.id, base) or feature
         return feature, True
     return feature, False
@@ -256,6 +251,7 @@ def _run_execution_loop(
     totals: BuildTotals,
     initial_untracked: list[str],
     stack: str | None,
+    callbacks: BuildCallbacks,
     base: Path | None = None,
     verbose: bool = False,
     base_branch: str = "main",
@@ -268,11 +264,6 @@ def _run_execution_loop(
     """
     from devflow.integrations.git import get_head_sha
     from devflow.orchestration.model_routing import get_phase_agent, resolve_model
-    from devflow.ui.rendering import (
-        render_phase_failure,
-        render_phase_header,
-        render_phase_success,
-    )
 
     total = len(feature.phases)
 
@@ -288,10 +279,11 @@ def _run_execution_loop(
 
         tier = resolve_model(feature, phase)
         model_label = get_backend().model_name(tier)
-        render_phase_header(phase_num, total, phase.name, model_label)
+        callbacks.on_phase_header(phase_num, total, phase.name, model_label)
 
         # Capture pre-phase SHA for commit tracking.
-        is_code_phase = phase.name in ("implementing", "fixing")
+        spec = get_spec(phase.name)
+        is_code_phase = spec.phase_type == PhaseType.CODE
         pre_phase_sha = get_head_sha(short=False) if is_code_phase else ""
 
         start = time.monotonic()
@@ -303,21 +295,21 @@ def _run_execution_loop(
         if success:
             complete_phase(feature.id, phase.name, output, base)
 
-            if phase.name == "gate":
-                from devflow.ui.gate_panel import render_gate_panel
-                render_gate_panel(feature.id, base)
+            if spec.phase_type == PhaseType.GATE:
+                callbacks.on_gate_panel(feature.id, base)
                 totals.add(phase.name, metrics, elapsed, model=model_label)
             elif is_code_phase:
                 _handle_post_phase_commit(
                     feature, phase, pre_phase_sha, success, output, metrics,
-                    elapsed, model_label, initial_untracked, totals, base, base_branch,
+                    elapsed, model_label, initial_untracked, totals, callbacks,
+                    base, base_branch,
                 )
             else:
-                render_phase_success(phase.name, elapsed, metrics)
+                callbacks.on_phase_success(phase.name, elapsed, metrics)
                 totals.add(phase.name, metrics, elapsed, model=model_label)
 
             # Review cycle: after fixing, re-review if budget allows.
-            if phase.name == "fixing":
+            if phase.name == PhaseName.FIXING:
                 feature = _refresh_feature(feature.id, base) or feature
                 if should_re_review(feature, base):
                     setup_re_review(feature.id, base)
@@ -326,7 +318,7 @@ def _run_execution_loop(
                     continue
 
             # Review cycle: after reviewing, check if reviewer approved.
-            if (phase.name == "reviewing"
+            if (phase.name == PhaseName.REVIEWING
                     and feature.metadata.review_cycles > 0
                     and "APPROVE" not in output.upper()):
                 feature = _refresh_feature(feature.id, base) or feature
@@ -336,22 +328,22 @@ def _run_execution_loop(
                 continue
         else:
             # Gate failure with auto-retry.
-            if phase.name == "gate":
+            if spec.phase_type == PhaseType.GATE:
                 feature, gate_action = _handle_gate_result(
                     feature, phase, False, output, metrics, elapsed,
-                    model_label, totals, base,
+                    model_label, totals, callbacks, base,
                 )
                 if gate_action is True:
                     continue
                 if gate_action is False:
                     fail_phase(feature.id, phase.name, output, base)
-                    render_phase_failure(phase.name, elapsed, output)
+                    callbacks.on_phase_failure(phase.name, elapsed, output)
                     return feature, False
             else:
                 totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
 
             fail_phase(feature.id, phase.name, output, base)
-            render_phase_failure(phase.name, elapsed, output)
+            callbacks.on_phase_failure(phase.name, elapsed, output)
             return feature, False
 
         feature = _refresh_feature(feature.id, base) or feature
@@ -395,13 +387,13 @@ def _finalize_build(
     branch: str,
     totals: BuildTotals,
     initial_untracked: list[str],
+    callbacks: BuildCallbacks,
     base: Path | None = None,
     base_branch: str = "main",
 ) -> bool:
     """Push branch, create PR, persist metrics, and render the build summary."""
     from devflow.core.history import append_build_metrics, build_metrics_from
     from devflow.integrations.git import push_and_create_pr
-    from devflow.ui.rendering import render_build_summary
 
     console.print("[dim]Creating PR…[/dim]")
 
@@ -433,7 +425,7 @@ def _finalize_build(
     from devflow.orchestration.phase_exec import sync_linear_if_configured
     sync_linear_if_configured(final, base)
 
-    render_build_summary(final, totals, pr_url, branch)
+    callbacks.on_build_summary(final, totals, pr_url, branch, None)
     if pr_url is None:
         console.print("[yellow]PR creation failed — push manually.[/yellow]\n")
 
@@ -460,6 +452,7 @@ def execute_build_loop(
     base_branch: str = "main",
     worktree: bool = False,
     create_pr: bool = True,
+    callbacks: BuildCallbacks | None = None,
 ) -> bool:
     """Run a feature through its phases end-to-end.
 
@@ -477,8 +470,8 @@ def execute_build_loop(
     """
     from devflow.core.history import append_build_metrics, build_metrics_from
     from devflow.integrations.git import get_head_sha, get_untracked_files, main_repo_root
-    from devflow.ui.rendering import render_build_banner
 
+    cb = callbacks or BuildCallbacks()
     is_resuming = feedback is not None
     if worktree and base is None:
         base = main_repo_root()
@@ -501,14 +494,14 @@ def execute_build_loop(
         initial_untracked = get_untracked_files()
 
     if create_pr:
-        render_build_banner(feature, branch, stack)
+        cb.on_banner(feature, branch, stack)
     else:
         console.print(f"[bold]do:[/bold] {feature.description}\n")
     if is_resuming:
         console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
 
     # ── Planning ──
-    feature, plan_output, ok = _run_planning_loop(feature, totals, stack, base, verbose)
+    feature, plan_output, ok = _run_planning_loop(feature, totals, stack, cb, base, verbose)
     if not ok:
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
@@ -520,7 +513,7 @@ def execute_build_loop(
 
     # ── Execution ──
     feature, ok = _run_execution_loop(
-        feature, totals, initial_untracked, stack, base, verbose,
+        feature, totals, initial_untracked, stack, cb, base, verbose,
         base_branch, base_sha=initial_sha,
     )
     if not ok:
@@ -542,17 +535,15 @@ def execute_build_loop(
 
     # ── Finalize ──
     if create_pr:
-        return _finalize_build(feature, branch, totals, initial_untracked, base, base_branch)
+        return _finalize_build(feature, branch, totals, initial_untracked, cb, base, base_branch)
 
     # do mode: persist metrics and print success summary.
-    from devflow.ui.rendering import render_build_summary
-
     feature = _refresh_feature(feature.id, base) or feature
     record = build_metrics_from(feature, totals, success=True)
     append_build_metrics(record, base)
 
     current_sha = get_head_sha()
-    render_build_summary(feature, totals, pr_url=None, branch="")
+    cb.on_build_summary(feature, totals, None, "", None)
     if current_sha != initial_sha[:7]:
         console.print(
             f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
@@ -642,10 +633,13 @@ def execute_do_loop(
     feature: Feature,
     verbose: bool = False,
     base: Path | None = None,
+    callbacks: BuildCallbacks | None = None,
 ) -> bool:
     """Run a task on the current branch — no branch, no PR.
 
     Delegates to :func:`execute_build_loop` with ``create_pr=False``.
     On failure, all commits made during the build are reverted.
     """
-    return execute_build_loop(feature, base=base, verbose=verbose, create_pr=False)
+    return execute_build_loop(
+        feature, base=base, verbose=verbose, create_pr=False, callbacks=callbacks,
+    )

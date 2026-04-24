@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from devflow.core.models import Feature, FeatureStatus, PhaseRecord, PhaseStatus
+from devflow.core.models import (
+    Feature,
+    FeatureStatus,
+    PhaseName,
+    PhaseRecord,
+    PhaseStatus,
+    PhaseType,
+)
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import advance_phase, mutate_feature
 from devflow.orchestration.lifecycle import transition_safe
@@ -101,7 +108,7 @@ def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
         if not feature:
             return
         for phase in feature.phases:
-            if phase.name in ("architecture", "planning", "plan_review"):
+            if get_spec(phase.name).phase_type == PhaseType.PLANNING:
                 phase.reset()
         feature.status = FeatureStatus.PENDING
 
@@ -134,13 +141,13 @@ def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
         if attempts >= MAX_GATE_AUTO_RETRIES:
             return False
 
-        gate_phase = feature.find_phase("gate")
+        gate_phase = feature.find_phase(PhaseName.GATE)
         if not gate_phase:
             return False
 
-        fixing_phase = feature.find_phase("fixing")
+        fixing_phase = feature.find_phase(PhaseName.FIXING)
         if fixing_phase is None:
-            fixing_phase = PhaseRecord(name="fixing", status=PhaseStatus.PENDING)
+            fixing_phase = PhaseRecord(name=PhaseName.FIXING, status=PhaseStatus.PENDING)
             gate_idx = feature.phases.index(gate_phase)
             feature.phases.insert(gate_idx, fixing_phase)
         else:

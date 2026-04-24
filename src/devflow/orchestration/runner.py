@@ -10,7 +10,7 @@ from devflow.core.artifacts import context_deps_for, load_phase_output, read_art
 from devflow.core.backend import get_backend
 from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics, ToolUse
-from devflow.core.models import Feature, PhaseRecord
+from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.paths import venv_env
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.orchestration.model_routing import resolve_model
@@ -247,7 +247,7 @@ Feature status: {feature.status.value}""")
     if previous_context:
         sections.append(f"# Context from previous phases\n\n{previous_context}")
 
-    if phase.name == "fixing":
+    if phase.name == PhaseName.FIXING:
         gate_json = read_artifact(feature.id, "gate.json")
         if gate_json:
             sections.append(
@@ -280,7 +280,7 @@ Feature status: {feature.status.value}""")
             sections.append(retry_section)
 
     feedback = feature.metadata.feedback
-    if feedback and phase.name == "planning":
+    if feedback and phase.name == PhaseName.PLANNING:
         sections.append(
             "# User feedback on previous plan\n\n"
             "The user rejected the previous plan with this feedback:\n\n"
@@ -320,7 +320,7 @@ def _get_phase_instructions(phase_name: str, workflow: str = "") -> str:
     returns alternate instructions that forbid intermediate commits
     (the caller handles the single commit).
     """
-    if workflow == "quick" and phase_name == "implementing":
+    if workflow == "quick" and phase_name == PhaseName.IMPLEMENTING:
         from devflow.core.phases import _INSTRUCTIONS_IMPLEMENTING_QUICK
         return _INSTRUCTIONS_IMPLEMENTING_QUICK
     try:

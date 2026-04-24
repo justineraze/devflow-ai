@@ -321,6 +321,7 @@ class TestFinalizeBuildCacheWarning:
 
         from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
         from devflow.orchestration.build import _finalize_build
+        from devflow.orchestration.events import BuildCallbacks
         from devflow.ui.rendering import BuildTotals
 
         feature = start_build("test", "quick", project_dir)
@@ -353,7 +354,7 @@ class TestFinalizeBuildCacheWarning:
         original = build_mod.console
         build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
         try:
-            _finalize_build(feature, "feat/test", totals, [], project_dir)
+            _finalize_build(feature, "feat/test", totals, [], BuildCallbacks(), project_dir)
         finally:
             build_mod.console = original
 
@@ -370,6 +371,7 @@ class TestFinalizeBuildCacheWarning:
 
         from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
         from devflow.orchestration.build import _finalize_build
+        from devflow.orchestration.events import BuildCallbacks
         from devflow.ui.rendering import BuildTotals
 
         feature = start_build("test", "quick", project_dir)
@@ -401,7 +403,7 @@ class TestFinalizeBuildCacheWarning:
         original = build_mod.console
         build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
         try:
-            _finalize_build(feature, "feat/test", totals, [], project_dir)
+            _finalize_build(feature, "feat/test", totals, [], BuildCallbacks(), project_dir)
         finally:
             build_mod.console = original
 

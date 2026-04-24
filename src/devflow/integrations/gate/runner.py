@@ -20,6 +20,7 @@ _CUSTOM_TIMEOUTS: dict[str, int] = {"lint": 60, "test": 120}
 
 def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
     """Run a custom shell command and return a CheckResult."""
+    import shlex
     import subprocess
 
     from devflow.integrations.gate.report import CheckResult
@@ -27,8 +28,7 @@ def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
     timeout = _CUSTOM_TIMEOUTS.get(name, 60)
     try:
         result = subprocess.run(
-            shell_cmd,
-            shell=True,
+            shlex.split(shell_cmd),
             capture_output=True,
             text=True,
             cwd=str(cwd),

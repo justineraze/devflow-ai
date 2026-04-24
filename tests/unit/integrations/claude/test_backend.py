@@ -91,9 +91,10 @@ class TestParseEvent:
 
 
 class TestGetSetBackend:
-    def test_default_is_claude_code(self) -> None:
-        backend = get_backend()
-        assert isinstance(backend, ClaudeCodeBackend)
+    def test_raises_when_no_backend_registered(self) -> None:
+        _backend_mod._current_backend = None
+        with pytest.raises(RuntimeError, match="No backend registered"):
+            get_backend()
 
     def test_set_backend_overrides(self) -> None:
         class DummyBackend:
@@ -113,6 +114,7 @@ class TestGetSetBackend:
         assert get_backend() is dummy
 
     def test_get_backend_caches(self) -> None:
+        set_backend(ClaudeCodeBackend())
         b1 = get_backend()
         b2 = get_backend()
         assert b1 is b2

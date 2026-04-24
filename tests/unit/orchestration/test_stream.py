@@ -2,12 +2,12 @@
 
 import json
 
+from devflow.integrations.claude.backend import parse_event
 from devflow.orchestration.stream import (
     ToolUse,
     format_cost,
     format_tokens,
     format_tool_line,
-    parse_event,
 )
 
 

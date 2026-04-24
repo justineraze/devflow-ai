@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from devflow.core.console import console
-from devflow.core.formatting import format_cost, format_tokens
+from devflow.core.formatting import format_cost, format_duration, format_tokens
 from devflow.core.metrics import (
     BuildTotals,
     PhaseMetrics,
@@ -400,12 +400,4 @@ def render_sync_summary(result: SyncResult) -> None:
     ))
 
 
-def _fmt_duration(seconds: float | None) -> str:
-    if seconds is None:
-        return "—"
-    if seconds < 1:
-        return f"{int(seconds * 1000)}ms"
-    if seconds < 60:
-        return f"{int(round(seconds))}s"
-    m, s = divmod(int(seconds), 60)
-    return f"{m}m{s:02d}s"
+_fmt_duration = format_duration

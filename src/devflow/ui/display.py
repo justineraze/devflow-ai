@@ -10,7 +10,7 @@ from rich.table import Table
 from rich.text import Text
 
 from devflow.core.console import console
-from devflow.core.formatting import format_cost, format_tokens
+from devflow.core.formatting import format_cost, format_duration, format_tokens
 from devflow.core.history import BuildMetrics
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
 
@@ -502,12 +502,7 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
         )
 
 
-def _format_build_duration(seconds: float) -> str:
-    """Format build duration for the metrics table."""
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    m, s = divmod(int(seconds), 60)
-    return f"{m}m{s:02d}s"
+_format_build_duration = format_duration
 
 
 def render_log_detail(feature: Feature) -> None:

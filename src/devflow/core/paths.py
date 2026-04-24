@@ -114,7 +114,7 @@ def atomic_write_text(path: Path, content: str) -> None:
         with os.fdopen(fd, "w") as fh:
             fh.write(content)
         os.replace(tmp_name, path)
-    except Exception:
+    except OSError:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise

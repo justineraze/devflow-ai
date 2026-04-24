@@ -57,7 +57,7 @@ def _score_via_llm(description: str) -> ComplexityScore | None:
             model=model,
             timeout=_LLM_TIMEOUT,
         )
-    except Exception:
+    except (OSError, TimeoutError, RuntimeError):
         log.debug("LLM complexity scorer: backend call failed", exc_info=True)
         return None
 

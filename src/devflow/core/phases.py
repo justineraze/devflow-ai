@@ -20,7 +20,7 @@ from typing import Self
 from pydantic import BaseModel, model_validator
 
 from devflow.core.backend import ModelTier
-from devflow.core.models import FeatureStatus, PhaseName
+from devflow.core.models import FeatureStatus, PhaseName, PhaseType
 
 
 class PhaseSpec(BaseModel):
@@ -29,6 +29,7 @@ class PhaseSpec(BaseModel):
     model_config = {"frozen": True}
 
     name: PhaseName
+    phase_type: PhaseType
     feature_status: FeatureStatus
     model_default: ModelTier
     skills: tuple[str, ...] = ()
@@ -111,6 +112,7 @@ _INSTRUCTIONS_FIXING = (
 PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.ARCHITECTURE: PhaseSpec(
         name=PhaseName.ARCHITECTURE,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLANNING,
         model_default=ModelTier.THINKING,
         skills=("devflow-planning",),
@@ -119,6 +121,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.PLANNING: PhaseSpec(
         name=PhaseName.PLANNING,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLANNING,
         model_default=ModelTier.THINKING,
         skills=("devflow-planning",),
@@ -127,6 +130,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.PLAN_REVIEW: PhaseSpec(
         name=PhaseName.PLAN_REVIEW,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLAN_REVIEW,
         model_default=ModelTier.STANDARD,
         skills=("devflow-review", "devflow-planning"),
@@ -135,6 +139,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.IMPLEMENTING: PhaseSpec(
         name=PhaseName.IMPLEMENTING,
+        phase_type=PhaseType.CODE,
         feature_status=FeatureStatus.IMPLEMENTING,
         model_default=ModelTier.STANDARD,
         skills=("devflow-incremental", "devflow-tdd"),
@@ -143,6 +148,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.REVIEWING: PhaseSpec(
         name=PhaseName.REVIEWING,
+        phase_type=PhaseType.REVIEW,
         feature_status=FeatureStatus.REVIEWING,
         model_default=ModelTier.THINKING,
         skills=("devflow-review", "devflow-refactor"),
@@ -151,6 +157,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.FIXING: PhaseSpec(
         name=PhaseName.FIXING,
+        phase_type=PhaseType.CODE,
         feature_status=FeatureStatus.FIXING,
         model_default=ModelTier.STANDARD,
         skills=("devflow-debug", "devflow-incremental", "devflow-tdd"),
@@ -159,6 +166,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
     ),
     PhaseName.GATE: PhaseSpec(
         name=PhaseName.GATE,
+        phase_type=PhaseType.GATE,
         feature_status=FeatureStatus.GATE,
         model_default=ModelTier.STANDARD,
         skills=(),

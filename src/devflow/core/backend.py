@@ -102,16 +102,17 @@ _current_backend: Backend | None = None
 
 
 def get_backend() -> Backend:
-    """Return the active backend, defaulting to Claude Code.
+    """Return the active backend.
 
-    The backend is created once and cached for the process lifetime.
-    Call ``set_backend()`` before first use to override.
+    The backend must be registered via ``set_backend()`` before first use
+    (typically in ``cli.py`` at command entry).  Raises ``RuntimeError``
+    if no backend has been registered — this keeps core/ free of any
+    import from integrations/.
     """
-    global _current_backend  # noqa: PLW0603
     if _current_backend is None:
-        from devflow.integrations.claude.backend import ClaudeCodeBackend
-
-        _current_backend = ClaudeCodeBackend()
+        raise RuntimeError(
+            "No backend registered. Call set_backend() before using the build loop."
+        )
     return _current_backend
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from devflow.core.backend import ModelTier
-from devflow.core.models import FeatureStatus, PhaseName
+from devflow.core.models import FeatureStatus, PhaseName, PhaseType
 from devflow.core.phases import (
     PHASES,
     PhaseSpec,
@@ -20,6 +20,7 @@ class TestPhaseSpec:
         with pytest.raises(ValueError, match="cannot depend on itself"):
             PhaseSpec(
                 name=PhaseName.PLANNING,
+                phase_type=PhaseType.PLANNING,
                 feature_status=FeatureStatus.PLANNING,
                 model_default=ModelTier.THINKING,
                 context_deps=(PhaseName.PLANNING,),
