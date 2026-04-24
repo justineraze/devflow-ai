@@ -162,7 +162,29 @@ def retry(
         raise typer.Exit(1)
 
 
-@app.command()
+@app.command(name="do")
+def do_task(
+    description: Annotated[str, typer.Argument(help="What to do")],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
+    ] = False,
+) -> None:
+    """Quick task on the current branch — single commit, revertable.
+
+    Stays on the current branch (no new branch, no PR).
+    Runs implementing → gate. If the gate fails after retries,
+    the commit is automatically reverted.
+    """
+    from devflow.orchestration.build import execute_do_loop
+    from devflow.orchestration.lifecycle import start_do
+
+    feature = start_do(description)
+    success = execute_do_loop(feature, verbose=verbose)
+    if not success:
+        raise typer.Exit(1)
+
+
+@app.command(deprecated=True)
 def fix(
     description: Annotated[str, typer.Argument(help="What to fix")],
     base: Annotated[
@@ -172,7 +194,11 @@ def fix(
         bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
     ] = False,
 ) -> None:
-    """Fix a bug using a lightweight workflow (no planning phase)."""
+    """Fix a bug using a lightweight workflow (no planning phase).
+
+    Deprecated: use ``devflow do`` for quick tasks on the current branch,
+    or ``devflow build --workflow quick`` for a full build with PR.
+    """
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import start_fix
 
@@ -195,11 +221,34 @@ def sync(
             help="Skip archiving .devflow/<feat>/ dirs for merged PRs",
         ),
     ] = False,
+    linear: Annotated[
+        bool,
+        typer.Option("--linear", help="Sync feature statuses to Linear"),
+    ] = False,
 ) -> None:
     """Post-merge cleanup: switch main, prune branches, archive done features.
 
+    With --linear, also syncs feature statuses to Linear issues
+    (requires LINEAR_API_KEY and devflow init --linear-team).
+
     Refuses to run if the working tree is dirty.
     """
+    if linear:
+        from devflow.integrations.linear.sync import sync_all
+
+        result = sync_all()
+        if result.errors:
+            for err in result.errors:
+                console.print(f"[red]✗ {err}[/red]")
+            raise typer.Exit(1)
+        if result.created:
+            console.print(f"[green]Created {len(result.created)} issues[/green]")
+        if result.updated:
+            console.print(f"[green]Updated {len(result.updated)} issues[/green]")
+        if not result.created and not result.updated:
+            console.print("[dim]Nothing to sync.[/dim]")
+        return
+
     from devflow.orchestration.sync import DirtyWorktreeError, run_sync
     from devflow.ui.rendering import render_sync_summary
 
@@ -257,7 +306,12 @@ def version() -> None:
 
 
 @app.command()
-def init() -> None:
+def init(
+    linear_team: Annotated[
+        str | None,
+        typer.Option("--linear-team", help="Linear team key (e.g. 'ABC') for issue sync"),
+    ] = None,
+) -> None:
     """Initialize devflow in the current project."""
     from pathlib import Path
 
@@ -272,6 +326,8 @@ def init() -> None:
     state = load_state()
     state.stack = stack
     state.base_branch = base_branch
+    if linear_team is not None:
+        state.linear_team_id = linear_team
     save_state(state)
 
     console.print(f"[green]Initialized devflow in {devflow_dir}[/green]")
@@ -280,3 +336,5 @@ def init() -> None:
     else:
         console.print("[yellow]No stack detected.[/yellow]")
     console.print(f"[green]Base branch: {base_branch}[/green]")
+    if state.linear_team_id:
+        console.print(f"[green]Linear team: {state.linear_team_id}[/green]")

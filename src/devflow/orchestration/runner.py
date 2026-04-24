@@ -283,7 +283,7 @@ Feature status: {feature.status.value}""")
             "Don't repeat the unchanged parts; focus on the requested changes."
         )
 
-    phase_instructions = _get_phase_instructions(phase.name)
+    phase_instructions = _get_phase_instructions(phase.name, workflow=feature.workflow)
     if phase_instructions:
         sections.append(phase_instructions)
 
@@ -307,8 +307,16 @@ def build_prompt(
     return "\n\n---\n\n".join(parts)
 
 
-def _get_phase_instructions(phase_name: str) -> str:
-    """Return the instructions string for *phase_name*."""
+def _get_phase_instructions(phase_name: str, workflow: str = "") -> str:
+    """Return the instructions string for *phase_name*.
+
+    When the workflow is ``"quick"`` and the phase is ``implementing``,
+    returns alternate instructions that forbid intermediate commits
+    (the caller handles the single commit).
+    """
+    if workflow == "quick" and phase_name == "implementing":
+        from devflow.core.phases import _INSTRUCTIONS_IMPLEMENTING_QUICK
+        return _INSTRUCTIONS_IMPLEMENTING_QUICK
     try:
         return get_spec(phase_name).instructions
     except UnknownPhase:

@@ -21,6 +21,27 @@ class TestVersionCommand:
         assert f"devflow {__version__}" in result.output
 
 
+class TestDoCommand:
+    def test_command_is_registered(self) -> None:
+        result = runner.invoke(app, ["do", "--help"])
+        assert result.exit_code == 0
+        assert "Quick task on the current branch" in result.output
+
+    def test_missing_description_shows_error(self) -> None:
+        result = runner.invoke(app, ["do"])
+        assert result.exit_code != 0
+
+
+class TestFixDeprecated:
+    def test_command_still_registered(self) -> None:
+        result = runner.invoke(app, ["fix", "--help"])
+        assert result.exit_code == 0
+
+    def test_marked_deprecated(self) -> None:
+        result = runner.invoke(app, ["fix", "--help"])
+        assert "Deprecated" in result.output or "deprecated" in result.output
+
+
 class TestRetryCommand:
     def test_command_is_registered(self) -> None:
         result = runner.invoke(app, ["retry", "--help"])

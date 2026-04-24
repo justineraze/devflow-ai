@@ -151,3 +151,13 @@ def start_fix(description: str, base: Path | None = None) -> Feature:
     Always uses ``quick`` — complexity scoring is intentionally skipped.
     """
     return start_build(description, workflow_name="quick", base=base)
+
+
+def start_do(description: str, base: Path | None = None) -> Feature:
+    """Start a quick task on the current branch (no branch, no PR).
+
+    Always uses ``quick`` — complexity scoring is intentionally skipped.
+    The feature is created but no git branch is created; the caller
+    (execute_do_loop) handles committing and potential revert.
+    """
+    return start_build(description, workflow_name="quick", base=base)

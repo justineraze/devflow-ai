@@ -186,6 +186,25 @@ def has_commits_ahead(base_branch: str = "main") -> bool:
     return result.stdout.strip() != "0"
 
 
+def get_head_sha(short: bool = True) -> str:
+    """Return the current HEAD commit SHA (short by default)."""
+    args = ["rev-parse"]
+    if short:
+        args.append("--short")
+    args.append("HEAD")
+    result = _git(*args)
+    return result.stdout.strip()
+
+
+def revert_head() -> bool:
+    """Revert the last commit (``git revert HEAD --no-edit``).
+
+    Returns True if the revert succeeded.
+    """
+    result = _git("revert", "HEAD", "--no-edit")
+    return result.returncode == 0
+
+
 def get_diff_stat() -> str:
     """Return git diff --stat of the latest commit."""
     result = _git("diff", "--stat", "HEAD~1")

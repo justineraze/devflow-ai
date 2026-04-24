@@ -77,6 +77,16 @@ _INSTRUCTIONS_IMPLEMENTING = (
     "Each commit = one plan step, verified green (ruff + pytest pass)."
 )
 
+_INSTRUCTIONS_IMPLEMENTING_QUICK = (
+    "## Instructions\n\n"
+    "Implement the requested change.\n"
+    "Write tests alongside the code.\n"
+    "Run ruff and pytest after each change.\n\n"
+    "**IMPORTANT — Do NOT commit.**\n"
+    "Do NOT run git add, git commit, or any git command.\n"
+    "The caller will handle the single commit after you're done."
+)
+
 _INSTRUCTIONS_REVIEWING = (
     "## Instructions\n\n"
     "Review the implementation changes.\n"
