@@ -192,6 +192,21 @@ def get_diff_stat() -> str:
     return result.stdout.strip()
 
 
+def get_fix_commit_log(max_commits: int = 10) -> str:
+    """Return a compact log of recent 'fix:' commits on the current branch.
+
+    Format: one line per commit with short hash, subject, and --stat summary.
+    Used to inject previous-attempt context into the fixing prompt.
+    """
+    result = _git(
+        "log", "--oneline", "--grep=fix:", f"-{max_commits}",
+        "--stat", "--stat-width=60",
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def get_branch_diff_summary(base_branch: str = "main") -> DiffSummary:
     """Summarize changes between current branch and *base_branch*.
 

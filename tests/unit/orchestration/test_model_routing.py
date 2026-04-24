@@ -135,6 +135,44 @@ class TestReviewingSelector:
         assert resolve_model(feature, phase) == ModelTier.THINKING
 
 
+class TestFixingEscalation:
+    """Model tier is forced on gate retry >= 2 via gate_retry_models."""
+
+    def test_retry_2_forces_sonnet(self, project_dir: Path) -> None:
+        feature = _make_feature()
+        feature.metadata.gate_retry = 2
+        feature.metadata.gate_retry_models = ["", "sonnet"]
+        phase = PhaseRecord(name="fixing")
+        assert resolve_model(feature, phase) == ModelTier.STANDARD  # sonnet = STANDARD
+
+    def test_retry_3_forces_opus(self, project_dir: Path) -> None:
+        feature = _make_feature()
+        feature.metadata.gate_retry = 3
+        feature.metadata.gate_retry_models = ["", "sonnet", "opus"]
+        phase = PhaseRecord(name="fixing")
+        assert resolve_model(feature, phase) == ModelTier.THINKING  # opus = THINKING
+
+    def test_retry_1_uses_selector(self, project_dir: Path) -> None:
+        """Retry 1 stores empty string → selector runs normally."""
+        self._write_gate("feat-001", project_dir, [
+            {"name": "ruff", "passed": False, "message": "E501"},
+        ])
+        feature = _make_feature()
+        feature.metadata.gate_retry = 1
+        feature.metadata.gate_retry_models = [""]
+        phase = PhaseRecord(name="fixing")
+        # ruff-only → FAST via selector.
+        assert resolve_model(feature, phase) == ModelTier.FAST
+
+    def _write_gate(self, feature_id: str, project_dir: Path, checks: list[dict]) -> None:
+        write_artifact(
+            feature_id,
+            "gate.json",
+            json.dumps({"passed": all(c["passed"] for c in checks), "checks": checks}),
+            project_dir,
+        )
+
+
 class TestYamlOverride:
     def test_override_beats_selector(self, project_dir: Path) -> None:
         write_artifact("feat-001", "gate.json", json.dumps({

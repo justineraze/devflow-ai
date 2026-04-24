@@ -83,7 +83,21 @@ class TestSetupGateRetry:
         assert fixing.status == PhaseStatus.PENDING
         assert fixing.output == ""
 
-    def test_refuses_second_retry(self, project_dir: Path) -> None:
+    def test_allows_three_retries(self, project_dir: Path) -> None:
+        """MAX_GATE_AUTO_RETRIES is now 3 — three successive retries succeed."""
+        _make_feature_with_gate(project_dir, with_fixing=True)
+
+        from devflow.core.workflow import load_state
+
+        for attempt in range(1, 4):
+            assert setup_gate_retry("feat-001", project_dir) is True
+            feature = load_state(project_dir).get_feature("feat-001")
+            assert feature.metadata.gate_retry == attempt
+
+        # Fourth attempt should be refused.
+        assert setup_gate_retry("feat-001", project_dir) is False
+
+    def test_refuses_after_max_retries(self, project_dir: Path) -> None:
         feature = _make_feature_with_gate(project_dir, with_fixing=False)
         feature.metadata.gate_retry = MAX_GATE_AUTO_RETRIES
         state = WorkflowState(features={feature.id: feature})
@@ -92,6 +106,36 @@ class TestSetupGateRetry:
         scheduled = setup_gate_retry("feat-001", project_dir)
 
         assert scheduled is False
+
+    def test_gate_retry_models_tracks_escalation(self, project_dir: Path) -> None:
+        """gate_retry_models records the tier for each retry."""
+        _make_feature_with_gate(project_dir, with_fixing=True)
+
+        from devflow.core.workflow import load_state
+
+        setup_gate_retry("feat-001", project_dir)
+        feature = load_state(project_dir).get_feature("feat-001")
+        # Retry 1: no escalation (empty string = use selector).
+        assert feature.metadata.gate_retry_models == [""]
+
+        # Reset gate to DONE so we can retry again.
+        gate = feature.find_phase("gate")
+        gate.status = PhaseStatus.DONE
+        save_state(WorkflowState(features={feature.id: feature}), project_dir)
+
+        setup_gate_retry("feat-001", project_dir)
+        feature = load_state(project_dir).get_feature("feat-001")
+        # Retry 2: escalate to sonnet.
+        assert feature.metadata.gate_retry_models == ["", "sonnet"]
+
+        gate = feature.find_phase("gate")
+        gate.status = PhaseStatus.DONE
+        save_state(WorkflowState(features={feature.id: feature}), project_dir)
+
+        setup_gate_retry("feat-001", project_dir)
+        feature = load_state(project_dir).get_feature("feat-001")
+        # Retry 3: escalate to opus.
+        assert feature.metadata.gate_retry_models == ["", "sonnet", "opus"]
 
     def test_returns_false_for_unknown_feature(self, project_dir: Path) -> None:
         assert setup_gate_retry("ghost", project_dir) is False
@@ -131,3 +175,67 @@ class TestFixingPromptInjectsGateJson:
         prompt = build_user_prompt(feature, feature.phases[0])
 
         assert "Gate failures to fix" not in prompt
+
+
+class TestRetryContextInPrompt:
+    def test_retry_context_injected_when_gate_retry_positive(
+        self, project_dir: Path,
+    ) -> None:
+        write_artifact(
+            "feat-001",
+            "gate.json",
+            '{"passed": false, "checks": [{"name": "pytest", "passed": false}]}',
+            project_dir,
+        )
+        feature = Feature(
+            id="feat-001",
+            description="test",
+            status=FeatureStatus.FIXING,
+            phases=[PhaseRecord(name="fixing", status=PhaseStatus.IN_PROGRESS)],
+        )
+        feature.metadata.gate_retry = 1
+
+        prompt = build_user_prompt(feature, feature.phases[0])
+
+        assert "Tentatives précédentes" in prompt
+        assert "Tentative 1" in prompt
+        assert "approche différente" in prompt
+
+    def test_no_retry_context_on_first_fixing(
+        self, project_dir: Path,
+    ) -> None:
+        feature = Feature(
+            id="feat-001",
+            description="test",
+            status=FeatureStatus.FIXING,
+            phases=[PhaseRecord(name="fixing", status=PhaseStatus.IN_PROGRESS)],
+        )
+        # gate_retry == 0 by default
+
+        prompt = build_user_prompt(feature, feature.phases[0])
+
+        assert "Tentatives précédentes" not in prompt
+
+    def test_retry_context_includes_gate_errors_on_latest(
+        self, project_dir: Path,
+    ) -> None:
+        write_artifact(
+            "feat-001",
+            "gate.json",
+            '{"passed": false, "checks": [{"name": "pytest", "passed": false}]}',
+            project_dir,
+        )
+        feature = Feature(
+            id="feat-001",
+            description="test",
+            status=FeatureStatus.FIXING,
+            phases=[PhaseRecord(name="fixing", status=PhaseStatus.IN_PROGRESS)],
+        )
+        feature.metadata.gate_retry = 2
+
+        prompt = build_user_prompt(feature, feature.phases[0])
+
+        assert "Tentative 1" in prompt
+        assert "Tentative 2" in prompt
+        # Gate errors only on the latest attempt.
+        assert "Erreur gate" in prompt

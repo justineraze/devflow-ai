@@ -91,11 +91,22 @@ def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
         feature.status = FeatureStatus.PENDING
 
 
-MAX_GATE_AUTO_RETRIES = 1
+MAX_GATE_AUTO_RETRIES = 3
+
+# Tier escalation per retry attempt (1-indexed).
+# retry 1 = same model (None → let selector decide),
+# retry 2 = sonnet, retry 3 = opus.
+_RETRY_TIER_ESCALATION: dict[int, str] = {
+    2: "sonnet",
+    3: "opus",
+}
 
 
 def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
-    """Reset gate+fixing to PENDING for one automatic retry loop.
+    """Reset gate+fixing to PENDING for an automatic retry loop.
+
+    Escalates the model tier on retries 2 and 3 to increase the chance
+    of fixing non-trivial gate failures.
 
     Returns True when a retry was scheduled, False when the budget is
     exhausted (caller should fall back to the normal failure path).
@@ -121,6 +132,12 @@ def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
             fixing_phase.reset()
 
         gate_phase.reset()
-        feature.metadata.gate_retry = attempts + 1
+        next_attempt = attempts + 1
+        feature.metadata.gate_retry = next_attempt
+
+        # Record the tier to use for this retry's fixing phase.
+        tier = _RETRY_TIER_ESCALATION.get(next_attempt)
+        feature.metadata.gate_retry_models.append(tier or "")
+
         transition_safe(feature, FeatureStatus.FIXING)
         return True

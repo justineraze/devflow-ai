@@ -27,6 +27,7 @@ from devflow.core.console import console
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import (
     Feature,
+    FeatureStatus,
     PhaseRecord,
     PhaseStatus,
 )
@@ -261,6 +262,30 @@ def _run_execution_loop(
                         f"  {line}" for line in diff.split("\n")
                     ) + "[/dim]\n")
                 persist_files_summary(feature.id, base, base_branch)
+
+            # Review loop: after fixing, re-run reviewing if the workflow
+            # includes it and we haven't exhausted the review cycle budget.
+            if phase.name == "fixing":
+                feature = _refresh_feature(feature.id, base) or feature
+                if _should_re_review(feature, base):
+                    _setup_re_review(feature.id, base)
+                    feature = _refresh_feature(feature.id, base) or feature
+                    total = len(feature.phases)
+                    continue
+
+            # Review loop: after reviewing, check if reviewer approved.
+            # If REQUEST_CHANGES, reset fixing to PENDING and loop.
+            if phase.name == "reviewing" and feature.metadata.review_cycles > 0:
+                if "APPROVE" in output.upper():
+                    # Reviewer approved — proceed to gate normally.
+                    pass
+                else:
+                    # REQUEST_CHANGES — re-do fixing.
+                    feature = _refresh_feature(feature.id, base) or feature
+                    _setup_re_fix(feature.id, base)
+                    feature = _refresh_feature(feature.id, base) or feature
+                    total = len(feature.phases)
+                    continue
         else:
             totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
 
@@ -280,6 +305,43 @@ def _run_execution_loop(
         feature = _refresh_feature(feature.id, base) or feature
 
     return feature, True
+
+
+MAX_REVIEW_CYCLES = 2
+
+
+def _should_re_review(feature: Feature, base: Path | None = None) -> bool:
+    """Return True if the workflow has a reviewing phase and review budget remains."""
+    if feature.metadata.review_cycles >= MAX_REVIEW_CYCLES:
+        return False
+    return feature.find_phase("reviewing") is not None
+
+
+def _setup_re_review(feature_id: str, base: Path | None = None) -> None:
+    """Reset reviewing to PENDING after fixing, incrementing review_cycles."""
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            return
+        reviewing = feature.find_phase("reviewing")
+        if reviewing:
+            reviewing.reset()
+        feature.metadata.review_cycles += 1
+
+
+def _setup_re_fix(feature_id: str, base: Path | None = None) -> None:
+    """Reset fixing+gate to PENDING after a reviewer REQUEST_CHANGES."""
+    from devflow.orchestration.lifecycle import transition_safe
+
+    with mutate_feature(feature_id, base) as feature:
+        if not feature:
+            return
+        fixing = feature.find_phase("fixing")
+        if fixing:
+            fixing.reset()
+        gate = feature.find_phase("gate")
+        if gate:
+            gate.reset()
+        transition_safe(feature, FeatureStatus.FIXING)
 
 
 def _finalize_build(

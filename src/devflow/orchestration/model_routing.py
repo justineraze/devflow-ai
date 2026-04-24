@@ -66,11 +66,27 @@ TRIVIAL_GATE_CHECKS: frozenset[str] = frozenset({
 SMALL_DIFF_THRESHOLD = 50
 
 
-Selector = Callable[[str, Path | None], ModelTier | None]
+Selector = Callable[..., ModelTier | None]
 
 
-def _select_for_fixing(feature_id: str, base: Path | None) -> ModelTier | None:
-    """FAST tier when the gate report only complains about trivial tools."""
+def _select_for_fixing(
+    feature_id: str, base: Path | None, *, feature: Feature | None = None,
+) -> ModelTier | None:
+    """Pick the model tier for a fixing phase.
+
+    On gate retry >= 2, the tier is forced from the escalation schedule
+    stored in ``gate_retry_models`` (sonnet → opus). On retry 1 or
+    first run, fall back to the trivial-gate heuristic (FAST for
+    lint-only failures).
+    """
+    # Escalation override: retry 2+ forces a specific tier.
+    if feature and feature.metadata.gate_retry >= 2:
+        models = feature.metadata.gate_retry_models
+        if models:
+            last = models[-1]
+            if last:
+                return _tier_from_legacy(last)
+
     data = read_json_artifact(feature_id, "gate.json", base)
     if not data:
         return None
@@ -115,7 +131,10 @@ def resolve_model(
 
     selector = PHASE_SELECTORS.get(phase.name)
     if selector is not None:
-        override = selector(feature.id, base)
+        if phase.name == PhaseName.FIXING:
+            override = selector(feature.id, base, feature=feature)
+        else:
+            override = selector(feature.id, base)
         if override:
             return override
 

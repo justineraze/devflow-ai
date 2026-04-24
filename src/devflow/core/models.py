@@ -76,6 +76,12 @@ class FeatureMetadata(BaseModel):
     gate_retry: int = 0
     """Number of automatic gate→fixing→gate retry cycles consumed."""
 
+    gate_retry_models: list[str] = Field(default_factory=list)
+    """Model tier used at each gate retry (e.g. ['sonnet', 'sonnet', 'opus'])."""
+
+    review_cycles: int = 0
+    """Number of review→fix→review cycles consumed (max 2)."""
+
     archived: bool = False
     """True after devflow sync archives a merged feature."""
 
@@ -94,6 +100,9 @@ class FeatureMetadata(BaseModel):
 
     complexity: ComplexityScore | None = None
     """Complexity score computed at feature creation (auto-select workflow)."""
+
+    linear_issue_id: str | None = None
+    """Linear issue ID (e.g. 'ABC-123'). Set when synced to Linear."""
 
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""
@@ -321,6 +330,8 @@ class WorkflowState(BaseModel):
     version: int = 1
     stack: str | None = None
     base_branch: str = "main"
+    linear_team_id: str | None = None
+    """Linear team ID (e.g. 'ABC'). Set via devflow init --linear-team. Optional."""
     features: dict[str, Feature] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

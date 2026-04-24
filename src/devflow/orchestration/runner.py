@@ -175,6 +175,53 @@ def build_system_prompt(phase_name: str, agent_name: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
+MAX_RETRY_CONTEXT_CHARS = 2000
+"""Rough ceiling (~500 tokens) per previous attempt in the retry section."""
+
+
+def _build_retry_context(feature: Feature) -> str:
+    """Build a 'Tentatives précédentes' section for fixing retries.
+
+    When gate_retry > 0, inject a summary of what was tried before so
+    the model can take a different approach.  Includes the fix commit
+    log and gate errors from the last attempt.
+    """
+    retry = feature.metadata.gate_retry
+    if retry <= 0:
+        return ""
+
+    parts: list[str] = ["# Tentatives précédentes\n"]
+
+    # Get fix commit history (best-effort, may fail in tests without git).
+    commit_log = ""
+    try:
+        from devflow.integrations.git import get_fix_commit_log
+        commit_log = get_fix_commit_log()
+    except Exception:
+        pass
+
+    # Get the current gate.json as the latest failure snapshot.
+    gate_json = read_artifact(feature.id, "gate.json")
+
+    for attempt in range(1, retry + 1):
+        section = f"### Tentative {attempt}\n"
+        if commit_log:
+            # Truncate per attempt to stay within budget.
+            budget = MAX_RETRY_CONTEXT_CHARS
+            trimmed = commit_log[:budget]
+            if len(commit_log) > budget:
+                trimmed += "\n… (tronqué)"
+            section += f"Commits fix:\n```\n{trimmed}\n```\n"
+        if gate_json and attempt == retry:
+            # Only the latest gate failure is relevant — older ones were
+            # already shown in the previous fixing prompt.
+            section += f"Erreur gate:\n```json\n{gate_json[:MAX_RETRY_CONTEXT_CHARS]}\n```\n"
+        section += "\nCe fix n'a pas marché. Essaie une approche différente.\n"
+        parts.append(section)
+
+    return "\n".join(parts)
+
+
 def build_user_prompt(feature: Feature, phase: PhaseRecord) -> str:
     """Build the variable part of the prompt (task + context + feedback).
 
@@ -219,6 +266,12 @@ Feature status: {feature.status.value}""")
                 "- Re-run the failing tool locally to verify before moving on.\n\n"
                 f"```json\n{gate_json}\n```"
             )
+
+        # Inject previous retry context so the model avoids repeating
+        # the same failed approach.
+        retry_section = _build_retry_context(feature)
+        if retry_section:
+            sections.append(retry_section)
 
     feedback = feature.metadata.feedback
     if feedback and phase.name == "planning":

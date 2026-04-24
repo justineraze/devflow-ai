@@ -412,6 +412,96 @@ class TestFinalizeBuildCacheWarning:
         assert "Cache hit rate bas" not in output
 
 
+class TestReviewLoop:
+    """Tests for the review→fix→review cycle in the execution loop."""
+
+    def test_should_re_review_true_when_budget_remains(
+        self, project_dir: Path,
+    ) -> None:
+        from devflow.orchestration.build import _should_re_review
+
+        feature = start_build("test", "standard", project_dir)
+        assert feature.find_phase("reviewing") is not None
+        assert _should_re_review(feature) is True
+
+    def test_should_re_review_false_after_max_cycles(
+        self, project_dir: Path,
+    ) -> None:
+        from devflow.orchestration.build import MAX_REVIEW_CYCLES, _should_re_review
+
+        feature = start_build("test", "standard", project_dir)
+        feature.metadata.review_cycles = MAX_REVIEW_CYCLES
+        assert _should_re_review(feature) is False
+
+    def test_should_re_review_false_without_reviewing_phase(
+        self, project_dir: Path,
+    ) -> None:
+        from devflow.orchestration.build import _should_re_review
+
+        feature = start_build("test", "quick", project_dir)
+        # quick workflow has no reviewing phase.
+        assert feature.find_phase("reviewing") is None
+        assert _should_re_review(feature) is False
+
+    def test_setup_re_review_resets_and_increments(
+        self, project_dir: Path,
+    ) -> None:
+        from devflow.orchestration.build import _setup_re_review
+
+        feature = start_build("test", "standard", project_dir)
+        # Simulate reviewing done.
+        reviewing = feature.find_phase("reviewing")
+        reviewing.start()
+        reviewing.complete("LGTM")
+        save_state(load_state(project_dir), project_dir)
+
+        _setup_re_review(feature.id, project_dir)
+
+        state = load_state(project_dir)
+        tracked = state.get_feature(feature.id)
+        assert tracked.metadata.review_cycles == 1
+        rev = tracked.find_phase("reviewing")
+        assert rev.status == PhaseStatus.PENDING
+
+    def test_setup_re_fix_resets_fixing_and_gate(
+        self, project_dir: Path,
+    ) -> None:
+        from devflow.orchestration.build import _setup_re_fix
+
+        feature = start_build("test", "standard", project_dir)
+        # Simulate fixing + gate done.
+        for name in ("planning", "implementing", "reviewing"):
+            p = feature.find_phase(name)
+            if p:
+                p.start()
+                p.complete()
+        fixing_p = feature.find_phase("fixing")
+        if fixing_p is None:
+            from devflow.core.models import PhaseRecord
+            fixing_p = PhaseRecord(name="fixing")
+            gate_idx = next(
+                i for i, p in enumerate(feature.phases) if p.name == "gate"
+            )
+            feature.phases.insert(gate_idx, fixing_p)
+        fixing_p.start()
+        fixing_p.complete()
+        gate_p = feature.find_phase("gate")
+        gate_p.start()
+        gate_p.complete()
+        feature.status = FeatureStatus.GATE
+        state = load_state(project_dir)
+        state.features[feature.id] = feature
+        save_state(state, project_dir)
+
+        _setup_re_fix(feature.id, project_dir)
+
+        state = load_state(project_dir)
+        tracked = state.get_feature(feature.id)
+        assert tracked.find_phase("fixing").status == PhaseStatus.PENDING
+        assert tracked.find_phase("gate").status == PhaseStatus.PENDING
+        assert tracked.status == FeatureStatus.FIXING
+
+
 class TestAutoCommitAfterPhase:
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")
