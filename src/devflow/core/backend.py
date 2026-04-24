@@ -82,10 +82,11 @@ class Backend(Protocol):
         that don't need streaming or tool use.  Returns ``None`` on any
         failure — callers must provide a deterministic fallback.
 
-        Default implementation returns ``None`` (not abstract) so existing
-        backends that don't override it still satisfy the protocol.
+        Backends must implement this — there is no default to discourage
+        silent fallbacks where a backend pretends to support one-shot
+        prompts but actually returns ``None`` for everything.
         """
-        return None
+        ...
 
     def check_available(self) -> tuple[bool, str]:
         """Verify the backend CLI/API is reachable.

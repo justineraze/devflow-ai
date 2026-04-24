@@ -13,7 +13,8 @@ import re
 from pathlib import Path
 
 from devflow.core.backend import ModelTier, get_backend
-from devflow.core.models import CRITICAL_PATH_PATTERNS, ComplexityScore
+from devflow.core.complexity import ComplexityScore
+from devflow.core.security import CRITICAL_PATH_PATTERNS
 from devflow.integrations.detect import walk_files
 
 log = logging.getLogger(__name__)

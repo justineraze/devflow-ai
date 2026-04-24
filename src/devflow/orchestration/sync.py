@@ -6,7 +6,8 @@ import contextlib
 import subprocess
 from pathlib import Path
 
-from devflow.core.models import DirtyWorktreeError, FeatureStatus, SyncResult
+from devflow.core.models import FeatureStatus
+from devflow.core.sync_results import DirtyWorktreeError, SyncResult
 
 
 def _current_branch(cwd: Path) -> str:

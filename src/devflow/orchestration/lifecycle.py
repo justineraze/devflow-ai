@@ -10,13 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from devflow.core.console import console
-from devflow.core.models import (
-    Feature,
-    FeatureStatus,
-    InvalidTransition,
-    PhaseStatus,
-    generate_feature_id,
-)
+from devflow.core.models import Feature, PhaseStatus, generate_feature_id
+from devflow.core.state_machine import FeatureStatus, InvalidTransition
 from devflow.core.phases import get_spec
 from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
 from devflow.integrations.complexity import score_complexity

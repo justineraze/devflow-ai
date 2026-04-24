@@ -469,6 +469,59 @@ def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool)
     return True
 
 
+def render_do_banner(feature: Feature) -> None:
+    """Plain-text banner shown for ``devflow do`` (no PR mode)."""
+    console.print(f"[bold]do:[/bold] {feature.description}\n")
+
+
+def render_resume_notice(feedback: str) -> None:
+    """Notice line printed when a build resumes with user feedback."""
+    console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
+
+
+def render_pr_creating() -> None:
+    """Status line printed while ``gh pr create`` is in flight."""
+    console.print("[dim]Creating PR…[/dim]")
+
+
+def render_pr_failed() -> None:
+    """Warning shown when ``gh pr create`` returns no URL."""
+    console.print("[yellow]PR creation failed — push manually.[/yellow]\n")
+
+
+def render_low_cache_warning(avg_cache: float) -> None:
+    """Warn when the prompt cache hit rate has been consistently low."""
+    pct = int(avg_cache * 100)
+    console.print(
+        f"[yellow]⚠ Cache hit rate bas ({pct}%) "
+        "sur les 3 derniers builds. "
+        "Les prompts système ont peut-être changé.[/yellow]"
+    )
+
+
+def render_epic_complete(epic_id: str) -> None:
+    """Banner shown when the last sub-feature of an epic finishes."""
+    console.print(
+        f"[green bold]Epic {epic_id} — all sub-features done![/green bold]\n"
+    )
+
+
+def render_revert_hint(feature_id: str, initial_sha: str) -> None:
+    """Failure-recovery hint after ``devflow do`` aborts a phase."""
+    short = initial_sha[:7]
+    console.print("\n[yellow]Gate failed. Changes are still on your branch.[/yellow]")
+    console.print(f"[dim]Pour annuler : git reset --hard {short}[/dim]")
+    console.print(f"[dim]Pour réessayer : devflow build --retry {feature_id}[/dim]\n")
+
+
+def render_do_success(current_sha: str, initial_sha: str) -> None:
+    """Success line printed at the end of ``devflow do``."""
+    console.print(
+        f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
+        f"\n[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]\n"
+    )
+
+
 def render_doctor_report(report: GateReport) -> None:
     """Display the doctor diagnostic report using Rich."""
     lines = Text()

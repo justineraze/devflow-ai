@@ -60,6 +60,16 @@ def _ensure_backend() -> None:
     set_backend(ClaudeCodeBackend())
 
 
+class _RichPrompter:
+    """Rich-based plan confirmation prompter."""
+
+    def confirm_plan(  # noqa: PLR6301
+        self, plan_output: str, feature_id: str, create_pr: bool,
+    ) -> bool:
+        from devflow.ui.rendering import render_plan_confirmation
+        return render_plan_confirmation(plan_output, feature_id, create_pr)
+
+
 def _build_callbacks() -> BuildCallbacks:
     """Wire up UI renderers as build callbacks (lazy import)."""
     from devflow.orchestration.events import BuildCallbacks
@@ -67,16 +77,25 @@ def _build_callbacks() -> BuildCallbacks:
     from devflow.ui.rendering import (
         render_build_banner,
         render_build_summary,
+        render_do_banner,
+        render_do_success,
+        render_epic_complete,
+        render_low_cache_warning,
         render_phase_auto_retry,
         render_phase_commits,
         render_phase_failure,
         render_phase_header,
         render_phase_success,
-        render_plan_confirmation,
+        render_pr_creating,
+        render_pr_failed,
+        render_resume_notice,
+        render_revert_hint,
     )
 
     return BuildCallbacks(
         on_banner=render_build_banner,
+        on_do_banner=render_do_banner,
+        on_resume_notice=render_resume_notice,
         on_phase_header=render_phase_header,
         on_phase_success=render_phase_success,
         on_phase_failure=render_phase_failure,
@@ -84,7 +103,13 @@ def _build_callbacks() -> BuildCallbacks:
         on_phase_commits=render_phase_commits,
         on_gate_panel=render_gate_panel,
         on_build_summary=render_build_summary,
-        confirm_plan=render_plan_confirmation,
+        on_pr_creating=render_pr_creating,
+        on_pr_failed=render_pr_failed,
+        on_low_cache_warning=render_low_cache_warning,
+        on_epic_complete=render_epic_complete,
+        on_revert_hint=render_revert_hint,
+        on_do_success=render_do_success,
+        prompter=_RichPrompter(),
     )
 
 

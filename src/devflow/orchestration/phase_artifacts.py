@@ -18,7 +18,7 @@ from typing import TypedDict
 
 from devflow.core.artifacts import write_artifact
 from devflow.core.metrics import CommitInfo, PhaseMetrics, PhaseResult
-from devflow.core.models import CRITICAL_PATH_PATTERNS
+from devflow.core.security import CRITICAL_PATH_PATTERNS
 from devflow.integrations.git.repo import (
     DiffSummary,
     get_branch_diff_summary,

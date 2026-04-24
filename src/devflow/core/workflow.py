@@ -19,12 +19,11 @@ except ImportError:  # pragma: no cover - Windows fallback
 
 from devflow.core.models import (
     Feature,
-    PhaseDefinition,
     PhaseRecord,
     PhaseStatus,
-    WorkflowDefinition,
     WorkflowState,
 )
+from devflow.core.workflow_def import PhaseDefinition, WorkflowDefinition
 from devflow.core.paths import atomic_write_text
 from devflow.core.paths import workflows_dir as _workflows_dir
 

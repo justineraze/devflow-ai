@@ -18,12 +18,15 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from devflow.core.metrics import PhaseResult
-
-from devflow.core.artifacts import save_phase_output
+from devflow.core.artifacts import save_phase_output, write_artifact
 from devflow.core.backend import get_backend
-from devflow.core.console import console
+from devflow.core.config import load_config
+from devflow.core.epics import check_epic_completion
+from devflow.core.history import (
+    append_build_metrics,
+    build_metrics_from,
+    read_history,
+)
 from devflow.core.metrics import BuildTotals, PhaseMetrics
 from devflow.core.models import (
     Feature,
@@ -34,11 +37,29 @@ from devflow.core.models import (
 )
 from devflow.core.phases import get_spec
 from devflow.core.workflow import load_state, mutate_feature
+from devflow.integrations.gate import run_gate_phase
+from devflow.integrations.git import (
+    branch_name,
+    commit_changes,
+    create_branch,
+    create_worktree,
+    get_head_sha,
+    get_untracked_files,
+    main_repo_root,
+    push_and_create_pr,
+    switch_branch,
+)
+from devflow.integrations.git.smart_messages import generate_commit_message
 from devflow.orchestration.events import BuildCallbacks
 from devflow.orchestration.model_routing import get_phase_agent, resolve_model
+from devflow.orchestration.phase_artifacts import (
+    collect_phase_result,
+    persist_files_summary,
+)
 from devflow.orchestration.phase_exec import (
     complete_phase,
     fail_phase,
+    reset_planning_phases,
     run_phase,
     setup_gate_retry,
     sync_linear_if_configured,
@@ -53,6 +74,17 @@ from devflow.orchestration.review import (
     setup_re_review,
     should_re_review,
 )
+from devflow.orchestration.runner import execute_phase
+
+if TYPE_CHECKING:
+    from devflow.core.metrics import PhaseResult
+
+
+# Average cache hit rate threshold below which a warning is fired.
+_LOW_CACHE_THRESHOLD = 0.4
+
+# How many recent builds to average for the cache warning.
+_CACHE_WARNING_WINDOW = 3
 
 
 def _refresh_feature(feature_id: str, base: Path | None = None) -> Feature | None:
@@ -65,21 +97,36 @@ def _execute_phase(
     feature: Feature, phase: PhaseRecord, agent_name: str,
     base: Path | None = None, verbose: bool = False,
     base_sha: str = "",
+    stack: str | None = None,
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a single phase via the backend or local gate."""
-    from devflow.integrations.gate import run_gate_phase
-    from devflow.orchestration.runner import execute_phase
-
     if get_spec(phase.name).phase_type == PhaseType.GATE:
-        from devflow.core.config import load_config
         return run_gate_phase(
-            base, stack=load_config(base).stack,
+            base, stack=stack,
             feature_id=feature.id, base_sha=base_sha,
         )
     return execute_phase(feature, phase, agent_name, verbose=verbose)
 
 
 # ── Planning loop ─────────────────────────────────────────────────
+
+
+def _persist_plan_metadata(feature_id: str, plan_output: str, base: Path | None) -> None:
+    """Extract and save plan-derived metadata (scope, title, commit_type)."""
+    module = parse_plan_module(plan_output)
+    title = parse_plan_title(plan_output)
+    commit_type = parse_plan_type(plan_output)
+    if not (module or title or commit_type):
+        return
+    with mutate_feature(feature_id, base) as feat:
+        if not feat:
+            return
+        if module:
+            feat.metadata.scope = module
+        if title:
+            feat.metadata.title = title
+        if commit_type:
+            feat.metadata.commit_type = commit_type
 
 
 def _run_planning_loop(
@@ -120,7 +167,9 @@ def _run_planning_loop(
         model_label = get_backend().model_name(tier)
         callbacks.on_phase_header(phase_num, total, phase.name, model_label)
         start = time.monotonic()
-        success, output, metrics = _execute_phase(feature, phase, agent_name, base, verbose)
+        success, output, metrics = _execute_phase(
+            feature, phase, agent_name, base, verbose, stack=stack,
+        )
         elapsed = time.monotonic() - start
 
         if not success:
@@ -135,17 +184,7 @@ def _run_planning_loop(
 
         if phase.name == PhaseName.PLANNING:
             plan_output = output
-            with mutate_feature(feature.id, base) as feat:
-                if feat:
-                    module = parse_plan_module(output)
-                    if module:
-                        feat.metadata.scope = module
-                    title = parse_plan_title(output)
-                    if title:
-                        feat.metadata.title = title
-                    commit_type = parse_plan_type(output)
-                    if commit_type:
-                        feat.metadata.commit_type = commit_type
+            _persist_plan_metadata(feature.id, output, base)
 
         feature = _refresh_feature(feature.id, base) or feature
 
@@ -170,17 +209,14 @@ def _handle_post_phase_commit(
     base: Path | None,
     base_branch: str,
 ) -> None:
-    """Auto-commit after implementing/fixing and record metrics."""
-    from devflow.integrations.git import commit_changes
-    from devflow.integrations.git.smart_messages import generate_commit_message
-    from devflow.orchestration.phase_artifacts import (
-        collect_phase_result,
-        persist_files_summary,
-    )
+    """Auto-commit after implementing/fixing and record metrics.
 
+    The diff between *pre_phase_sha* and HEAD is collected once. If the
+    agent left uncommitted changes we run a second commit and re-collect
+    only the new commit info — never the full diff a second time.
+    """
     phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
-    # Auto-commit only if agent left uncommitted changes.
     if phase_result.uncommitted_changes:
         msg = generate_commit_message(feature, phase=phase.name)
         if commit_changes(msg, exclude=initial_untracked):
@@ -211,10 +247,7 @@ def _handle_gate_result(
     callbacks: BuildCallbacks,
     base: Path | None,
 ) -> tuple[Feature, bool]:
-    """Handle a gate failure. Returns (feature, should_retry).
-
-    should_retry is True if a gate-retry phase was scheduled; False to abort.
-    """
+    """Handle a gate failure. Returns (feature, should_retry)."""
     totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
     save_phase_output(feature.id, "gate", output, base)
     if setup_gate_retry(feature.id, base):
@@ -223,6 +256,31 @@ def _handle_gate_result(
         feature = _refresh_feature(feature.id, base) or feature
         return feature, True
     return feature, False
+
+
+def _maybe_re_review(
+    feature: Feature, phase: PhaseRecord, output: str, base: Path | None,
+) -> Feature | None:
+    """Post-FIXING/REVIEWING hook: schedule another review cycle if needed.
+
+    Returns a refreshed Feature when a re-review/re-fix was scheduled,
+    or ``None`` to indicate the loop should continue with the same feature.
+    """
+    if phase.name == PhaseName.FIXING:
+        feature = _refresh_feature(feature.id, base) or feature
+        if should_re_review(feature, base):
+            setup_re_review(feature.id, base)
+            return _refresh_feature(feature.id, base) or feature
+        return None
+
+    if (phase.name == PhaseName.REVIEWING
+            and feature.metadata.review_cycles > 0
+            and "APPROVE" not in output.upper()):
+        feature = _refresh_feature(feature.id, base) or feature
+        setup_re_fix(feature.id, base)
+        return _refresh_feature(feature.id, base) or feature
+
+    return None
 
 
 # ── Execution loop ────────────────────────────────────────────────
@@ -239,16 +297,9 @@ def _run_execution_loop(
     base_branch: str = "main",
     base_sha: str = "",
 ) -> tuple[Feature, bool]:
-    """Run implementation, review, gate, and fixing phases.
-
-    Returns (feature, success). Dispatches to handlers for auto-commit,
-    gate retry, and review cycles.
-    """
-    from devflow.integrations.git import get_head_sha
-
+    """Run implementation, review, gate, and fixing phases."""
     total = len(feature.phases)
 
-    console.print()
     while True:
         phase = run_phase(feature, base)
         if not phase:
@@ -262,7 +313,6 @@ def _run_execution_loop(
         model_label = get_backend().model_name(tier)
         callbacks.on_phase_header(phase_num, total, phase.name, model_label)
 
-        # Capture pre-phase SHA for commit tracking.
         spec = get_spec(phase.name)
         is_code_phase = spec.phase_type == PhaseType.CODE
         pre_phase_sha = get_head_sha(short=False) if is_code_phase else ""
@@ -270,6 +320,7 @@ def _run_execution_loop(
         start = time.monotonic()
         success, output, metrics = _execute_phase(
             feature, phase, agent_name, base, verbose, base_sha=base_sha,
+            stack=stack,
         )
         elapsed = time.monotonic() - start
 
@@ -289,26 +340,12 @@ def _run_execution_loop(
                 callbacks.on_phase_success(phase.name, elapsed, metrics)
                 totals.add(phase.name, metrics, elapsed, model=model_label)
 
-            # Review cycle: after fixing, re-review if budget allows.
-            if phase.name == PhaseName.FIXING:
-                feature = _refresh_feature(feature.id, base) or feature
-                if should_re_review(feature, base):
-                    setup_re_review(feature.id, base)
-                    feature = _refresh_feature(feature.id, base) or feature
-                    total = len(feature.phases)
-                    continue
-
-            # Review cycle: after reviewing, check if reviewer approved.
-            if (phase.name == PhaseName.REVIEWING
-                    and feature.metadata.review_cycles > 0
-                    and "APPROVE" not in output.upper()):
-                feature = _refresh_feature(feature.id, base) or feature
-                setup_re_fix(feature.id, base)
-                feature = _refresh_feature(feature.id, base) or feature
+            updated = _maybe_re_review(feature, phase, output, base)
+            if updated is not None:
+                feature = updated
                 total = len(feature.phases)
                 continue
         else:
-            # Gate failure with auto-retry.
             if spec.phase_type == PhaseType.GATE:
                 feature, should_retry = _handle_gate_result(
                     feature, phase, output, metrics, elapsed,
@@ -334,8 +371,6 @@ def _save_phase_commits_artifact(
     base: Path | None = None,
 ) -> None:
     """Persist commit summary as a JSON artifact for downstream phases."""
-    from devflow.core.artifacts import write_artifact
-
     data = {
         "commits": [
             {
@@ -357,6 +392,16 @@ def _save_phase_commits_artifact(
 # ── Finalize ──────────────────────────────────────────────────────
 
 
+def _maybe_warn_low_cache(callbacks: BuildCallbacks, base: Path | None) -> None:
+    """Fire on_low_cache_warning when recent builds drop under the threshold."""
+    recent = read_history(base, limit=_CACHE_WARNING_WINDOW)
+    if len(recent) < _CACHE_WARNING_WINDOW:
+        return
+    avg_cache = sum(r.cache_hit_rate for r in recent) / _CACHE_WARNING_WINDOW
+    if avg_cache < _LOW_CACHE_THRESHOLD:
+        callbacks.on_low_cache_warning(avg_cache)
+
+
 def _finalize_build(
     feature: Feature,
     branch: str,
@@ -367,10 +412,7 @@ def _finalize_build(
     base_branch: str = "main",
 ) -> bool:
     """Push branch, create PR, persist metrics, and render the build summary."""
-    from devflow.core.history import append_build_metrics, build_metrics_from
-    from devflow.integrations.git import push_and_create_pr
-
-    console.print("[dim]Creating PR…[/dim]")
+    callbacks.on_pr_creating()
 
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
@@ -378,38 +420,19 @@ def _finalize_build(
         final, branch, exclude=initial_untracked, base_branch=base_branch,
     )
 
-    # Persist build metrics for historical tracking.
     record = build_metrics_from(final, totals, success=True)
     append_build_metrics(record, base)
 
-    # Warn if cache hit rate has been consistently low.
-    from devflow.core.history import read_history
+    _maybe_warn_low_cache(callbacks, base)
 
-    recent = read_history(base, limit=3)
-    if len(recent) >= 3:
-        avg_cache = sum(r.cache_hit_rate for r in recent[:3]) / 3
-        if avg_cache < 0.4:
-            console.print(
-                f"[yellow]⚠ Cache hit rate bas ({int(avg_cache * 100)}%) "
-                f"sur les 3 derniers builds. "
-                f"Les prompts système ont peut-être changé.[/yellow]"
-            )
-
-    # Sync Linear status to "completed" (best-effort).
     sync_linear_if_configured(final, base)
 
     callbacks.on_build_summary(final, totals, pr_url, branch, None)
     if pr_url is None:
-        console.print("[yellow]PR creation failed — push manually.[/yellow]\n")
+        callbacks.on_pr_failed()
 
-    # If this feature is part of an epic, check if the epic is now complete.
-    if final.parent_id:
-        from devflow.core.epics import check_epic_completion
-
-        if check_epic_completion(final.parent_id, base):
-            console.print(
-                f"[green bold]Epic {final.parent_id} — all sub-features done![/green bold]\n"
-            )
+    if final.parent_id and check_epic_completion(final.parent_id, base):
+        callbacks.on_epic_complete(final.parent_id)
 
     return True
 
@@ -441,14 +464,10 @@ def execute_build_loop(
         3. No PR — on success, print the commit SHAs
         4. On failure, changes stay on branch (user decides)
     """
-    from devflow.core.history import append_build_metrics, build_metrics_from
-    from devflow.integrations.git import get_head_sha, get_untracked_files, main_repo_root
-
     cb = callbacks or BuildCallbacks()
     is_resuming = feedback is not None
     if worktree and base is None:
         base = main_repo_root()
-    from devflow.core.config import load_config
 
     config = load_config(base)
     stack = config.stack
@@ -457,34 +476,28 @@ def execute_build_loop(
 
     initial_sha = get_head_sha(short=False)
 
-    # ── Branch / Worktree (build mode only) ──
     if create_pr:
         initial_untracked = _setup_branch(
             feature, base, worktree, is_resuming, feedback,
         )
-        branch = _get_branch_name(feature)
-    else:
-        initial_untracked = get_untracked_files()
-
-    if create_pr:
+        branch = branch_name(feature.id)
         cb.on_banner(feature, branch, stack)
     else:
-        console.print(f"[bold]do:[/bold] {feature.description}\n")
-    if is_resuming:
-        console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
+        initial_untracked = get_untracked_files()
+        cb.on_do_banner(feature)
 
-    # ── Planning ──
+    if is_resuming and feedback is not None:
+        cb.on_resume_notice(feedback)
+
     feature, plan_output, ok = _run_planning_loop(feature, totals, stack, cb, base, verbose)
     if not ok:
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
         return False
 
-    # ── Plan confirmation ──
     if plan_output and not cb.confirm_plan(plan_output, feature.id, create_pr):
         return False
 
-    # ── Execution ──
     feature, ok = _run_execution_loop(
         feature, totals, initial_untracked, stack, cb, base, verbose,
         base_branch, base_sha=initial_sha,
@@ -495,22 +508,12 @@ def execute_build_loop(
         if not create_pr and initial_sha:
             current_sha = get_head_sha(short=False)
             if current_sha != initial_sha:
-                console.print(
-                    "\n[yellow]Gate failed. Changes are still on your branch.[/yellow]"
-                )
-                console.print(
-                    f"[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]"
-                )
-                console.print(
-                    f"[dim]Pour réessayer : devflow build --retry {feature.id}[/dim]\n"
-                )
+                cb.on_revert_hint(feature.id, initial_sha)
         return False
 
-    # ── Finalize ──
     if create_pr:
         return _finalize_build(feature, branch, totals, initial_untracked, cb, base, base_branch)
 
-    # do mode: persist metrics and print success summary.
     feature = _refresh_feature(feature.id, base) or feature
     record = build_metrics_from(feature, totals, success=True)
     append_build_metrics(record, base)
@@ -518,10 +521,7 @@ def execute_build_loop(
     current_sha = get_head_sha()
     cb.on_build_summary(feature, totals, None, "", None)
     if current_sha != initial_sha[:7]:
-        console.print(
-            f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
-            f"\n[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]\n"
-        )
+        cb.on_do_success(current_sha, initial_sha)
     return True
 
 
@@ -533,41 +533,25 @@ def _setup_branch(
     feedback: str | None,
 ) -> list[str]:
     """Set up git branch or worktree, return initial untracked files."""
-    from devflow.integrations.git import (
-        create_branch,
-        create_worktree,
-        get_untracked_files,
-        switch_branch,
-    )
-    from devflow.orchestration.phase_exec import reset_planning_phases
-
     if worktree:
-        _branch, _wt_path = create_worktree(feature.id)
-        initial_untracked = get_untracked_files(cwd=_wt_path)
+        _branch, wt_path = create_worktree(feature.id)
+        initial_untracked = get_untracked_files(cwd=wt_path)
         if is_resuming:
             reset_planning_phases(feature.id, base)
             with mutate_feature(feature.id, base) as tracked:
                 if tracked:
                     tracked.metadata.feedback = feedback
+        return initial_untracked
+
+    initial_untracked = get_untracked_files()
+    branch = branch_name(feature.id)
+    if is_resuming:
+        reset_planning_phases(feature.id, base)
+        with mutate_feature(feature.id, base) as tracked:
+            if tracked:
+                tracked.metadata.feedback = feedback
+        switch_branch(branch)
     else:
-        initial_untracked = get_untracked_files()
-        from devflow.integrations.git import branch_name
-        branch = branch_name(feature.id)
-        if is_resuming:
-            reset_planning_phases(feature.id, base)
-            with mutate_feature(feature.id, base) as tracked:
-                if tracked:
-                    tracked.metadata.feedback = feedback
-            switch_branch(branch)
-        else:
-            create_branch(feature.id)
+        create_branch(feature.id)
 
     return initial_untracked
-
-
-def _get_branch_name(feature: Feature) -> str:
-    """Return the branch name for the feature."""
-    from devflow.integrations.git import branch_name
-    return branch_name(feature.id)
-
-

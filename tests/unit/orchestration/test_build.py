@@ -315,10 +315,6 @@ class TestFinalizeBuildCacheWarning:
     def test_warns_when_cache_hit_rate_low(
         self, mock_pr: MagicMock, project_dir: Path,
     ) -> None:
-        from io import StringIO
-
-        from rich.console import Console
-
         from devflow.core.history import BuildMetrics, append_build_metrics
         from devflow.core.metrics import PhaseSnapshot
         from devflow.orchestration.build import _finalize_build
@@ -348,28 +344,16 @@ class TestFinalizeBuildCacheWarning:
             cost_usd=0.02,
         ), 30.0, model="sonnet")
 
-        # Capture console output.
-        import devflow.orchestration.build as build_mod
-
-        buf = StringIO()
-        original = build_mod.console
-        build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
-        try:
-            _finalize_build(feature, "feat/test", totals, [], BuildCallbacks(), project_dir)
-        finally:
-            build_mod.console = original
-
-        output = buf.getvalue()
-        assert "Cache hit rate bas" in output
+        warnings: list[float] = []
+        callbacks = BuildCallbacks(on_low_cache_warning=warnings.append)
+        _finalize_build(feature, "feat/test", totals, [], callbacks, project_dir)
+        assert warnings, "expected on_low_cache_warning to fire"
+        assert warnings[0] < 0.4
 
     @patch("devflow.integrations.git.push_and_create_pr", return_value=None)
     def test_no_warning_when_cache_hit_rate_ok(
         self, mock_pr: MagicMock, project_dir: Path,
     ) -> None:
-        from io import StringIO
-
-        from rich.console import Console
-
         from devflow.core.history import BuildMetrics, append_build_metrics
         from devflow.core.metrics import PhaseSnapshot
         from devflow.orchestration.build import _finalize_build
@@ -399,18 +383,10 @@ class TestFinalizeBuildCacheWarning:
             cost_usd=0.02,
         ), 30.0, model="sonnet")
 
-        import devflow.orchestration.build as build_mod
-
-        buf = StringIO()
-        original = build_mod.console
-        build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
-        try:
-            _finalize_build(feature, "feat/test", totals, [], BuildCallbacks(), project_dir)
-        finally:
-            build_mod.console = original
-
-        output = buf.getvalue()
-        assert "Cache hit rate bas" not in output
+        warnings: list[float] = []
+        callbacks = BuildCallbacks(on_low_cache_warning=warnings.append)
+        _finalize_build(feature, "feat/test", totals, [], callbacks, project_dir)
+        assert not warnings
 
 
 class TestReviewLoop:

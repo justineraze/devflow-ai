@@ -1,76 +1,37 @@
-"""Pydantic models and state machine for devflow-ai."""
+"""Feature lifecycle models — the persisted domain objects.
+
+This module owns the *feature* domain (Feature, PhaseRecord, PhaseStatus,
+PhaseName, PhaseType, FeatureMetadata, WorkflowState, generate_feature_id).
+
+Sibling modules own everything else, kept here only as re-exports for
+backward compatibility:
+
+- :mod:`devflow.core.state_machine` — :class:`FeatureStatus`,
+  :data:`VALID_TRANSITIONS`, :class:`InvalidTransition`.
+- :mod:`devflow.core.complexity` — :class:`ComplexityScore`.
+- :mod:`devflow.core.security`   — :data:`CRITICAL_PATH_PATTERNS`.
+- :mod:`devflow.core.sync_results` — :class:`SyncResult`,
+  :class:`DirtyWorktreeError`.
+- :mod:`devflow.core.workflow_def` — :class:`PhaseDefinition`,
+  :class:`WorkflowDefinition`.
+"""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from types import MappingProxyType
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
-# Security-sensitive path patterns used by both the complexity scorer and the
-# build loop's critical-path detection.  Lives here (core) so both
-# integrations/ and orchestration/ can import from core without coupling each
-# other.
-CRITICAL_PATH_PATTERNS: tuple[str, ...] = (
-    "auth", "secret", "token", "crypto", "payment", "billing", "password",
+from devflow.core.complexity import ComplexityScore
+from devflow.core.security import CRITICAL_PATH_PATTERNS
+from devflow.core.state_machine import (
+    VALID_TRANSITIONS,
+    FeatureStatus,
+    InvalidTransition,
 )
-
-# Workflow selection thresholds for ComplexityScore.total (0–12).
-_WORKFLOW_THRESHOLDS: tuple[tuple[int, str], ...] = (
-    (2, "quick"),
-    (5, "light"),
-    (8, "standard"),
-    (12, "full"),
-)
-
-
-def _resolve_workflow(total: int) -> str:
-    """Map a complexity total (0–12) to a workflow name."""
-    for threshold, name in _WORKFLOW_THRESHOLDS:
-        if total <= threshold:
-            return name
-    return "full"
-
-
-class ComplexityScore(BaseModel):
-    """Complexity score for a feature across four dimensions (each 0–3).
-
-    ``workflow`` is resolved once at construction time and stored as a plain
-    field so it survives JSON round-trips and never drifts if thresholds change.
-    """
-
-    files_touched: int = Field(default=0, ge=0, le=3)
-    """Number of files expected to be modified (heuristic, 0–3)."""
-
-    integrations: int = Field(default=0, ge=0, le=3)
-    """External systems involved: API, DB, webhook, OAuth… (0–3)."""
-
-    security: int = Field(default=0, ge=0, le=3)
-    """Security-sensitive surface area: auth, tokens, crypto… (0–3)."""
-
-    scope: int = Field(default=0, ge=0, le=3)
-    """Breadth of the change: tweak vs. new module vs. rewrite (0–3)."""
-
-    workflow: str = ""
-    """Workflow resolved from total at construction time (never recomputed)."""
-
-    method: str = ""
-    """How the score was produced: ``"llm"`` or ``"heuristic"`` (empty = unknown)."""
-
-    def model_post_init(self, _context: object) -> None:
-        """Resolve workflow from total once, at construction time."""
-        if not self.workflow:
-            self.workflow = _resolve_workflow(self.total)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def total(self) -> int:
-        """Sum of all four dimension scores (0–12)."""
-        return self.files_touched + self.integrations + self.security + self.scope
+from devflow.core.sync_results import DirtyWorktreeError, SyncResult
 
 
 class FeatureMetadata(BaseModel):
@@ -149,105 +110,6 @@ class PhaseName(StrEnum):
     GATE = "gate"
 
 
-class FeatureStatus(StrEnum):
-    """Lifecycle status of a feature."""
-
-    PENDING = "pending"
-    PLANNING = "planning"
-    PLAN_REVIEW = "plan_review"
-    IMPLEMENTING = "implementing"
-    REVIEWING = "reviewing"
-    FIXING = "fixing"
-    GATE = "gate"
-    DONE = "done"
-    BLOCKED = "blocked"
-    FAILED = "failed"
-
-
-# Valid transitions: current_status -> set of allowed next statuses.
-# Every non-terminal state can also fall into BLOCKED (waiting on user)
-# or FAILED (recoverable via --resume) — listed inline below for one
-# truth-table at a glance, no post-init mutation required.
-_RECOVERY: frozenset[FeatureStatus] = frozenset(
-    {FeatureStatus.BLOCKED, FeatureStatus.FAILED},
-)
-_VALID_TRANSITIONS_RAW: dict[FeatureStatus, frozenset[FeatureStatus]] = {
-    FeatureStatus.PENDING: frozenset({
-        FeatureStatus.PLANNING,
-        FeatureStatus.IMPLEMENTING,
-        *_RECOVERY,
-    }),
-    # PLANNING can skip plan_review in workflows that don't include it.
-    FeatureStatus.PLANNING: frozenset({
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        *_RECOVERY,
-    }),
-    FeatureStatus.PLAN_REVIEW: frozenset({
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.PLANNING,
-        *_RECOVERY,
-    }),
-    # IMPLEMENTING can skip review in light/quick workflows.
-    FeatureStatus.IMPLEMENTING: frozenset({
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        *_RECOVERY,
-    }),
-    FeatureStatus.REVIEWING: frozenset({
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-        *_RECOVERY,
-    }),
-    FeatureStatus.FIXING: frozenset({
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-        *_RECOVERY,
-    }),
-    FeatureStatus.GATE: frozenset({
-        FeatureStatus.DONE,
-        FeatureStatus.FIXING,
-        *_RECOVERY,
-    }),
-    FeatureStatus.DONE: frozenset(),
-    FeatureStatus.BLOCKED: frozenset({
-        FeatureStatus.PENDING,
-        FeatureStatus.PLANNING,
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-        FeatureStatus.BLOCKED,
-        FeatureStatus.FAILED,
-    }),
-    # FAILED is recoverable via --resume: can go back to any non-terminal state.
-    FeatureStatus.FAILED: frozenset({
-        FeatureStatus.PENDING,
-        FeatureStatus.PLANNING,
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-    }),
-}
-VALID_TRANSITIONS: Mapping[FeatureStatus, frozenset[FeatureStatus]] = MappingProxyType(
-    _VALID_TRANSITIONS_RAW,
-)
-
-
-class InvalidTransition(Exception):
-    """Raised when a feature status transition is not allowed."""
-
-    def __init__(self, current: FeatureStatus, target: FeatureStatus) -> None:
-        self.current = current
-        self.target = target
-        super().__init__(f"Cannot transition from {current.value!r} to {target.value!r}")
-
-
 class PhaseRecord(BaseModel):
     """Record of a single phase execution within a feature."""
 
@@ -323,12 +185,7 @@ class Feature(BaseModel):
         self.updated_at = datetime.now(UTC)
 
     def find_phase(self, name: str | PhaseName) -> PhaseRecord | None:
-        """Return the phase with *name* (first match), or None.
-
-        Replaces the ``next(p for p in feature.phases if p.name == name)``
-        / ``for phase in feature.phases: if phase.name == name`` pattern
-        sprinkled across ``phase_exec.py`` and ``build.py``.
-        """
+        """Return the phase with *name* (first match), or None."""
         target = name.value if isinstance(name, PhaseName) else name
         for phase in self.phases:
             if phase.name == target:
@@ -388,39 +245,25 @@ class WorkflowState(BaseModel):
         return any(f.parent_id == feature_id for f in self.features.values())
 
 
-class PhaseDefinition(BaseModel):
-    """Definition of a phase in a workflow YAML file."""
+# Workflow YAML DTOs live in workflow_def.py; re-export for compatibility.
+from devflow.core.workflow_def import PhaseDefinition, WorkflowDefinition  # noqa: E402
 
-    name: PhaseName
-    agent: str = ""
-    description: str = ""
-    required: bool = True
-    timeout: int = 300
-    model: str | None = None
-
-
-class WorkflowDefinition(BaseModel):
-    """Definition of a complete workflow loaded from YAML."""
-
-    name: str
-    description: str = ""
-    phases: list[PhaseDefinition] = Field(default_factory=list)
-
-
-# ── Sync result types ────────────────────────────────────────────
-
-
-class DirtyWorktreeError(Exception):
-    """Raised when the working tree has uncommitted changes."""
-
-
-@dataclass
-class SyncResult:
-    """Summary of what ``run_sync`` did (or would do in dry-run mode)."""
-
-    branches_deleted: list[str] = field(default_factory=list)
-    features_archived: list[str] = field(default_factory=list)
-    current_branch: str = ""
-    dry_run: bool = False
-    # Human-readable log of actions (populated in dry-run, also in real mode).
-    actions: list[str] = field(default_factory=list)
+__all__ = [
+    "CRITICAL_PATH_PATTERNS",
+    "VALID_TRANSITIONS",
+    "ComplexityScore",
+    "DirtyWorktreeError",
+    "Feature",
+    "FeatureMetadata",
+    "FeatureStatus",
+    "InvalidTransition",
+    "PhaseDefinition",
+    "PhaseName",
+    "PhaseRecord",
+    "PhaseStatus",
+    "PhaseType",
+    "SyncResult",
+    "WorkflowDefinition",
+    "WorkflowState",
+    "generate_feature_id",
+]

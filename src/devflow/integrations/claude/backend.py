@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import subprocess
 import threading
@@ -10,8 +11,11 @@ from pathlib import Path
 from typing import IO, Any
 
 from devflow.core.backend import ModelTier, OnToolEvent
+from devflow.core.errors import BackendError
 from devflow.core.metrics import PhaseMetrics, ToolUse
 from devflow.core.paths import venv_env
+
+log = logging.getLogger(__name__)
 
 # Claude Code model aliases indexed by logical tier.
 _MODEL_MAP: dict[ModelTier, str] = {
@@ -19,6 +23,17 @@ _MODEL_MAP: dict[ModelTier, str] = {
     ModelTier.STANDARD: "sonnet",
     ModelTier.THINKING: "opus",
 }
+
+# User-facing error messages — kept as constants so callers and tests can
+# match on them without parsing free-form text.
+ERR_CLI_NOT_FOUND = (
+    "Claude Code CLI not found. "
+    "Install it: https://docs.anthropic.com/en/docs/claude-code"
+)
+ERR_TIMEOUT_TEMPLATE = (
+    "Phase timed out after {timeout}s. "
+    "Increase the timeout in your workflow YAML or split the feature."
+)
 
 
 # ── Stream-json parsing ────────────────────────────────────────────
@@ -98,6 +113,20 @@ def _reader_thread(stream: IO[str], q: queue.Queue[str | None]) -> None:
             q.put(line)
     finally:
         q.put(None)
+
+
+def _stderr_drain_thread(stream: IO[str], buf: list[str]) -> None:
+    """Drain stderr into *buf* so the kernel pipe never fills up.
+
+    Without this, a verbose subprocess writing more than the pipe
+    buffer (~64 KB on Linux/macOS) blocks on its next ``write`` call,
+    leaving stdout never drained → spurious timeouts.
+    """
+    try:
+        for line in stream:
+            buf.append(line)
+    except (OSError, ValueError):  # pragma: no cover - rare on close races
+        pass
 
 
 def _drain_stream(
@@ -182,25 +211,31 @@ class ClaudeCodeBackend:
                 env=env,
             )
         except FileNotFoundError:
-            return False, (
-                "Claude Code CLI not found. "
-                "Install it: https://docs.anthropic.com/en/docs/claude-code"
-            ), PhaseMetrics()
+            return False, ERR_CLI_NOT_FOUND, PhaseMetrics()
 
-        # stdin=PIPE and stdout=PIPE were passed to Popen, so these are guaranteed non-None
-        if proc.stdin is None or proc.stdout is None:
-            raise RuntimeError("subprocess pipes failed to open")
+        # stdin=PIPE and stdout=PIPE were passed to Popen, so these are
+        # guaranteed non-None.
+        if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+            raise BackendError("subprocess pipes failed to open")
 
         proc.stdin.write(user_prompt)
         proc.stdin.close()
 
-        # Spawn a daemon thread to drain stdout — keeps timeout enforceable
-        # even if the subprocess hangs without closing stdout.
+        # Spawn daemon threads to drain stdout AND stderr — keeps timeout
+        # enforceable even if the subprocess hangs.  Without the stderr
+        # drain, a verbose claude run can fill the kernel pipe (~64KB)
+        # and block indefinitely.
         events: queue.Queue[str | None] = queue.Queue()
+        stderr_buf: list[str] = []
         reader = threading.Thread(
             target=_reader_thread, args=(proc.stdout, events), daemon=True,
         )
+        stderr_reader = threading.Thread(
+            target=_stderr_drain_thread, args=(proc.stderr, stderr_buf),
+            daemon=True,
+        )
         reader.start()
+        stderr_reader.start()
 
         metrics = PhaseMetrics()
 
@@ -209,22 +244,19 @@ class ClaudeCodeBackend:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-            # Drain whatever the reader has already enqueued before timing out.
             metrics, _, _ = _drain_stream(events, on_tool, metrics, block=False)
-            return False, (
-                f"Phase timed out after {timeout}s. "
-                "Increase the timeout in your workflow YAML or split the feature."
-            ), metrics
+            return False, ERR_TIMEOUT_TEMPLATE.format(timeout=timeout), metrics
 
         # Process exited cleanly — drain remaining events (blocking until the
         # reader thread emits its None sentinel).
         metrics, _, _ = _drain_stream(events, on_tool, metrics, block=True)
         reader.join(timeout=1.0)
+        stderr_reader.join(timeout=1.0)
 
         if proc.returncode == 0:
             return True, metrics.final_text or "Phase completed", metrics
-        stderr = proc.stderr.read().strip() if proc.stderr else ""
-        return False, stderr or metrics.final_text or "Unknown error", metrics
+        stderr_text = "".join(stderr_buf).strip()
+        return False, stderr_text or metrics.final_text or "Unknown error", metrics
 
     def one_shot(
         self,
@@ -256,7 +288,7 @@ class ClaudeCodeBackend:
             if proc.returncode == 0 and proc.stdout.strip():
                 return proc.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
+            log.debug("one_shot: backend call failed", exc_info=True)
         return None
 
     def check_available(self) -> tuple[bool, str]:
