@@ -32,6 +32,10 @@ class PhaseSnapshot:
     tool_count: int = 0
     duration_s: float = 0.0
     success: bool = True
+    commits: int = 0
+    files_changed: int = 0
+    insertions: int = 0
+    deletions: int = 0
 
 
 @dataclass
@@ -57,6 +61,9 @@ class BuildMetrics:
     gate_retries: int = 0
     phases_total: int = 0
     phases_completed: int = 0
+    # Commit stats
+    commits_count: int = 0
+    commits_by_phase: dict[str, int] = field(default_factory=dict)
     # Per-phase breakdown (full detail for dashboard/analysis)
     phases: list[PhaseSnapshot] = field(default_factory=list)
 
@@ -114,9 +121,19 @@ def build_metrics_from(
             tool_count=s.tool_count,
             duration_s=round(s.duration_s, 1),
             success=s.success,
+            commits=s.commits,
+            files_changed=s.files_changed,
+            insertions=s.insertions,
+            deletions=s.deletions,
         )
         for s in totals.phase_snapshots
     ]
+
+    # Aggregate commit stats across phases.
+    total_commits = sum(s.commits for s in totals.phase_snapshots)
+    commits_by_phase = {
+        s.name: s.commits for s in totals.phase_snapshots if s.commits > 0
+    }
 
     return BuildMetrics(
         feature_id=feature.id,
@@ -136,6 +153,8 @@ def build_metrics_from(
         gate_retries=feature.metadata.gate_retry,
         phases_total=len(feature.phases),
         phases_completed=phases_completed,
+        commits_count=total_commits,
+        commits_by_phase=commits_by_phase,
         phases=phase_records,
     )
 

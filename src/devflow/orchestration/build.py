@@ -19,6 +19,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 if TYPE_CHECKING:
+    from devflow.core.metrics import PhaseResult
     from devflow.ui.rendering import BuildTotals
 
 from devflow.core.artifacts import save_phase_output
@@ -215,8 +216,9 @@ def _run_execution_loop(
     and the gate auto-retry loop.
     """
     from devflow.integrations.git import (
+        collect_phase_result,
         commit_changes,
-        get_diff_stat,
+        get_head_sha,
         persist_files_summary,
     )
     from devflow.integrations.git.smart_messages import (
@@ -225,6 +227,7 @@ def _run_execution_loop(
     from devflow.orchestration.model_routing import get_phase_agent, resolve_model
     from devflow.ui.rendering import (
         render_phase_auto_retry,
+        render_phase_commits,
         render_phase_failure,
         render_phase_header,
         render_phase_success,
@@ -245,6 +248,11 @@ def _run_execution_loop(
         tier = resolve_model(feature, phase)
         model_label = get_backend().model_name(tier)
         render_phase_header(phase_num, total, phase.name, model_label)
+
+        # Capture pre-phase SHA for commit tracking.
+        is_code_phase = phase.name in ("implementing", "fixing")
+        pre_phase_sha = get_head_sha(short=False) if is_code_phase else ""
+
         start = time.monotonic()
         success, output, metrics = _execute_phase(
             feature, phase, agent_name, base, verbose, base_sha=base_sha,
@@ -257,20 +265,36 @@ def _run_execution_loop(
             if phase.name == "gate":
                 from devflow.ui.gate_panel import render_gate_panel
                 render_gate_panel(feature.id, base)
+                totals.add(phase.name, metrics, elapsed, model=model_label)
+            elif phase.name in ("implementing", "fixing"):
+                phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
+
+                # Auto-commit only if agent left uncommitted changes.
+                if phase_result.uncommitted_changes:
+                    msg = generate_commit_message(feature, phase=phase.name)
+                    if commit_changes(msg, exclude=initial_untracked):
+                        # Re-collect to include the auto-commit.
+                        phase_result = collect_phase_result(
+                            pre_phase_sha, success, output, metrics,
+                        )
+
+                render_phase_success(phase.name, elapsed, metrics)
+                render_phase_commits(phase_result)
+                totals.add(
+                    phase.name, metrics, elapsed, model=model_label,
+                    commits=len(phase_result.commits),
+                    files_changed=len(phase_result.files_changed),
+                    insertions=sum(c.insertions for c in phase_result.commits),
+                    deletions=sum(c.deletions for c in phase_result.commits),
+                )
+
+                # Persist commit summary as structured artifact.
+                _save_phase_commits_artifact(feature.id, phase.name, phase_result, base)
+
+                persist_files_summary(feature.id, base, base_branch)
             else:
                 render_phase_success(phase.name, elapsed, metrics)
-            totals.add(phase.name, metrics, elapsed, model=model_label)
-
-            if phase.name in ("implementing", "fixing"):
-                msg = generate_commit_message(feature, phase=phase.name)
-                if commit_changes(msg, exclude=initial_untracked):
-                    console.print("  [dim]💾 auto-committed changes[/dim]")
-                diff = get_diff_stat()
-                if diff:
-                    console.print("[dim]" + "\n".join(
-                        f"  {line}" for line in diff.split("\n")
-                    ) + "[/dim]\n")
-                persist_files_summary(feature.id, base, base_branch)
+                totals.add(phase.name, metrics, elapsed, model=model_label)
 
             # Review loop: after fixing, re-run reviewing if the workflow
             # includes it and we haven't exhausted the review cycle budget.
@@ -314,6 +338,34 @@ def _run_execution_loop(
         feature = _refresh_feature(feature.id, base) or feature
 
     return feature, True
+
+
+def _save_phase_commits_artifact(
+    feature_id: str, phase_name: str,
+    phase_result: PhaseResult,
+    base: Path | None = None,
+) -> None:
+    """Persist commit summary as a JSON artifact for downstream phases."""
+    import json
+
+    from devflow.core.artifacts import write_artifact
+
+    data = {
+        "commits": [
+            {
+                "sha": c.sha,
+                "message": c.message,
+                "files": c.files,
+                "insertions": c.insertions,
+                "deletions": c.deletions,
+            }
+            for c in phase_result.commits
+        ],
+        "total_files": len(phase_result.files_changed),
+        "total_insertions": sum(c.insertions for c in phase_result.commits),
+        "total_deletions": sum(c.deletions for c in phase_result.commits),
+    }
+    write_artifact(feature_id, f"{phase_name}.json", json.dumps(data, indent=2), base)
 
 
 MAX_REVIEW_CYCLES = 2

@@ -12,6 +12,7 @@ from .pr_body import (
 from .repo import (
     DiffSummary,
     branch_name,
+    collect_phase_result,
     commit_changes,
     create_branch,
     create_worktree,
@@ -46,6 +47,7 @@ __all__ = [
     "branch_name",
     "build_commit_message",
     "build_pr_title",
+    "collect_phase_result",
     "commit_changes",
     "create_branch",
     "create_worktree",

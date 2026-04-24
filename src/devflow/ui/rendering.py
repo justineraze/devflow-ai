@@ -13,7 +13,7 @@ from rich.text import Text
 
 from devflow.core.console import console
 from devflow.core.formatting import format_cost, format_tokens
-from devflow.core.metrics import PhaseMetrics
+from devflow.core.metrics import PhaseMetrics, PhaseResult
 from devflow.core.models import Feature
 
 if TYPE_CHECKING:
@@ -55,6 +55,10 @@ class PhaseMetricSnapshot:
     tool_count: int
     duration_s: float
     success: bool
+    commits: int = 0
+    files_changed: int = 0
+    insertions: int = 0
+    deletions: int = 0
 
 
 @dataclass
@@ -74,6 +78,8 @@ class BuildTotals:
     def add(
         self, phase_name: str, metrics: PhaseMetrics, elapsed_s: float,
         model: str = "", success: bool = True,
+        commits: int = 0, files_changed: int = 0,
+        insertions: int = 0, deletions: int = 0,
     ) -> None:
         self.cost_usd += metrics.cost_usd
         self.input_tokens += metrics.input_tokens
@@ -94,6 +100,10 @@ class BuildTotals:
             tool_count=metrics.tool_count,
             duration_s=elapsed_s,
             success=success,
+            commits=commits,
+            files_changed=files_changed,
+            insertions=insertions,
+            deletions=deletions,
         ))
 
 
@@ -211,6 +221,67 @@ def render_phase_auto_retry(phase_name: str, elapsed_s: float, message: str) -> 
     for line in message.split("\n")[:8]:
         if line.strip():
             console.print(Text(f"    {line}", style="dim"))
+    console.print()
+
+
+def render_phase_commits(phase_result: PhaseResult) -> None:
+    """Render a detailed commit summary after an implementing/fixing phase.
+
+    Shows all commits made by the agent during the phase, plus any
+    auto-committed leftovers. Replaces the old single-diff display.
+    """
+    commits = phase_result.commits
+    if not commits and not phase_result.uncommitted_changes:
+        return
+
+    total_ins = sum(c.insertions for c in commits)
+    total_del = sum(c.deletions for c in commits)
+    total_files = len(phase_result.files_changed)
+
+    if len(commits) == 1:
+        c = commits[0]
+        line = Text("  ")
+        line.append(f"  {c.sha} ", style="cyan dim")
+        line.append(c.message, style="dim")
+        console.print(line)
+        stat = Text("  ")
+        stat.append(
+            f"  {len(c.files)} file{'s' if len(c.files) != 1 else ''} changed",
+            style="dim",
+        )
+        if c.insertions:
+            ins_s = "s" if c.insertions != 1 else ""
+            stat.append(f", {c.insertions} insertion{ins_s}(+)", style="green dim")
+        if c.deletions:
+            del_s = "s" if c.deletions != 1 else ""
+            stat.append(f", {c.deletions} deletion{del_s}(-)", style="red dim")
+        console.print(stat)
+    elif len(commits) > 1:
+        for c in commits:
+            line = Text("  ")
+            line.append(f"  {c.sha} ", style="cyan dim")
+            line.append(c.message, style="dim")
+            detail = f" ({len(c.files)} file{'s' if len(c.files) != 1 else ''}, +{c.insertions}"
+            if c.deletions:
+                detail += f", -{c.deletions}"
+            detail += ")"
+            line.append(detail, style="dim")
+            console.print(line)
+
+        # Total line.
+        total = Text("  ")
+        total.append(
+            f"  Total: {total_files} file{'s' if total_files != 1 else ''} changed",
+            style="dim bold",
+        )
+        if total_ins:
+            ins_s = "s" if total_ins != 1 else ""
+            total.append(f", {total_ins} insertion{ins_s}(+)", style="green dim")
+        if total_del:
+            del_s = "s" if total_del != 1 else ""
+            total.append(f", {total_del} deletion{del_s}(-)", style="red dim")
+        console.print(total)
+
     console.print()
 
 

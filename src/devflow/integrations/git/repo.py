@@ -6,7 +6,10 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from devflow.core.metrics import CommitInfo, PhaseMetrics, PhaseResult
 
 
 class DiffSummary(TypedDict):
@@ -219,6 +222,105 @@ def get_diff_stat() -> str:
     """Return git diff --stat of the latest commit."""
     result = _git("diff", "--stat", "HEAD~1")
     return result.stdout.strip()
+
+
+def collect_phase_result(
+    pre_sha: str,
+    success: bool,
+    output: str,
+    metrics: PhaseMetrics,
+) -> PhaseResult:
+    """Build a PhaseResult by comparing git state before and after a phase.
+
+    Does at most 2 git calls (log + status). Gracefully returns an empty
+    result if git is unavailable or the repo is in an unusual state.
+    """
+    from devflow.core.metrics import CommitInfo as _CI
+    from devflow.core.metrics import PhaseResult as _PR
+
+    commits: list[_CI] = []
+    all_files: set[str] = set()
+    uncommitted = False
+
+    # 1. Commits made during the phase: git log with --numstat.
+    log_result = _git(
+        "log", "--format=%H%x00%s", "--numstat",
+        f"{pre_sha}..HEAD",
+    )
+    if log_result.returncode == 0 and log_result.stdout.strip():
+        commits = _parse_log_numstat(log_result.stdout)
+        for c in commits:
+            all_files.update(c.files)
+
+    # 2. Uncommitted changes: git status --porcelain.
+    status_result = _git("status", "--porcelain")
+    if status_result.returncode == 0 and status_result.stdout.strip():
+        uncommitted = True
+        for line in status_result.stdout.splitlines():
+            # Format: "XY path" or "XY path -> newpath"
+            path = line[3:].split(" -> ")[-1].strip()
+            if path:
+                all_files.add(path)
+
+    return _PR(
+        success=success,
+        output=output,
+        metrics=metrics,
+        commits=commits,
+        files_changed=sorted(all_files),
+        uncommitted_changes=uncommitted,
+    )
+
+
+def _parse_log_numstat(raw: str) -> list[CommitInfo]:
+    """Parse ``git log --format=%H%x00%s --numstat`` output into CommitInfo list."""
+    from devflow.core.metrics import CommitInfo as _CI
+
+    commits: list[_CI] = []
+    current_sha = ""
+    current_msg = ""
+    current_files: list[str] = []
+    current_ins = 0
+    current_del = 0
+
+    for line in raw.splitlines():
+        if "\x00" in line:
+            # Save previous commit if any.
+            if current_sha:
+                commits.append(_CI(
+                    sha=current_sha[:7],
+                    message=current_msg,
+                    files=current_files,
+                    insertions=current_ins,
+                    deletions=current_del,
+                ))
+            sha_msg = line.split("\x00", 1)
+            current_sha = sha_msg[0]
+            current_msg = sha_msg[1] if len(sha_msg) > 1 else ""
+            current_files = []
+            current_ins = 0
+            current_del = 0
+        elif line.strip():
+            # numstat line: "added\tremoved\tpath"
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                if parts[0].isdigit():
+                    current_ins += int(parts[0])
+                if parts[1].isdigit():
+                    current_del += int(parts[1])
+                current_files.append(parts[2])
+
+    # Don't forget the last commit.
+    if current_sha:
+        commits.append(_CI(
+            sha=current_sha[:7],
+            message=current_msg,
+            files=current_files,
+            insertions=current_ins,
+            deletions=current_del,
+        ))
+
+    return commits
 
 
 def get_fix_commit_log(max_commits: int = 10) -> str:

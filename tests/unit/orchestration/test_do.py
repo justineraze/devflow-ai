@@ -123,8 +123,8 @@ class TestBuildLoopDoMode:
         mock_gate_retry: MagicMock,
         project_dir: Path,
     ) -> None:
-        # First call: initial SHA save. Subsequent: changed SHA.
-        mock_sha.side_effect = ["initial_sha_full", "changed_sha_full"]
+        # Calls: initial SHA save, pre-phase SHA, failure-path SHA check.
+        mock_sha.side_effect = ["initial_sha_full", "pre_phase_sha", "changed_sha_full"]
         mock_exec.side_effect = [_PHASE_OK, _PHASE_FAIL]  # implementing ok, gate fail
 
         from devflow.orchestration.build import execute_build_loop

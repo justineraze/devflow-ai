@@ -30,3 +30,29 @@ class PhaseMetrics:
     tool_count: int = 0
     tools_used: list[ToolUse] = field(default_factory=list)
     final_text: str = ""
+
+
+@dataclass
+class CommitInfo:
+    """A single commit made during a phase execution."""
+
+    sha: str
+    message: str
+    files: list[str] = field(default_factory=list)
+    insertions: int = 0
+    deletions: int = 0
+
+
+@dataclass
+class PhaseResult:
+    """Observable output of a phase execution.
+
+    Built AFTER a phase completes by comparing git state before/after.
+    """
+
+    success: bool
+    output: str
+    metrics: PhaseMetrics
+    commits: list[CommitInfo] = field(default_factory=list)
+    files_changed: list[str] = field(default_factory=list)
+    uncommitted_changes: bool = False
