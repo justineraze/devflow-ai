@@ -311,6 +311,107 @@ class TestGetPhaseAgent:
         assert agent == "developer-typescript"
 
 
+class TestFinalizeBuildCacheWarning:
+    """Tests for the low cache hit rate warning in _finalize_build."""
+
+    @patch("devflow.integrations.git.push_and_create_pr", return_value=None)
+    def test_warns_when_cache_hit_rate_low(
+        self, mock_pr: MagicMock, project_dir: Path,
+    ) -> None:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
+        from devflow.orchestration.build import _finalize_build
+        from devflow.ui.rendering import BuildTotals
+
+        feature = start_build("test", "quick", project_dir)
+
+        # Seed 2 low-cache builds (the 3rd will be appended by _finalize_build).
+        for i in range(2):
+            record = BuildMetrics(
+                feature_id=f"feat-old-{i}", description="old", workflow="quick",
+                timestamp=f"2026-04-20T0{i}:00:00+00:00", success=True,
+                input_tokens=10000, cache_creation=5000, cache_read=1000,  # ~6.7%
+                duration_s=30.0, cost_usd=0.02,
+                phases=[PhaseSnapshot(
+                    name="implementing", model="sonnet", cost_usd=0.02,
+                    input_tokens=10000, cache_creation=5000, cache_read=1000,
+                    duration_s=30.0,
+                )],
+            )
+            append_build_metrics(record, project_dir)
+
+        totals = BuildTotals()
+        totals.add("implementing", PhaseMetrics(
+            input_tokens=10000, cache_creation=5000, cache_read=1000,
+            cost_usd=0.02,
+        ), 30.0, model="sonnet")
+
+        # Capture console output.
+        import devflow.orchestration.build as build_mod
+
+        buf = StringIO()
+        original = build_mod.console
+        build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
+        try:
+            _finalize_build(feature, "feat/test", totals, [], project_dir)
+        finally:
+            build_mod.console = original
+
+        output = buf.getvalue()
+        assert "Cache hit rate bas" in output
+
+    @patch("devflow.integrations.git.push_and_create_pr", return_value=None)
+    def test_no_warning_when_cache_hit_rate_ok(
+        self, mock_pr: MagicMock, project_dir: Path,
+    ) -> None:
+        from io import StringIO
+
+        from rich.console import Console
+
+        from devflow.core.history import BuildMetrics, PhaseSnapshot, append_build_metrics
+        from devflow.orchestration.build import _finalize_build
+        from devflow.ui.rendering import BuildTotals
+
+        feature = start_build("test", "quick", project_dir)
+
+        # Seed 2 high-cache builds.
+        for i in range(2):
+            record = BuildMetrics(
+                feature_id=f"feat-ok-{i}", description="ok", workflow="quick",
+                timestamp=f"2026-04-20T0{i}:00:00+00:00", success=True,
+                input_tokens=2000, cache_creation=3000, cache_read=15000,  # 75%
+                duration_s=30.0, cost_usd=0.02,
+                phases=[PhaseSnapshot(
+                    name="implementing", model="sonnet", cost_usd=0.02,
+                    input_tokens=2000, cache_creation=3000, cache_read=15000,
+                    duration_s=30.0,
+                )],
+            )
+            append_build_metrics(record, project_dir)
+
+        totals = BuildTotals()
+        totals.add("implementing", PhaseMetrics(
+            input_tokens=2000, cache_creation=3000, cache_read=15000,
+            cost_usd=0.02,
+        ), 30.0, model="sonnet")
+
+        import devflow.orchestration.build as build_mod
+
+        buf = StringIO()
+        original = build_mod.console
+        build_mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
+        try:
+            _finalize_build(feature, "feat/test", totals, [], project_dir)
+        finally:
+            build_mod.console = original
+
+        output = buf.getvalue()
+        assert "Cache hit rate bas" not in output
+
+
 class TestAutoCommitAfterPhase:
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")

@@ -283,3 +283,39 @@ class TestRenderMetricsTable:
         # Both phases should appear even though gate has $0.00
         assert "gate" in output
         assert "implementing" in output
+
+    def test_phase_averages_include_cache_percent(self) -> None:
+        phases = [
+            PhaseSnapshot(
+                name="planning", model="opus", cost_usd=0.05,
+                input_tokens=2000, cache_creation=3000, cache_read=15000,
+                duration_s=30.0, success=True,
+            ),
+        ]
+        records = [
+            _make_build_metrics("feat-c1", phases=phases, cost_usd=0.05),
+            _make_build_metrics("feat-c2", phases=phases, cost_usd=0.05),
+        ]
+        output = _capture(render_metrics_table, records)
+        assert "Cache %" in output
+        # 15000 / (2000+3000+15000) = 75%
+        assert "75%" in output
+
+    def test_build_history_models_column_shows_cost(self) -> None:
+        phases = [
+            PhaseSnapshot(
+                name="planning", model="opus", cost_usd=0.12,
+                input_tokens=5000, cache_creation=3000, cache_read=2000,
+                duration_s=30.0, success=True,
+            ),
+            PhaseSnapshot(
+                name="implementing", model="sonnet", cost_usd=0.04,
+                input_tokens=4000, cache_creation=1000, cache_read=1000,
+                duration_s=60.0, success=True,
+            ),
+        ]
+        records = [_make_build_metrics("feat-m1", phases=phases, cost_usd=0.16)]
+        output = _capture(render_metrics_table, records)
+        # Models column now shows cost per model (may wrap across lines).
+        assert "opus $0.12" in output
+        assert "$0.04" in output

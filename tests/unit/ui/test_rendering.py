@@ -137,6 +137,30 @@ class TestBuildSummary:
         assert "planning" in out
         assert "gate" in out
 
+    def test_cache_line_shows_read_and_total(self) -> None:
+        out = _capture(
+            r.render_build_summary,
+            _feature(), self._totals(), None, "feat/x",
+        )
+        # cache_read = 12000+18000+22000 = 52000 -> 52.0k
+        assert "52.0k read" in out
+        assert "total" in out
+
+    def test_cost_by_model_line(self) -> None:
+        totals = self._totals()
+        # Add model labels to snapshots for cost breakdown.
+        totals.phase_snapshots[0].model = "opus"
+        totals.phase_snapshots[1].model = "sonnet"
+        totals.phase_snapshots[2].model = "opus"
+        totals.phase_snapshots[3].model = ""
+        out = _capture(
+            r.render_build_summary,
+            _feature(), totals, None, "feat/x",
+        )
+        assert "Cost by model" in out
+        assert "opus" in out
+        assert "sonnet" in out
+
     def test_falls_back_to_branch_when_no_pr(self) -> None:
         out = _capture(
             r.render_build_summary,

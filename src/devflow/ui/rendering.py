@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from devflow.core.console import console
-from devflow.core.formatting import format_cost
+from devflow.core.formatting import format_cost, format_tokens
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.models import Feature
 
@@ -232,7 +232,28 @@ def render_build_summary(
     if total_in > 0:
         cache_pct = int(totals.cache_read / total_in * 100)
         cache_style = "green" if cache_pct >= 80 else "yellow"
-        grid.add_row("Cache", Text(f"{cache_pct}%", style=cache_style))
+        cache_text = Text()
+        cache_text.append(f"{cache_pct}%", style=cache_style)
+        cache_text.append(
+            f" ({format_tokens(totals.cache_read)} read / {format_tokens(total_in)} total)",
+            style="dim",
+        )
+        grid.add_row("Cache", cache_text)
+
+    # Cost breakdown by model tier.
+    model_costs: dict[str, float] = {}
+    for snap in totals.phase_snapshots:
+        tier = snap.model or "unknown"
+        model_costs[tier] = model_costs.get(tier, 0.0) + snap.cost_usd
+    if model_costs:
+        cost_parts = Text()
+        for i, (tier, cost) in enumerate(sorted(model_costs.items(), key=lambda x: -x[1])):
+            if i > 0:
+                cost_parts.append(", ", style="dim")
+            style = MODEL_STYLES.get(tier, "white bold")
+            cost_parts.append(tier, style=style)
+            cost_parts.append(f" {format_cost(cost)}", style="dim")
+        grid.add_row("Cost by model", cost_parts)
 
     rows: list = [grid, Text()]
 

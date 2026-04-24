@@ -308,6 +308,19 @@ def _finalize_build(
     record = build_metrics_from(final, totals, success=True)
     append_build_metrics(record, base)
 
+    # Warn if cache hit rate has been consistently low.
+    from devflow.core.history import read_history
+
+    recent = read_history(base, limit=3)
+    if len(recent) >= 3:
+        avg_cache = sum(r.cache_hit_rate for r in recent[:3]) / 3
+        if avg_cache < 0.4:
+            console.print(
+                f"[yellow]⚠ Cache hit rate bas ({int(avg_cache * 100)}%) "
+                f"sur les 3 derniers builds. "
+                f"Les prompts système ont peut-être changé.[/yellow]"
+            )
+
     render_build_summary(final, totals, pr_url, branch)
     if pr_url is None:
         console.print("[yellow]PR creation failed — push manually.[/yellow]\n")

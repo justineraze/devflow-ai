@@ -329,11 +329,16 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
     for r in records:
         for p in r.phases:
             if p.name not in acc:
-                acc[p.name] = {"cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0}
+                acc[p.name] = {
+                    "cost": 0.0, "duration": 0.0, "tokens": 0, "runs": 0,
+                    "cache_read": 0, "cache_total": 0,
+                }
             acc[p.name]["cost"] = float(acc[p.name]["cost"]) + p.cost_usd
             acc[p.name]["duration"] = float(acc[p.name]["duration"]) + p.duration_s
             total_tokens = p.input_tokens + p.cache_creation + p.cache_read
             acc[p.name]["tokens"] = int(acc[p.name]["tokens"]) + total_tokens
+            acc[p.name]["cache_read"] = int(acc[p.name]["cache_read"]) + p.cache_read
+            acc[p.name]["cache_total"] = int(acc[p.name]["cache_total"]) + total_tokens
             acc[p.name]["runs"] = int(acc[p.name]["runs"]) + 1
 
     if not acc:
@@ -350,27 +355,51 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
     table.add_column("Avg Cost", justify="right")
     table.add_column("Avg Duration", justify="right")
     table.add_column("Avg Tokens", justify="right")
+    table.add_column("Cache %", justify="right")
     table.add_column("Runs", justify="right", style="dim")
 
     total_avg_cost = 0.0
     total_avg_duration = 0.0
     total_avg_tokens = 0
 
+    total_cache_read = 0
+    total_cache_total = 0
+
     for name, data in sorted_phases:
         runs = int(data["runs"])
         avg_cost = float(data["cost"]) / runs
         avg_duration = float(data["duration"]) / runs
         avg_tokens = int(data["tokens"]) // runs
+        phase_cache_total = int(data["cache_total"])
+        phase_cache_read = int(data["cache_read"])
         total_avg_cost += avg_cost
         total_avg_duration += avg_duration
         total_avg_tokens += avg_tokens
+        total_cache_read += phase_cache_read
+        total_cache_total += phase_cache_total
+
+        if phase_cache_total > 0:
+            cpct = int(phase_cache_read / phase_cache_total * 100)
+            cache_style = "green" if cpct >= 60 else "yellow"
+            cache_cell = Text(f"{cpct}%", style=cache_style)
+        else:
+            cache_cell = Text("—", style="dim")
+
         table.add_row(
             name,
             format_cost(avg_cost),
             _format_build_duration(avg_duration),
             format_tokens(avg_tokens),
+            cache_cell,
             str(runs),
         )
+
+    if total_cache_total > 0:
+        total_cpct = int(total_cache_read / total_cache_total * 100)
+        total_cache_style = "green" if total_cpct >= 60 else "yellow"
+        total_cache_cell = Text(f"{total_cpct}%", style=total_cache_style)
+    else:
+        total_cache_cell = Text("—", style="dim")
 
     table.add_section()
     table.add_row(
@@ -378,6 +407,7 @@ def _render_phase_averages(records: list[BuildMetrics]) -> None:
         Text(format_cost(total_avg_cost), style="yellow"),
         _format_build_duration(total_avg_duration),
         format_tokens(total_avg_tokens),
+        total_cache_cell,
         "[dim]—[/dim]",
     )
 
@@ -410,8 +440,18 @@ def _render_build_history(records: list[BuildMetrics]) -> None:
             gate = r.failed_phase or "—"
             gate_style = "red"
 
-        models = sorted({p.model for p in r.phases if p.model})
-        models_str = ", ".join(models) if models else "—"
+        # Aggregate cost per model tier.
+        model_costs: dict[str, float] = {}
+        for p in r.phases:
+            tier = p.model or "unknown"
+            model_costs[tier] = model_costs.get(tier, 0.0) + p.cost_usd
+        if model_costs:
+            parts = []
+            for tier, cost in sorted(model_costs.items(), key=lambda x: -x[1]):
+                parts.append(f"{tier} {format_cost(cost)}")
+            models_str = " · ".join(parts)
+        else:
+            models_str = "—"
 
         table.add_row(
             _truncate(r.feature_id, 28),
