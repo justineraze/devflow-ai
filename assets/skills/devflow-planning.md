@@ -1,111 +1,84 @@
 ---
 name: devflow-planning
-description: Produces rigorous implementation plans with concrete steps, quality audit, and risk assessment. For the planning and architecture phases.
+description: Planning principles — when to audit, when to refactor, when to block. Injected alongside the planner agent.
 ---
 
-# Planning Rigor
+# Planning Principles
 
-A good plan is executable. A bad plan is vague encouragement. Your job is to
-produce a plan so specific that a developer agent can execute it without
-asking a single follow-up question.
+This skill defines the decision principles for the planning phase. The planner
+agent defines the process and output format. This skill tells you WHEN and WHY
+to make certain choices — the agent tells you HOW to structure the output.
 
-## What makes a plan rigorous
+## Principle 1 — Audit before you plan
 
-### 1. Named files with named actions
+Never plan on top of code you haven't read. The quality audit (duplication,
+file size, abstraction threshold, test coverage) is not a nice-to-have — it's
+the foundation of the plan. If you skip the audit, you're planning blind.
 
-```
-✓ "src/devflow/detect.py — create. Add detect_stack(path: Path) -> str | None
-  that counts source files by extension and returns the language with most files."
+**When to apply**: every planning phase, no exceptions.
 
-✗ "Add detection logic somewhere in the codebase."
-```
+## Principle 2 — Refactor-first, not refactor-later
 
-Every step must name:
-- The exact file path
-- The exact action (create / modify / delete / rename)
-- The exact change (function names, class names, imports)
+If the audit finds problems (duplication, god modules, missing tests), the
+refactoring steps come FIRST in the plan, before the feature. "Ship the
+feature now, refactor later" means never refactoring. The plan must leave the
+codebase cleaner than it found it.
 
-### 2. Tests live in the plan
+**When to apply**: whenever the audit finds issues in files you'll touch.
 
-Every step that changes behavior must name a test:
-- What fixture or setup is needed
-- What assertion proves the change works
-- Edge case that will be covered
+**Exception**: if the refactor is large enough to be its own feature (>5 steps),
+propose splitting it out as a separate `devflow build` instead of front-loading
+it. Flag this to the user.
 
-If you can't name the test, you don't understand the step well enough.
+## Principle 3 — The rule of three
 
-### 3. Quality audit before the feature
+Two similar cases = inline is fine. Three similar cases = abstraction is
+mandatory. When your feature adds a 3rd handler, backend, format, or similar
+construct, the plan must include extracting the common pattern before adding
+the new case.
 
-Before proposing feature steps, audit the code you'll touch:
+**When to apply**: whenever you notice you're adding "another one of those."
 
-- **Duplication** — similar code elsewhere that should be consolidated first?
-- **God modules** — file over 300 lines mixing concerns? Plan a split.
-- **Leaky abstractions** — callers reaching into internals? Plan a cleaner API.
-- **Dead code** — unused functions, flags, branches? Plan a cleanup.
-- **Inconsistency** — similar code using different conventions? Plan unification.
+## Principle 4 — Characterization tests before modification
 
-If any of these apply, **the refactor steps come FIRST, before the feature steps**.
-A good plan leaves the codebase cleaner than it found it. Shipping a patch now
-and refactoring "later" means never refactoring.
+If a file has no tests (or no tests covering the area you'll change), writing
+characterization tests is step 1. These tests capture current behavior so you
+can prove the refactor or feature doesn't break anything.
 
-### 4. Risk flagging
+**When to apply**: whenever you modify untested code.
 
-For every plan, flag what could go wrong:
+## Principle 5 — Every step has a "why"
 
-- Breaking API changes → which callers need updating?
-- State machine changes → which transitions are now invalid?
-- Heavily-imported files → high blast radius, more tests needed
-- External dependencies → version compatibility, new install steps
+A plan step that says "add X to Y" without explaining why is a plan step you
+haven't thought through. The "why" is what lets the developer agent make
+judgment calls when the plan meets reality. Without it, the developer follows
+instructions blindly and makes bad decisions at the edges.
 
-Each risk gets a mitigation line. "Risk: X could break. Mitigation: Y."
+**When to apply**: every step, no exceptions.
 
-### 5. Step count is a signal
+## Principle 6 — Ask or decide, never guess silently
 
-- **1-3 steps** — trivial. Maybe too trivial for a full workflow.
-- **4-8 steps** — healthy. Usual sweet spot.
-- **9-15 steps** — borderline. Consider splitting.
-- **16+ steps** — too big. This is two features, split them.
+When the spec is ambiguous:
+- **Decide** if the choice is reversible and doesn't affect scope. Document
+  the decision in the plan so the user can override it.
+- **Ask** if the choice affects scope, breaks API, or touches security. The
+  feature will be blocked until the user answers.
 
-If you find yourself padding to hit a count, stop. Fewer honest steps beat more
-padded ones.
+Never guess silently. A plan built on silent assumptions will be wrong in
+exactly the ways that are hardest to debug.
 
-## Output shape (always this structure)
+**When to apply**: whenever you face ambiguity.
 
-```markdown
-## Plan: [feature-id] — [one-line summary]
+## Principle 7 — Step count is a complexity signal
 
-### Scope
-- Type: [new-feature | extension | refactor | bugfix]
-- Complexity: [low | medium | high]
-- Estimated steps: N
-- Module: [the primary Python module touched — e.g. runner, gate, lifecycle, git, cli]
+| Steps | Signal |
+|-------|--------|
+| 1-3 | Trivial — maybe too trivial for a full workflow |
+| 4-8 | Healthy sweet spot |
+| 9-15 | Borderline — consider splitting |
+| 16+ | Too big — this is two features, split them |
 
-### Affected files
-| File | Action | What changes |
-|------|--------|-------------|
+Don't pad to hit a count. Don't compress to hide complexity. The step count
+should honestly reflect the work.
 
-### Quality audit
-(what needs refactoring before we add to these files, if anything)
-
-### Implementation steps
-1. **[file]** — [what]. Test: [test name + assertion]
-2. ...
-
-### Risks
-- [risk] → [mitigation]
-
-### Open questions
-- [only if truly blocking; otherwise omit this section]
-```
-
-## When to ask vs when to decide
-
-If the spec is ambiguous, you have two options:
-
-- **Decide** — make a reasonable choice and note it in the plan as a decision.
-  Preferred when the choice is reversible and doesn't affect scope.
-- **Ask** — list it in "Open questions" and STOP the planning phase. The
-  feature will be blocked until the user answers. Preferred when the choice
-  affects scope, breaks API, or touches security.
-
-Never guess silently. Either decide-and-document or ask-and-block.
+**When to apply**: during plan review, before finalizing.
