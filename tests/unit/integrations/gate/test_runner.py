@@ -5,19 +5,31 @@ from unittest.mock import patch
 
 from devflow.integrations.gate import CheckResult, run_gate
 
+_OK = CheckResult(name="x", passed=True, message="ok")
+_SECRETS_OK = CheckResult(name="secrets", passed=True, message="clean")
+_COMPLEXITY_OK = CheckResult(name="complexity", passed=True, message="ok")
+_MODULE_SIZE_OK = CheckResult(name="module_size", passed=True, message="ok")
+
+
+def _patch_structural(fn):
+    """Decorator to mock the two structural checks alongside secrets."""
+    fn = patch("devflow.integrations.gate.runner.check_module_size", return_value=_MODULE_SIZE_OK)(fn)
+    fn = patch("devflow.integrations.gate.runner.check_complexity", return_value=_COMPLEXITY_OK)(fn)
+    return fn
+
 
 class TestRunGate:
     """Tests for run_gate stack dispatch."""
 
+    @_patch_structural
     @patch("devflow.integrations.gate.runner._run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_uses_typescript_tools(
-        self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
+        self, mock_secrets: patch, mock_check: patch,
+        _mock_cx: patch, _mock_ms: patch, tmp_path: Path,
     ) -> None:
-        mock_check.return_value = CheckResult(name="x", passed=True, message="ok")
-        mock_secrets.return_value = CheckResult(
-            name="secrets", passed=True, message="clean",
-        )
+        mock_check.return_value = _OK
+        mock_secrets.return_value = _SECRETS_OK
 
         run_gate(base=tmp_path, stack="typescript")
 
@@ -25,33 +37,70 @@ class TestRunGate:
         call_names = [call.args[0] for call in mock_check.call_args_list]
         assert call_names == ["biome", "vitest"]
 
+    @_patch_structural
     @patch("devflow.integrations.gate.runner._run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_default_stack_is_python(
-        self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
+        self, mock_secrets: patch, mock_check: patch,
+        _mock_cx: patch, _mock_ms: patch, tmp_path: Path,
     ) -> None:
-        mock_check.return_value = CheckResult(name="x", passed=True, message="ok")
-        mock_secrets.return_value = CheckResult(
-            name="secrets", passed=True, message="clean",
-        )
+        mock_check.return_value = _OK
+        mock_secrets.return_value = _SECRETS_OK
 
         run_gate(base=tmp_path)
 
         call_names = [call.args[0] for call in mock_check.call_args_list]
         assert call_names == ["ruff", "pytest"]
 
+    @_patch_structural
     @patch("devflow.integrations.gate.runner._run_command_check")
     @patch("devflow.integrations.gate.runner.scan_secrets")
     def test_secrets_always_runs(
-        self, mock_secrets: patch, mock_check: patch, tmp_path: Path,
+        self, mock_secrets: patch, mock_check: patch,
+        _mock_cx: patch, _mock_ms: patch, tmp_path: Path,
     ) -> None:
-        mock_check.return_value = CheckResult(name="x", passed=True, message="ok")
-        mock_secrets.return_value = CheckResult(
-            name="secrets", passed=True, message="clean",
-        )
+        mock_check.return_value = _OK
+        mock_secrets.return_value = _SECRETS_OK
 
         report = run_gate(base=tmp_path, stack="php")
 
         mock_secrets.assert_called_once()
         check_names = [c.name for c in report.checks]
         assert "secrets" in check_names
+
+    @_patch_structural
+    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.scan_secrets")
+    def test_structural_checks_included_in_report(
+        self, mock_secrets: patch, mock_check: patch,
+        _mock_cx: patch, _mock_ms: patch, tmp_path: Path,
+    ) -> None:
+        mock_check.return_value = _OK
+        mock_secrets.return_value = _SECRETS_OK
+
+        report = run_gate(base=tmp_path)
+
+        check_names = [c.name for c in report.checks]
+        assert "complexity" in check_names
+        assert "module_size" in check_names
+
+    @_patch_structural
+    @patch("devflow.integrations.gate.runner._run_command_check")
+    @patch("devflow.integrations.gate.runner.scan_secrets")
+    def test_structural_warnings_dont_fail_gate(
+        self, mock_secrets: patch, mock_check: patch,
+        mock_cx: patch, mock_ms: patch, tmp_path: Path,
+    ) -> None:
+        mock_check.return_value = _OK
+        mock_secrets.return_value = _SECRETS_OK
+        mock_cx.return_value = CheckResult(
+            name="complexity", passed=True,
+            message="2 function(s) exceed complexity 10 (warning)",
+        )
+        mock_ms.return_value = CheckResult(
+            name="module_size", passed=True,
+            message="1 module(s) exceed 400 lines (warning)",
+        )
+
+        report = run_gate(base=tmp_path)
+        assert report.passed is True

@@ -49,6 +49,12 @@ class TestParallelExecution:
         ), patch(
             "devflow.integrations.gate.runner.scan_secrets",
             side_effect=slow_check,
+        ), patch(
+            "devflow.integrations.gate.runner.check_complexity",
+            side_effect=slow_check,
+        ), patch(
+            "devflow.integrations.gate.runner.check_module_size",
+            side_effect=slow_check,
         ):
             start = time.monotonic()
             report = run_gate(base=tmp_path, stack="python")
@@ -77,8 +83,14 @@ class TestParallelExecution:
         ), patch(
             "devflow.integrations.gate.runner.scan_secrets",
             side_effect=named("secrets"),
+        ), patch(
+            "devflow.integrations.gate.runner.check_complexity",
+            side_effect=named("complexity"),
+        ), patch(
+            "devflow.integrations.gate.runner.check_module_size",
+            side_effect=named("module_size"),
         ):
             report = run_gate(base=tmp_path, stack="python")
 
         names = [c.name for c in report.checks]
-        assert names == ["ruff", "pytest", "secrets"]
+        assert names == ["ruff", "pytest", "secrets", "complexity", "module_size"]

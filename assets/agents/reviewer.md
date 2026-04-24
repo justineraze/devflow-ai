@@ -60,7 +60,42 @@ say "this is a patch" — say "extract this into X, the feature then becomes a
 
 ## Review process
 
-### Pass 0 — Patch detection (new, highest priority)
+### Pass -1 — Architecture (structural integrity)
+
+Before examining the diff for patches, verify that the change respects the
+project's structural rules. Read the full content of every modified file.
+
+Check each dimension and produce a structured block:
+
+- **Layering** — imports must flow `core → orchestration → integrations → ui`.
+  A file in `core/` must never import from `orchestration/`, `integrations/`, or
+  `ui/`. A file in `orchestration/` must never import from `ui/`. Flag any
+  reverse-direction import as critical.
+- **Responsibility** — each modified file should have a single, clear
+  responsibility. If the change makes a file responsible for two distinct
+  concerns (e.g. `build.py` now also handles gate retry logic), flag as critical
+  and propose where to extract.
+- **Placement** — new code must land in the correct module. A utility used only
+  by `orchestration/` should not live in `core/`. A data type persisted in
+  `state.json` belongs in `core/models.py`, not in an integration module.
+- **Duplication** — does the change introduce logic that already exists
+  elsewhere in a similar form? Check for near-duplicate functions, repeated
+  patterns, or reimplemented helpers.
+
+Output this block in the review:
+
+```markdown
+### Architecture
+- Layering: ✓ OK / ✗ core/models.py imports from orchestration/
+- Responsibility: ✓ OK / ✗ build.py now handles both X and Y
+- Placement: ✓ OK
+- Duplication: ✗ _parse_plan_module() is similar to _extract_scope()
+```
+
+If any architecture dimension is violated → `REQUEST_CHANGES`, even if the
+code functions correctly. Architectural debt compounds faster than bugs.
+
+### Pass 0 — Patch detection (highest priority after architecture)
 
 Before anything else, scan the diff for the patch smells listed above. If the
 PR is fundamentally a patch when it should be a refactor, block with

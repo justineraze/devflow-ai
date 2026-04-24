@@ -7,6 +7,8 @@ from pathlib import Path
 
 from devflow.core.metrics import PhaseMetrics
 from devflow.integrations.gate.checks import _checks_for_stack, _run_command_check
+from devflow.integrations.gate.complexity import check_complexity
+from devflow.integrations.gate.module_size import check_module_size
 from devflow.integrations.gate.report import GateReport
 from devflow.integrations.gate.secrets import scan_secrets
 
@@ -28,7 +30,7 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
     checks = _checks_for_stack(stack)
     report = GateReport()
 
-    with ThreadPoolExecutor(max_workers=len(checks) + 1) as pool:
+    with ThreadPoolExecutor(max_workers=len(checks) + 3) as pool:
         command_futures = [
             pool.submit(
                 _run_command_check,
@@ -37,11 +39,15 @@ def run_gate(base: Path | None = None, stack: str | None = None) -> GateReport:
             for c in checks
         ]
         secrets_future = pool.submit(scan_secrets, base)
+        complexity_future = pool.submit(check_complexity, base)
+        module_size_future = pool.submit(check_module_size, base)
 
         # Preserve declared order for a stable report layout.
         for fut in command_futures:
             report.add(fut.result())
         report.add(secrets_future.result())
+        report.add(complexity_future.result())
+        report.add(module_size_future.result())
 
     return report
 
