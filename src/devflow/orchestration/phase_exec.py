@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from devflow.core.artifacts import save_phase_output
+from devflow.core.config import load_config
 from devflow.core.models import (
     Feature,
     FeatureStatus,
@@ -28,12 +30,13 @@ def sync_linear_if_configured(
     """Sync Linear issue status for *feature* (best-effort, no-op if unconfigured)."""
     if not feature.metadata.linear_issue_id:
         return
-    from devflow.core.config import load_config
-    from devflow.integrations.linear.sync import sync_single_feature
-
     linear_team = load_config(base).linear.team
-    if linear_team:
-        sync_single_feature(feature, linear_team, base)
+    if not linear_team:
+        return
+    # Lazy import keeps optional httpx out of the import path when Linear
+    # is not configured for this project.
+    from devflow.integrations.linear.sync import sync_single_feature
+    sync_single_feature(feature, linear_team, base)
 
 
 def _walk_to_done(feature: Feature) -> None:
@@ -75,8 +78,6 @@ def complete_phase(
     PhaseRecord before persisting state.json — avoiding duplication of
     potentially large strings in the state file.
     """
-    from devflow.core.artifacts import save_phase_output
-
     with mutate_feature(feature_id, base) as feature:
         if not feature:
             return

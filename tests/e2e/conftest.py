@@ -122,7 +122,11 @@ def callbacks_with_ui_confirm() -> object:
     from devflow.orchestration.events import BuildCallbacks
     from devflow.ui.rendering import render_plan_confirmation
 
-    return BuildCallbacks(confirm_plan=render_plan_confirmation)
+    class _UIPrompter:
+        def confirm_plan(self, plan: str, fid: str, pr: bool) -> bool:  # noqa: PLR6301
+            return render_plan_confirmation(plan, fid, pr)
+
+    return BuildCallbacks(prompter=_UIPrompter())
 
 
 @pytest.fixture

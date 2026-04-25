@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import subprocess
 from pathlib import Path
 
 from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
 from devflow.core.backend import get_backend
 from devflow.core.console import console
+from devflow.core.formatting import format_tool_line
 from devflow.core.metrics import PhaseMetrics, ToolUse
 from devflow.core.models import Feature, PhaseName, PhaseRecord
-from devflow.core.paths import venv_env
-from devflow.core.phases import UnknownPhase, get_spec
+from devflow.core.paths import assets_dir, venv_env
+from devflow.core.phases import (
+    INSTRUCTIONS_IMPLEMENTING_QUICK,
+    UnknownPhase,
+    get_spec,
+)
+from devflow.core.workflow import load_workflow
 from devflow.orchestration.model_routing import resolve_model
+
+log = logging.getLogger(__name__)
 
 # Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
@@ -21,8 +30,7 @@ INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 
 def _bundled_dir(subdir: str) -> Path:
-    """Lazy accessor for bundled asset directories."""
-    from devflow.core.paths import assets_dir
+    """Locate a bundled asset directory shipped with the package."""
     return assets_dir() / subdir
 
 # Skills always injected on every phase.
@@ -36,8 +44,6 @@ DEFAULT_PHASE_TIMEOUT_S: int = 30 * 60
 
 def _phase_timeout(feature: Feature, phase: PhaseRecord) -> int:
     """Return the timeout for *phase*, preferring the workflow YAML value."""
-    from devflow.core.workflow import load_workflow
-
     try:
         wf = load_workflow(feature.workflow)
         for phase_def in wf.phases:
@@ -193,13 +199,13 @@ def _build_retry_context(feature: Feature) -> str:
 
     parts = [f"# Tentatives précédentes ({retry})\n"]
 
+    from devflow.integrations.git import get_fix_commit_log
+
     commit_log = ""
     try:
-        from devflow.integrations.git import get_fix_commit_log
         commit_log = get_fix_commit_log()
     except (subprocess.SubprocessError, OSError):
-        import logging
-        logging.getLogger(__name__).warning("Could not read fix commit log")
+        log.warning("Could not read fix commit log", exc_info=True)
 
     gate_json = read_artifact(feature.id, "gate.json")
 
@@ -315,7 +321,6 @@ def _get_phase_instructions(phase_name: str, workflow: str = "") -> str:
     (the caller handles the single commit).
     """
     if workflow == "quick" and phase_name == PhaseName.IMPLEMENTING:
-        from devflow.core.phases import INSTRUCTIONS_IMPLEMENTING_QUICK
         return INSTRUCTIONS_IMPLEMENTING_QUICK
     try:
         return get_spec(phase_name).instructions
@@ -338,12 +343,11 @@ def execute_phase(
     The final phase-summary chip is rendered by the caller from the returned
     PhaseMetrics — keeps the runner focused on I/O.
     """
-    from devflow.core.formatting import format_tool_line
-
     # Lazy import: PhaseSpinner lives in ui/ which orchestration/ should not
-    # import at module level.  Kept here because the spinner is tightly
-    # coupled to the execute loop and injecting it via callback would add
-    # complexity without real benefit.
+    # import at module level.  Kept lazy because the spinner is tightly
+    # coupled to the live execute loop and injecting it via callback would
+    # add complexity without real benefit; the layering is documented in
+    # CLAUDE.md.
     from devflow.ui.spinner import PhaseSpinner
 
     backend = get_backend()

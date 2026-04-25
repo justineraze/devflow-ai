@@ -135,19 +135,24 @@ def _migrate_state_json(base: Path | None = None) -> dict[str, Any]:
     return migrated
 
 
-def load_config(base: Path | None = None) -> DevflowConfig:
-    """Load project config from .devflow/config.yaml.
+# Process-scoped cache, keyed by config path. Invalidated by mtime so
+# external edits are picked up automatically. Same pattern as load_state
+# in workflow.py — keep them aligned if either changes.
+_config_cache: dict[Path, tuple[float, DevflowConfig]] = {}
 
-    Handles migrations from gate.yaml and state.json on first load.
-    Returns defaults when the config file is absent.
-    """
-    path = _config_path(base)
+
+def clear_config_cache() -> None:
+    """Drop the in-memory config cache (used in tests)."""
+    _config_cache.clear()
+
+
+def _load_config_uncached(path: Path, base: Path | None) -> DevflowConfig:
+    """Read config from disk, run any pending migrations, and return it."""
     config = DevflowConfig()
 
     if path.is_file():
         raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            # Flatten nested sections for Pydantic without mutating *raw*.
             gate_raw = raw.get("gate")
             linear_raw = raw.get("linear")
             config = DevflowConfig(
@@ -160,7 +165,6 @@ def load_config(base: Path | None = None) -> DevflowConfig:
                 linear=LinearConfig(**(linear_raw or {})),
             )
 
-    # Migrate gate.yaml if it exists.
     migrated_gate = _migrate_gate_yaml(base)
     if migrated_gate:
         if migrated_gate.lint and not config.gate.lint:
@@ -168,7 +172,6 @@ def load_config(base: Path | None = None) -> DevflowConfig:
         if migrated_gate.test and not config.gate.test:
             config.gate.test = migrated_gate.test
 
-    # Migrate state.json config fields.
     migrated_state = _migrate_state_json(base)
     if migrated_state:
         if migrated_state.get("stack") and not config.stack:
@@ -178,11 +181,39 @@ def load_config(base: Path | None = None) -> DevflowConfig:
         if migrated_state.get("linear_team") and not config.linear.team:
             config.linear.team = migrated_state["linear_team"]
 
-    # Persist merged config if migrations occurred.
     if migrated_gate or migrated_state:
         save_config(config, base)
 
     return config
+
+
+def load_config(base: Path | None = None) -> DevflowConfig:
+    """Load project config from .devflow/config.yaml.
+
+    Handles migrations from gate.yaml and state.json on first load.
+    Returns defaults when the config file is absent.
+
+    Cached by mtime so subsequent calls within a build don't re-parse
+    the YAML — the build loop calls this 8–10 times across modules.
+    """
+    path = _config_path(base)
+    if path.is_file():
+        mtime = path.stat().st_mtime
+        cached = _config_cache.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1].model_copy(deep=True)
+        config = _load_config_uncached(path, base)
+        # Re-stat: migrations may have written the file.
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        _config_cache[path] = (mtime, config)
+        return config.model_copy(deep=True)
+
+    # No file on disk — return defaults without caching (the file may
+    # appear between calls and we don't want to mask that).
+    return _load_config_uncached(path, base)
 
 
 # ── Save ───────────────────────────────────────────────────────────
@@ -227,4 +258,5 @@ def save_config(config: DevflowConfig, base: Path | None = None) -> Path:
 
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True) if data else ""
     atomic_write_text(path, content)
+    _config_cache.pop(path, None)
     return path

@@ -40,7 +40,7 @@ def _api_key(base: Path | None = None) -> str | None:
     root = base or Path.cwd()
     key_file = root / ".devflow" / "linear.key"
     if key_file.is_file():
-        content = key_file.read_text().strip()
+        content = key_file.read_text(encoding="utf-8").strip()
         if content:
             return content
 

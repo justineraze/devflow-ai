@@ -20,7 +20,7 @@ def load_settings(path: Path) -> tuple[dict[str, Any], str | None]:
         return {}, None
 
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data, None
     except json.JSONDecodeError as exc:
         return {}, f"invalid JSON in {path.name}: {exc}"

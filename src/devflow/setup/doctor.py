@@ -113,7 +113,7 @@ def check_devflow_init(base: Path | None = None) -> CheckResult:
         )
 
     try:
-        raw = state_file.read_text()
+        raw = state_file.read_text(encoding="utf-8")
         state = WorkflowState.model_validate_json(raw)
         n_features = len(state.features)
         config = load_config(base)

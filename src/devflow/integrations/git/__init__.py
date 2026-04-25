@@ -1,22 +1,21 @@
-"""Git integrations — facade module.
+"""Git integrations — public façade.
 
-Split into focused submodules; re-exports preserved for existing consumers.
+Exposes only the high-level operations the build loop, sync, and CLI
+need.  Internal helpers (numstat parsing, regex-based predicates, raw
+porcelain output…) live in submodules and must be imported from there
+directly when needed in tests.
 
-Note: ``collect_phase_result`` and ``persist_files_summary`` were moved to
-``devflow.orchestration.phase_artifacts`` because they bridge git output
-and domain concerns (PhaseResult, CRITICAL_PATH_PATTERNS) — keeping them
-here would create an integrations→core coupling that should not exist.
+Note: ``collect_phase_result`` and ``persist_files_summary`` were moved
+to :mod:`devflow.orchestration.phase_artifacts` because they bridge git
+output and domain concerns (PhaseResult, CRITICAL_PATH_PATTERNS) —
+keeping them here would create an integrations→core coupling that
+should not exist.
 """
 
 from __future__ import annotations
 
 from .commit_message import build_commit_message, build_pr_title
-from .pr_body import (
-    build_pr_body,
-    parse_plan_changes,
-    parse_plan_summary,
-    push_and_create_pr,
-)
+from .pr_body import build_pr_body, push_and_create_pr
 from .repo import (
     DiffSummary,
     branch_name,
@@ -32,16 +31,10 @@ from .repo import (
     get_gone_branches,
     get_head_sha,
     get_untracked_files,
-    git_log_numstat,
-    git_status_porcelain,
-    has_commits_ahead,
     is_worktree_dirty,
-    list_worktrees,
     main_repo_root,
     push_branch,
     remove_worktree,
-    reset_to_sha,
-    revert_head,
     switch_and_pull_main,
     switch_branch,
 )
@@ -72,19 +65,11 @@ __all__ = [
     "get_gone_branches",
     "get_head_sha",
     "get_untracked_files",
-    "git_log_numstat",
-    "git_status_porcelain",
-    "has_commits_ahead",
     "is_worktree_dirty",
-    "list_worktrees",
     "main_repo_root",
-    "parse_plan_changes",
-    "parse_plan_summary",
     "push_and_create_pr",
     "push_branch",
     "remove_worktree",
-    "reset_to_sha",
-    "revert_head",
     "switch_and_pull_main",
     "switch_branch",
 ]

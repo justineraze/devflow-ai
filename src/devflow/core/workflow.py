@@ -23,9 +23,9 @@ from devflow.core.models import (
     PhaseStatus,
     WorkflowState,
 )
-from devflow.core.workflow_def import PhaseDefinition, WorkflowDefinition
 from devflow.core.paths import atomic_write_text
 from devflow.core.paths import workflows_dir as _workflows_dir
+from devflow.core.workflow_def import PhaseDefinition, WorkflowDefinition
 
 # Default location for project state.
 DEVFLOW_DIR = Path(".devflow")
@@ -67,7 +67,7 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
     if not path.exists():
         raise FileNotFoundError(f"Workflow not found: {path}")
 
-    raw = yaml.safe_load(path.read_text())
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     phases = [PhaseDefinition(**p) for p in raw.get("phases", [])]
     wf = WorkflowDefinition(
         name=raw.get("name", name),
@@ -109,7 +109,7 @@ def load_state(base: Path | None = None) -> WorkflowState:
     cached = _state_cache.get(state_file)
     if cached and cached[0] == mtime:
         return cached[1].model_copy(deep=True)
-    raw = json.loads(state_file.read_text())
+    raw = json.loads(state_file.read_text(encoding="utf-8"))
     state = WorkflowState.model_validate(raw)
     _state_cache[state_file] = (mtime, state)
     return state.model_copy(deep=True)

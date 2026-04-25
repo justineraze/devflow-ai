@@ -8,6 +8,7 @@ and makes diffs easy to review.
 from __future__ import annotations
 
 import json
+from collections import deque
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -151,14 +152,22 @@ def append_build_metrics(record: BuildMetrics, base: Path | None = None) -> None
     """Append a build record to the metrics JSONL file."""
     path = _metrics_path(base)
     line = json.dumps(asdict(record), separators=(",", ":"))
-    with path.open("a") as f:
+    with path.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
 def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics]:
-    """Read the last *limit* build records, most recent first."""
+    """Read the last *limit* build records, most recent first.
+
+    Uses a bounded deque so memory is O(limit) regardless of how many
+    historical records the JSONL file contains — the previous version
+    parsed the whole file just to slice the tail off, which got slower
+    with every successful build.
+    """
     path = _metrics_path(base)
     if not path.exists():
+        return []
+    if limit <= 0:
         return []
 
     # Known fields for forward-compatible deserialization: ignore any
@@ -166,7 +175,7 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
     _build_fields = {f.name for f in fields(BuildMetrics)}
     _phase_fields = {f.name for f in fields(PhaseSnapshot)}
 
-    records: list[BuildMetrics] = []
+    tail: deque[BuildMetrics] = deque(maxlen=limit)
     with path.open(encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
@@ -175,15 +184,15 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
             try:
                 data = json.loads(stripped)
                 raw_phases = data.pop("phases", [])
-                # Filter unknown fields to prevent TypeError on new fields.
                 known_data = {k: v for k, v in data.items() if k in _build_fields}
                 rec = BuildMetrics(**known_data)
                 rec.phases = [
                     PhaseSnapshot(**{k: v for k, v in p.items() if k in _phase_fields})
                     for p in raw_phases
                 ]
-                records.append(rec)
+                tail.append(rec)
             except (json.JSONDecodeError, TypeError, KeyError, ValueError):
                 continue
 
-    return list(reversed(records[-limit:]))
+    # Most-recent-first.
+    return list(reversed(tail))

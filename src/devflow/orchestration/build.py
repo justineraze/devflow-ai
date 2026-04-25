@@ -37,19 +37,12 @@ from devflow.core.models import (
 )
 from devflow.core.phases import get_spec
 from devflow.core.workflow import load_state, mutate_feature
+from devflow.integrations import git
 from devflow.integrations.gate import run_gate_phase
-from devflow.integrations.git import (
-    branch_name,
-    commit_changes,
-    create_branch,
-    create_worktree,
-    get_head_sha,
-    get_untracked_files,
-    main_repo_root,
-    push_and_create_pr,
-    switch_branch,
-)
+from devflow.integrations.git import branch_name, main_repo_root
+from devflow.integrations.git.repo import git_status_porcelain
 from devflow.integrations.git.smart_messages import generate_commit_message
+from devflow.orchestration import runner
 from devflow.orchestration.events import BuildCallbacks
 from devflow.orchestration.model_routing import get_phase_agent, resolve_model
 from devflow.orchestration.phase_artifacts import (
@@ -74,7 +67,6 @@ from devflow.orchestration.review import (
     setup_re_review,
     should_re_review,
 )
-from devflow.orchestration.runner import execute_phase
 
 if TYPE_CHECKING:
     from devflow.core.metrics import PhaseResult
@@ -105,7 +97,7 @@ def _execute_phase(
             base, stack=stack,
             feature_id=feature.id, base_sha=base_sha,
         )
-    return execute_phase(feature, phase, agent_name, verbose=verbose)
+    return runner.execute_phase(feature, phase, agent_name, verbose=verbose)
 
 
 # ── Planning loop ─────────────────────────────────────────────────
@@ -211,16 +203,16 @@ def _handle_post_phase_commit(
 ) -> None:
     """Auto-commit after implementing/fixing and record metrics.
 
-    The diff between *pre_phase_sha* and HEAD is collected once. If the
-    agent left uncommitted changes we run a second commit and re-collect
-    only the new commit info — never the full diff a second time.
+    Detects uncommitted changes with a single ``git status --porcelain``
+    (cheap), commits them, then collects the full phase result exactly
+    once.  The previous version called :func:`collect_phase_result`
+    twice on every code phase, doubling the git log/numstat work.
     """
-    phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
-
-    if phase_result.uncommitted_changes:
+    if git_status_porcelain():
         msg = generate_commit_message(feature, phase=phase.name)
-        if commit_changes(msg, exclude=initial_untracked):
-            phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
+        git.commit_changes(msg, exclude=initial_untracked)
+
+    phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
     callbacks.on_phase_success(phase.name, elapsed, metrics)
     callbacks.on_phase_commits(phase_result)
@@ -283,6 +275,46 @@ def _maybe_re_review(
     return None
 
 
+# ── Post-phase dispatch ───────────────────────────────────────────
+
+
+def _dispatch_post_phase_success(
+    phase_type: PhaseType,
+    feature: Feature,
+    phase: PhaseRecord,
+    pre_phase_sha: str,
+    output: str,
+    metrics: PhaseMetrics,
+    elapsed: float,
+    model_label: str,
+    initial_untracked: list[str],
+    totals: BuildTotals,
+    callbacks: BuildCallbacks,
+    base: Path | None,
+    base_branch: str,
+) -> None:
+    """Route a successful phase to its type-specific post-handler.
+
+    Replaces the inline ``if/elif spec.phase_type == ...`` in the
+    execution loop, keeping the loop a pure orchestrator.
+    """
+    if phase_type is PhaseType.GATE:
+        callbacks.on_gate_panel(feature.id, base)
+        totals.add(phase.name, metrics, elapsed, model=model_label)
+        return
+
+    if phase_type is PhaseType.CODE:
+        _handle_post_phase_commit(
+            feature, phase, pre_phase_sha, True, output, metrics,
+            elapsed, model_label, initial_untracked, totals, callbacks,
+            base, base_branch,
+        )
+        return
+
+    callbacks.on_phase_success(phase.name, elapsed, metrics)
+    totals.add(phase.name, metrics, elapsed, model=model_label)
+
+
 # ── Execution loop ────────────────────────────────────────────────
 
 
@@ -315,7 +347,7 @@ def _run_execution_loop(
 
         spec = get_spec(phase.name)
         is_code_phase = spec.phase_type == PhaseType.CODE
-        pre_phase_sha = get_head_sha(short=False) if is_code_phase else ""
+        pre_phase_sha = git.get_head_sha(short=False) if is_code_phase else ""
 
         start = time.monotonic()
         success, output, metrics = _execute_phase(
@@ -326,19 +358,11 @@ def _run_execution_loop(
 
         if success:
             complete_phase(feature.id, phase.name, output, base)
-
-            if spec.phase_type == PhaseType.GATE:
-                callbacks.on_gate_panel(feature.id, base)
-                totals.add(phase.name, metrics, elapsed, model=model_label)
-            elif is_code_phase:
-                _handle_post_phase_commit(
-                    feature, phase, pre_phase_sha, success, output, metrics,
-                    elapsed, model_label, initial_untracked, totals, callbacks,
-                    base, base_branch,
-                )
-            else:
-                callbacks.on_phase_success(phase.name, elapsed, metrics)
-                totals.add(phase.name, metrics, elapsed, model=model_label)
+            _dispatch_post_phase_success(
+                spec.phase_type, feature, phase, pre_phase_sha, output, metrics,
+                elapsed, model_label, initial_untracked, totals, callbacks,
+                base, base_branch,
+            )
 
             updated = _maybe_re_review(feature, phase, output, base)
             if updated is not None:
@@ -416,7 +440,7 @@ def _finalize_build(
 
     state = load_state(base)
     final = state.get_feature(feature.id) or feature
-    pr_url = push_and_create_pr(
+    pr_url = git.push_and_create_pr(
         final, branch, exclude=initial_untracked, base_branch=base_branch,
     )
 
@@ -474,7 +498,7 @@ def execute_build_loop(
     totals = BuildTotals()
     branch = ""
 
-    initial_sha = get_head_sha(short=False)
+    initial_sha = git.get_head_sha(short=False)
 
     if create_pr:
         initial_untracked = _setup_branch(
@@ -483,7 +507,7 @@ def execute_build_loop(
         branch = branch_name(feature.id)
         cb.on_banner(feature, branch, stack)
     else:
-        initial_untracked = get_untracked_files()
+        initial_untracked = git.get_untracked_files()
         cb.on_do_banner(feature)
 
     if is_resuming and feedback is not None:
@@ -506,7 +530,7 @@ def execute_build_loop(
         feature = _refresh_feature(feature.id, base) or feature
         append_build_metrics(build_metrics_from(feature, totals, success=False), base)
         if not create_pr and initial_sha:
-            current_sha = get_head_sha(short=False)
+            current_sha = git.get_head_sha(short=False)
             if current_sha != initial_sha:
                 cb.on_revert_hint(feature.id, initial_sha)
         return False
@@ -518,7 +542,7 @@ def execute_build_loop(
     record = build_metrics_from(feature, totals, success=True)
     append_build_metrics(record, base)
 
-    current_sha = get_head_sha()
+    current_sha = git.get_head_sha()
     cb.on_build_summary(feature, totals, None, "", None)
     if current_sha != initial_sha[:7]:
         cb.on_do_success(current_sha, initial_sha)
@@ -534,8 +558,8 @@ def _setup_branch(
 ) -> list[str]:
     """Set up git branch or worktree, return initial untracked files."""
     if worktree:
-        _branch, wt_path = create_worktree(feature.id)
-        initial_untracked = get_untracked_files(cwd=wt_path)
+        _branch, wt_path = git.create_worktree(feature.id)
+        initial_untracked = git.get_untracked_files(cwd=wt_path)
         if is_resuming:
             reset_planning_phases(feature.id, base)
             with mutate_feature(feature.id, base) as tracked:
@@ -543,15 +567,15 @@ def _setup_branch(
                     tracked.metadata.feedback = feedback
         return initial_untracked
 
-    initial_untracked = get_untracked_files()
+    initial_untracked = git.get_untracked_files()
     branch = branch_name(feature.id)
     if is_resuming:
         reset_planning_phases(feature.id, base)
         with mutate_feature(feature.id, base) as tracked:
             if tracked:
                 tracked.metadata.feedback = feedback
-        switch_branch(branch)
+        git.switch_branch(branch)
     else:
-        create_branch(feature.id)
+        git.create_branch(feature.id)
 
     return initial_untracked

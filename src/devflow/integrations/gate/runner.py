@@ -22,8 +22,14 @@ from devflow.integrations.gate.secrets import scan_secrets
 _CUSTOM_TIMEOUTS: dict[str, int] = {"lint": 60, "test": 120}
 
 
-def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
-    """Run a custom shell command and return a CheckResult."""
+def _run_custom_check(
+    name: str, shell_cmd: str, cwd: Path, env: dict[str, str] | None = None,
+) -> CheckResult:
+    """Run a custom shell command and return a CheckResult.
+
+    *env* may be supplied by the caller to share a venv-aware environment
+    across parallel checks; otherwise it is computed lazily.
+    """
     timeout = _CUSTOM_TIMEOUTS.get(name, 60)
     try:
         result = subprocess.run(
@@ -32,7 +38,7 @@ def _run_custom_check(name: str, shell_cmd: str, cwd: Path) -> CheckResult:
             text=True,
             cwd=str(cwd),
             timeout=timeout,
-            env=venv_env(cwd),
+            env=env if env is not None else venv_env(cwd),
         )
     except subprocess.TimeoutExpired:
         return CheckResult(name=name, passed=False, message=f"{name} timed out")
@@ -51,10 +57,11 @@ def _submit_custom_commands(
     pool: ThreadPoolExecutor,
     config: dict[str, str],
     cwd: Path,
+    env: dict[str, str],
 ) -> list[Future[CheckResult]]:
     """Submit custom gate checks to the thread pool."""
     return [
-        pool.submit(_run_custom_check, name, cmd, cwd)
+        pool.submit(_run_custom_check, name, cmd, cwd, env)
         for name, cmd in config.items()
     ]
 
@@ -63,11 +70,12 @@ def _submit_stack_commands(
     pool: ThreadPoolExecutor,
     stack: str | None,
     cwd: Path,
+    env: dict[str, str],
 ) -> list[Future[CheckResult]]:
     """Submit stack-specific gate checks to the thread pool."""
     checks = checks_for_stack(stack)
     return [
-        pool.submit(run_command_check, c.name, c.cmd, cwd, c.timeout, c.parse_output)
+        pool.submit(run_command_check, c.name, c.cmd, cwd, c.timeout, c.parse_output, env)
         for c in checks
     ]
 
@@ -85,14 +93,18 @@ def run_gate(
         stack: Tech stack name (e.g. "python", "typescript", "php").
     """
     cwd = base or Path.cwd()
+    # Compute the venv-aware env once per build — every check shares the
+    # same cwd, and ``os.environ.copy()`` per check adds up across the
+    # 6+ parallel workers.
+    env = venv_env(cwd)
     custom_config = load_gate_config(cwd)
     report = GateReport(custom=custom_config is not None)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         if custom_config is not None:
-            cmd_futures = _submit_custom_commands(pool, custom_config, cwd)
+            cmd_futures = _submit_custom_commands(pool, custom_config, cwd, env)
         else:
-            cmd_futures = _submit_stack_commands(pool, stack, cwd)
+            cmd_futures = _submit_stack_commands(pool, stack, cwd, env)
 
         secrets_future = pool.submit(scan_secrets, base, ctx)
         complexity_future = pool.submit(check_complexity, base, ctx=ctx)

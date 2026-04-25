@@ -24,22 +24,29 @@ from devflow.core.workflow import load_workflow
 
 DEFAULT_TIER = ModelTier.STANDARD
 
-# Legacy string → ModelTier mapping for workflow YAML overrides that
-# still use Claude-specific names.
-_LEGACY_MODEL_MAP: dict[str, ModelTier] = {
-    "haiku": ModelTier.FAST,
-    "sonnet": ModelTier.STANDARD,
-    "opus": ModelTier.THINKING,
-    # Also accept tier names directly.
+# String → ModelTier mapping for workflow YAML overrides.  Accepts both
+# canonical tier names (fast/standard/thinking) and Claude-specific
+# legacy aliases (haiku/sonnet/opus) for backwards compatibility.
+# Other backends should add their own aliases here when needed.
+_TIER_ALIASES: dict[str, ModelTier] = {
+    # Canonical names.
     "fast": ModelTier.FAST,
     "standard": ModelTier.STANDARD,
     "thinking": ModelTier.THINKING,
+    # Claude legacy aliases.
+    "haiku": ModelTier.FAST,
+    "sonnet": ModelTier.STANDARD,
+    "opus": ModelTier.THINKING,
 }
 
 
-def _tier_from_legacy(name: str) -> ModelTier:
-    """Convert a legacy model name or tier name to ModelTier."""
-    return _LEGACY_MODEL_MAP.get(name.lower(), DEFAULT_TIER)
+def _tier_from_string(name: str) -> ModelTier:
+    """Convert a YAML model string (canonical tier or legacy alias) to ModelTier."""
+    return _TIER_ALIASES.get(name.lower(), DEFAULT_TIER)
+
+
+# Backwards-compat alias retained for any external imports.
+_tier_from_legacy = _tier_from_string
 
 
 # Stack → specialized developer agent.

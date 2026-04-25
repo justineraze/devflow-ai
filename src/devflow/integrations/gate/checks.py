@@ -69,6 +69,7 @@ def run_command_check(
     cwd: Path,
     timeout: int = 60,
     parse_output: ParseOutput | None = None,
+    env: dict[str, str] | None = None,
 ) -> CheckResult:
     """Run an external tool and return a CheckResult.
 
@@ -79,6 +80,8 @@ def run_command_check(
         timeout: Maximum seconds before killing the process.
         parse_output: Optional callback ``(returncode, stdout) -> (message, details)``
             for custom summary extraction. When *None*, a generic summary is used.
+        env: Pre-computed venv-aware environment (saves ``os.environ.copy()``
+            when running many checks in parallel).  Built lazily when *None*.
 
     Returns:
         CheckResult with *passed=True* when the tool exits 0 **or** is missing.
@@ -91,7 +94,7 @@ def run_command_check(
             text=True,
             cwd=str(cwd),
             timeout=timeout,
-            env=venv_env(cwd),
+            env=env if env is not None else venv_env(cwd),
         )
     except FileNotFoundError:
         return CheckResult(

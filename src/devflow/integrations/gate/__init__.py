@@ -1,45 +1,27 @@
-"""Quality gate package — facade re-exporting public names.
+"""Quality gate package — public façade.
 
-Consumers can continue to import from ``devflow.integrations.gate`` without
-any changes after the gate.py monolith was split into focused submodules.
+Exposes only the high-level operations callers need.  Implementation
+details (parsers, secret patterns, stack-specific checks…) live in
+submodules and must be imported from there directly when needed in tests.
 
-``render_gate_report`` now lives in ``devflow.ui.gate_panel`` — import it
-from there directly (not from this facade) to avoid circular imports.
+``render_gate_report`` lives in ``devflow.ui.gate_panel`` — import it
+from there to avoid circular imports.
 """
 
 from __future__ import annotations
 
-from devflow.integrations.gate.checks import STACK_CHECKS, checks_for_stack, run_command_check
-from devflow.integrations.gate.complexity import check_complexity
-from devflow.integrations.gate.config import load_gate_config
+# Backwards-compat re-export — the test suite still imports STACK_CHECKS
+# from this façade.  Internal modules should import from .checks directly.
+from devflow.integrations.gate.checks import STACK_CHECKS  # noqa: F401
 from devflow.integrations.gate.context import GateContext, build_context
-from devflow.integrations.gate.module_size import check_module_size
-from devflow.integrations.gate.report import CheckDef, CheckResult, GateReport, ParseOutput
+from devflow.integrations.gate.report import CheckResult, GateReport
 from devflow.integrations.gate.runner import run_gate, run_gate_phase
-from devflow.integrations.gate.secrets import (
-    SECRET_PATTERNS,
-    SKIP_DIRS,
-    SKIP_EXTENSIONS,
-    scan_secrets,
-)
 
 __all__ = [
-    "CheckDef",
     "CheckResult",
     "GateContext",
     "GateReport",
-    "ParseOutput",
-    "SECRET_PATTERNS",
-    "SKIP_DIRS",
-    "SKIP_EXTENSIONS",
-    "STACK_CHECKS",
     "build_context",
-    "check_complexity",
-    "check_module_size",
-    "checks_for_stack",
-    "load_gate_config",
-    "run_command_check",
     "run_gate",
     "run_gate_phase",
-    "scan_secrets",
 ]

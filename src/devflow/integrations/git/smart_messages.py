@@ -42,8 +42,8 @@ def _call_one_shot(system: str, user: str) -> str | None:
             model=model,
             timeout=_ONE_SHOT_TIMEOUT,
         )
-    except Exception as exc:  # noqa: BLE001
-        logging.getLogger(__name__).debug("one_shot failed: %s", exc)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).debug("one_shot failed", exc_info=True)
         return None
 
 
