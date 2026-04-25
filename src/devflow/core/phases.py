@@ -24,7 +24,15 @@ from devflow.core.models import FeatureStatus, PhaseName, PhaseType
 
 
 class PhaseSpec(BaseModel):
-    """Static metadata for one phase of the build state machine."""
+    """Static metadata for one phase of the build state machine.
+
+    ``post_phase`` and ``on_failure`` are string keys into a dispatch
+    table maintained by :mod:`devflow.orchestration.build`. They stay as
+    strings (not callables) so the spec remains a pure ``BaseModel`` —
+    serializable, hashable, comparable — while still letting the build
+    loop add a new phase by registering exactly one handler under each
+    key. The build loop never branches on ``phase_type`` directly.
+    """
 
     model_config = {"frozen": True}
 
@@ -36,6 +44,14 @@ class PhaseSpec(BaseModel):
     context_deps: tuple[PhaseName, ...] = ()
     instructions: str = ""
     runs_claude: bool = True
+    post_phase: str | None = None
+    """Handler key for the post-success path. Resolved against the
+    dispatcher in :mod:`devflow.orchestration.build`. ``None`` falls
+    back to a generic no-op (just record metrics)."""
+
+    on_failure: str | None = None
+    """Handler key for the failure path. ``None`` falls back to the
+    standard fail-and-record-metrics behaviour."""
 
     @model_validator(mode="after")
     def _no_self_dep(self) -> Self:
@@ -145,6 +161,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
         skills=("devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_IMPLEMENTING,
+        post_phase="commit_changes",
     ),
     PhaseName.REVIEWING: PhaseSpec(
         name=PhaseName.REVIEWING,
@@ -163,6 +180,7 @@ PHASES: dict[PhaseName, PhaseSpec] = {
         skills=("devflow-debug", "devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.REVIEWING,),
         instructions=_INSTRUCTIONS_FIXING,
+        post_phase="commit_changes",
     ),
     PhaseName.GATE: PhaseSpec(
         name=PhaseName.GATE,
@@ -173,6 +191,8 @@ PHASES: dict[PhaseName, PhaseSpec] = {
         context_deps=(),
         instructions="",
         runs_claude=False,
+        post_phase="render_gate_panel",
+        on_failure="gate_retry",
     ),
 }
 

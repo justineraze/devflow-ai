@@ -11,6 +11,7 @@ actual API/CLI call.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 
 from devflow.core.models import Feature
@@ -59,29 +60,107 @@ def _truncate_diff(diff: str, max_lines: int = _MAX_DIFF_LINES) -> str:
 
 
 _TITLE_SYSTEM = (
-    "Summarize this development request in ONE line, max 50 chars, "
-    "in English, lowercase, no period. This will be used as git "
-    "commit summary and PR title. Examples:\n"
+    "Summarize this development request as a single git-commit subject.\n\n"
+    "Rules:\n"
+    "- ONE line, max 50 characters, English, lowercase\n"
+    "- No period, no surrounding quotes, no markdown\n"
+    "- Imperative mood, present tense (\"add\", not \"added\" or \"adding\")\n"
+    "- Describe the *intent*, do NOT echo the user's wording verbatim\n"
+    "- Skip filler words (\"please\", \"can you\", \"the codebase\", etc.)\n"
+    "- Do NOT include a Conventional Commits prefix (no `feat:` / `fix:`),\n"
+    "  the build pipeline adds the type later from the diff\n\n"
+    "Examples:\n"
     "- add epic support to state machine\n"
-    "- refactor game controller into thin controller\n"
-    "- fix cache invalidation on user logout"
+    "- extract planning loop into helper\n"
+    "- prevent null state_id in linear sync\n"
+    "- consolidate console layering violations"
 )
 
 
 def generate_feature_title(prompt: str) -> str:
     """Generate a concise feature title from a long user prompt.
 
-    Falls back to the first 80 characters of the prompt on failure.
+    The result is a *plain* commit-style description (no
+    ``feat:``/``fix:`` prefix — the prefix is added downstream by
+    :func:`build_commit_message`).  Falls back to the first 80
+    characters of the prompt on backend failure.
     """
     result = _call_one_shot(_TITLE_SYSTEM, prompt)
     if result:
         # Strip quotes/period the model might add.
         result = result.strip('"\'').rstrip(".")
-        if len(result) <= 80:
+        # Drop accidental Conventional Commits prefix the model still
+        # emitted despite the instruction not to ("feat: ", "fix: " …).
+        result = re.sub(
+            r"^(feat|fix|refactor|docs|test|chore|perf|build|ci|style|revert)"
+            r"(\([^)]+\))?:\s+",
+            "",
+            result,
+            flags=re.IGNORECASE,
+        )
+        if result and len(result) <= 80:
             return result
     # Fallback: first line, truncated.
     first_line = prompt.split("\n", 1)[0].strip()
     return first_line[:80]
+
+
+# ── PR title ───────────────────────────────────────────────────────
+
+
+_PR_TITLE_SYSTEM = (
+    "Generate a Conventional Commits PR title from this diff.\n"
+    "Format: <type>(<scope>): <description>\n\n"
+    "Rules:\n"
+    "- type: feat | fix | refactor | docs | test | chore | perf\n"
+    "- scope: the main module touched, optional, omit when >3 modules\n"
+    "- description: max 60 chars, lowercase, imperative, no period\n"
+    "- Pick the type that matches the *actual diff*, not the user's prompt\n"
+    "- ONE line only, no trailing comment, no quotes, no markdown\n\n"
+    "Examples:\n"
+    "- feat(gate): add custom gate config via yaml\n"
+    "- fix(linear): prevent null state_id in sync\n"
+    "- refactor(build): extract planning loop into helper\n"
+    "- docs: clarify smoke test cadence in CLAUDE.md"
+)
+
+# Maximum length for a PR title we'll trust from the model.
+# Longer values fall back to the deterministic template.
+MAX_PR_TITLE_LEN = 72
+
+# Conventional Commits prefix anchor — used to validate generated titles.
+_CC_PREFIX_RE = re.compile(
+    r"^(feat|fix|refactor|docs|test|chore|perf|build|ci|style|revert)"
+    r"(\([^)]+\))?: \S",
+)
+
+
+def generate_pr_title(feature: Feature, diff: str = "") -> str:
+    """Generate a Conventional Commits PR title from the actual diff.
+
+    The model is given the diff so the type prefix reflects what
+    *changed*, not what the user *asked for*.  Falls back to the
+    deterministic :func:`build_pr_title` template on any failure or when
+    the model output does not match the Conventional Commits prefix.
+    """
+    from .commit_message import build_pr_title as _template_pr_title
+
+    if diff:
+        user_parts: list[str] = []
+        if feature.description:
+            user_parts.append(f"Feature context: {feature.description}")
+        user_parts.append(f"Diff:\n```\n{_truncate_diff(diff)}\n```")
+        result = _call_one_shot(_PR_TITLE_SYSTEM, "\n\n".join(user_parts))
+        if result:
+            first_line = result.split("\n", 1)[0].strip().strip('"\'').rstrip(".")
+            if (
+                first_line
+                and len(first_line) <= MAX_PR_TITLE_LEN
+                and _CC_PREFIX_RE.match(first_line)
+            ):
+                return first_line
+
+    return _template_pr_title(feature)
 
 
 # ── Commit messages ────────────────────────────────────────────────
@@ -91,15 +170,18 @@ _COMMIT_SYSTEM = (
     "Generate a Conventional Commits message for this diff.\n"
     "Format: <type>(<scope>): <description>\n\n"
     "Rules:\n"
-    "- type: feat, fix, refactor, docs, test, chore\n"
-    "- scope: the main module/file changed (optional, omit if >3 files)\n"
-    "- description: max 50 chars, lowercase, imperative mood, no period\n"
+    "- type: feat | fix | refactor | docs | test | chore | perf\n"
+    "- Pick the type that matches the *diff*, not the user prompt.\n"
+    "  Renames/extracts → refactor, new behavior → feat, bug repair → fix.\n"
+    "- scope: the main module touched (optional, omit if >3 modules)\n"
+    "- description: max 50 chars, lowercase, imperative, no period\n"
     "- If the diff is large, focus on the INTENT not the details\n"
-    "- ONE line only, no body\n\n"
+    "- ONE line only, no body, no markdown, no quotes\n\n"
     "Examples:\n"
     "- feat(gate): add custom gate config via yaml\n"
-    "- fix: prevent null state_id in linear sync\n"
-    "- refactor(build): extract planning loop into helper"
+    "- fix(linear): prevent null state_id in sync\n"
+    "- refactor(build): extract planning loop into helper\n"
+    "- test(orchestration): cover gate retry escalation"
 )
 
 

@@ -6,10 +6,12 @@ from unittest.mock import MagicMock, patch
 
 from devflow.core.models import Feature
 from devflow.integrations.git.smart_messages import (
+    _CC_PREFIX_RE,
     _truncate_diff,
     generate_commit_message,
     generate_feature_title,
     generate_pr_body,
+    generate_pr_title,
 )
 
 # ---------------------------------------------------------------------------
@@ -186,3 +188,100 @@ class TestGeneratePrBody:
         user_arg = mock_haiku.call_args[0][1]
         assert "Plan text" in user_arg
         assert "+5 files" in user_arg
+
+
+# ---------------------------------------------------------------------------
+# generate_pr_title — Conventional Commits enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestGeneratePrTitle:
+    """The PR title must always be a valid Conventional Commits subject.
+
+    Regression: previously the PR title was the truncated user prompt,
+    which did not satisfy the ``<type>(<scope>): <description>`` format.
+    """
+
+    def _feature(self, **kwargs: object) -> Feature:
+        defaults = {"id": "f-001", "description": "Add auth", "workflow": "standard"}
+        defaults.update(kwargs)
+        return Feature(**defaults)
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_returns_model_title_when_valid_cc_format(
+        self, mock_haiku: MagicMock,
+    ) -> None:
+        mock_haiku.return_value = "feat(auth): add login endpoint"
+        result = generate_pr_title(self._feature(), diff="+def login(): pass")
+        assert result == "feat(auth): add login endpoint"
+        assert _CC_PREFIX_RE.match(result)
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_strips_quotes_and_period(self, mock_haiku: MagicMock) -> None:
+        mock_haiku.return_value = '"feat: add login endpoint."'
+        result = generate_pr_title(self._feature(), diff="+code")
+        assert result == "feat: add login endpoint"
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_falls_back_when_model_drops_prefix(
+        self, mock_haiku: MagicMock,
+    ) -> None:
+        # Plain prose without a Conventional Commits prefix → reject.
+        mock_haiku.return_value = "add login endpoint"
+        result = generate_pr_title(self._feature(), diff="+code")
+        # Falls back to template build_pr_title("Add auth").
+        assert _CC_PREFIX_RE.match(result), result
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_falls_back_when_model_returns_too_long(
+        self, mock_haiku: MagicMock,
+    ) -> None:
+        mock_haiku.return_value = "feat: " + "x" * 200
+        result = generate_pr_title(self._feature(), diff="+code")
+        assert _CC_PREFIX_RE.match(result)
+        assert len(result) <= 80
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_falls_back_when_model_returns_none(
+        self, mock_haiku: MagicMock,
+    ) -> None:
+        mock_haiku.return_value = None
+        result = generate_pr_title(self._feature(), diff="+code")
+        assert _CC_PREFIX_RE.match(result)
+
+    def test_falls_back_when_diff_empty(self) -> None:
+        # No diff to feed the model → directly use the deterministic template.
+        result = generate_pr_title(self._feature(), diff="")
+        assert _CC_PREFIX_RE.match(result)
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_takes_only_first_line(self, mock_haiku: MagicMock) -> None:
+        mock_haiku.return_value = "feat: add login\n\nLong body"
+        result = generate_pr_title(self._feature(), diff="+code")
+        assert result == "feat: add login"
+
+
+class TestGenerateFeatureTitleStripsCcPrefix:
+    """Feature titles must NOT carry a Conventional Commits prefix.
+
+    Reason: ``build_commit_message`` adds the prefix downstream.  If the
+    model leaks one (e.g. emits ``feat: …``), we'd get ``feat: feat: …``.
+    """
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_strips_feat_prefix(self, mock_haiku: MagicMock) -> None:
+        mock_haiku.return_value = "feat: add caching layer"
+        result = generate_feature_title("please add caching")
+        assert result == "add caching layer"
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_strips_fix_with_scope(self, mock_haiku: MagicMock) -> None:
+        mock_haiku.return_value = "fix(auth): null pointer in login"
+        result = generate_feature_title("auth login bug")
+        assert result == "null pointer in login"
+
+    @patch("devflow.integrations.git.smart_messages._call_one_shot")
+    def test_keeps_clean_title(self, mock_haiku: MagicMock) -> None:
+        mock_haiku.return_value = "extract planning loop into helper"
+        result = generate_feature_title("refactor please")
+        assert result == "extract planning loop into helper"

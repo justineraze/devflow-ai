@@ -10,6 +10,7 @@ from devflow.integrations.git.repo import (
     branch_name,
     commit_changes,
     detect_base_branch,
+    get_orphan_feature_branches,
     get_untracked_files,
     has_commits_ahead,
 )
@@ -153,3 +154,74 @@ class TestHasCommitsAhead:
     def test_no_commits(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="0\n")
         assert has_commits_ahead() is False
+
+
+class TestGetOrphanFeatureBranches:
+    """Real-repo integration tests for orphan branch detection."""
+
+    def _init_repo(self, tmp_path: Path) -> Path:
+        subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@devflow.ai"],
+            cwd=tmp_path, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "commit.gpgsign", "false"],
+            cwd=tmp_path, capture_output=True,
+        )
+        (tmp_path / "x.py").write_text("x = 1\n")
+        subprocess.run(["git", "add", "-A"], cwd=tmp_path, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True,
+        )
+        return tmp_path
+
+    def test_detects_branch_with_zero_commits_ahead(self, tmp_path: Path) -> None:
+        repo = self._init_repo(tmp_path)
+        # Create a branch but stay on main, no commits added.
+        subprocess.run(
+            ["git", "branch", "feat/empty-orphan"],
+            cwd=repo, capture_output=True,
+        )
+        orphans = get_orphan_feature_branches(cwd=repo)
+        assert "feat/empty-orphan" in orphans
+
+    def test_skips_branch_with_commits(self, tmp_path: Path) -> None:
+        repo = self._init_repo(tmp_path)
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/with-work"],
+            cwd=repo, capture_output=True,
+        )
+        (repo / "y.py").write_text("y = 2\n")
+        subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "feat: y"], cwd=repo, capture_output=True,
+        )
+        # Switch back so it isn't the current branch (which is excluded).
+        subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True)
+
+        orphans = get_orphan_feature_branches(cwd=repo)
+        assert "feat/with-work" not in orphans
+
+    def test_skips_current_branch(self, tmp_path: Path) -> None:
+        repo = self._init_repo(tmp_path)
+        # Create and stay on the orphan branch.
+        subprocess.run(
+            ["git", "checkout", "-b", "feat/current-orphan"],
+            cwd=repo, capture_output=True,
+        )
+        orphans = get_orphan_feature_branches(cwd=repo)
+        assert "feat/current-orphan" not in orphans
+
+    def test_only_matches_prefix(self, tmp_path: Path) -> None:
+        repo = self._init_repo(tmp_path)
+        subprocess.run(
+            ["git", "branch", "release/1.0"],
+            cwd=repo, capture_output=True,
+        )
+        orphans = get_orphan_feature_branches(cwd=repo)
+        assert "release/1.0" not in orphans

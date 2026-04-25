@@ -10,7 +10,6 @@ from pathlib import Path
 from devflow.core.artifacts import load_phase_output
 from devflow.core.models import Feature
 
-from .commit_message import build_pr_title
 from .repo import (
     commit_changes,
     get_branch_diff_summary,
@@ -121,6 +120,20 @@ def _create_gh_pr(
     return None
 
 
+def _branch_diff_against(base_branch: str) -> str:
+    """Return the full ``git diff <base>..HEAD`` output."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", f"{base_branch}..HEAD"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
 def push_and_create_pr(
     feature: Feature,
     branch: str,
@@ -134,7 +147,11 @@ def push_and_create_pr(
     the build started stay out of the final PR.
     Returns the PR URL, or None if creation failed.
     """
-    from .smart_messages import generate_commit_message, generate_pr_body
+    from .smart_messages import (
+        generate_commit_message,
+        generate_pr_body,
+        generate_pr_title,
+    )
 
     # Safety net: commit anything left uncommitted.
     commit_changes(
@@ -153,5 +170,9 @@ def push_and_create_pr(
 
     plan = load_phase_output(feature.id, "planning") or ""
     body = generate_pr_body(feature, plan=plan, diff_stat=_format_diff_stat(base_branch))
-    title = build_pr_title(feature)
+    # PR title: build it from the actual diff so the Conventional Commits
+    # type reflects what changed (feat / fix / refactor / docs / …) rather
+    # than echoing the user's prompt verbatim.
+    diff = _branch_diff_against(base_branch)
+    title = generate_pr_title(feature, diff=diff)
     return _create_gh_pr(title, body, base_branch, Path.cwd())

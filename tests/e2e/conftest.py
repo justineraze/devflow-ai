@@ -95,7 +95,14 @@ def mock_claude(monkeypatch: pytest.MonkeyPatch) -> None:
     it to run_gate_phase directly), so this mock only affects planning,
     implementing, reviewing, fixing, etc.
     """
-    def _fake(feature: object, phase: object, agent_name: str, verbose: bool = False) -> tuple:  # type: ignore[type-arg]
+    def _fake(  # type: ignore[type-arg]
+        feature: object,
+        phase: object,
+        agent_name: str,
+        verbose: bool = False,
+        phase_tool_listener: object = None,
+    ) -> tuple:
+        del phase_tool_listener  # Mock doesn't drive UI.
         output = _CANNED.get(phase.name, "Phase completed.")  # type: ignore[union-attr]
         return True, output, PhaseMetrics()
 

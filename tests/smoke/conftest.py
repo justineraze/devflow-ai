@@ -62,7 +62,9 @@ def mini_python_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     monkeypatch.setattr(
         "devflow.integrations.git.push_and_create_pr",
-        lambda feature, branch, exclude=None: "https://github.com/test/repo/pull/1",
+        lambda feature, branch, exclude=None, base_branch="main": (
+            "https://github.com/test/repo/pull/1"
+        ),
     )
 
     return project

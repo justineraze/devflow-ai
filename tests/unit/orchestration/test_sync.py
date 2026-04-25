@@ -223,3 +223,95 @@ def test_keep_artifacts_skips_archiving(tmp_path: Path) -> None:
     # No .archive dir created.
     archive_dir = tmp_path / ".devflow" / ".archive"
     assert not archive_dir.exists()
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — prune_orphans default off
+# ---------------------------------------------------------------------------
+
+
+def test_sync_does_not_prune_orphans_by_default(tmp_path: Path) -> None:
+    """Without --prune-orphans, orphan feat/* branches are NOT deleted."""
+    _make_state(tmp_path, [])
+
+    with (
+        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
+        patch("devflow.integrations.git.switch_and_pull_main"),
+        patch("devflow.integrations.git.fetch_prune"),
+        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch(
+            "devflow.integrations.git.get_orphan_feature_branches",
+            return_value=["feat/orphan-1"],
+        ) as mock_orphans,
+        patch("devflow.integrations.git.delete_branch") as mock_del,
+        patch("devflow.orchestration.sync._current_branch", return_value="main"),
+    ):
+        result = run_sync(project_root=tmp_path)
+
+    # Orphan detector never called.
+    mock_orphans.assert_not_called()
+    # No deletions.
+    mock_del.assert_not_called()
+    assert result.branches_deleted == []
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — prune_orphans=True deletes orphans
+# ---------------------------------------------------------------------------
+
+
+def test_sync_prune_orphans_deletes_them(tmp_path: Path) -> None:
+    """With prune_orphans=True, orphan feat/* branches are deleted."""
+    _make_state(tmp_path, [])
+
+    with (
+        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
+        patch("devflow.integrations.git.switch_and_pull_main"),
+        patch("devflow.integrations.git.fetch_prune"),
+        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch(
+            "devflow.integrations.git.get_orphan_feature_branches",
+            return_value=["feat/orphan-1", "feat/orphan-2"],
+        ),
+        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync._current_branch", return_value="main"),
+    ):
+        result = run_sync(project_root=tmp_path, prune_orphans=True)
+
+    assert mock_del.call_count == 2
+    assert "feat/orphan-1" in result.branches_deleted
+    assert "feat/orphan-2" in result.branches_deleted
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — prune_orphans dedupes against gone branches
+# ---------------------------------------------------------------------------
+
+
+def test_sync_prune_orphans_dedupes_against_gone(tmp_path: Path) -> None:
+    """Branches already deleted in the gone-step are not deleted again."""
+    _make_state(tmp_path, [])
+
+    with (
+        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
+        patch("devflow.integrations.git.switch_and_pull_main"),
+        patch("devflow.integrations.git.fetch_prune"),
+        patch(
+            "devflow.integrations.git.get_gone_branches", return_value=["feat/old"],
+        ),
+        patch(
+            "devflow.integrations.git.get_orphan_feature_branches",
+            return_value=["feat/old", "feat/new-orphan"],
+        ),
+        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync._current_branch", return_value="main"),
+    ):
+        result = run_sync(project_root=tmp_path, prune_orphans=True)
+
+    # feat/old is deleted once (gone-step), feat/new-orphan once (orphan-step).
+    deleted = [c.args[0] for c in mock_del.call_args_list]
+    assert deleted.count("feat/old") == 1
+    assert deleted.count("feat/new-orphan") == 1
+    # branches_deleted reflects both, no duplicates beyond the same branch
+    # appearing once across both lists.
+    assert result.branches_deleted == ["feat/old", "feat/new-orphan"]

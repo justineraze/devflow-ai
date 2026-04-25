@@ -65,8 +65,10 @@ def test_quick_gate_passes_on_clean_code(
     fix the fixture before investigating generated code regressions.
     """
     from devflow.integrations.gate import run_gate
+    from devflow.integrations.gate.context import GateContext
 
-    report = run_gate(base=mini_python_smoke, stack="python")
+    ctx = GateContext(mode="audit")
+    report = run_gate(ctx, base=mini_python_smoke, stack="python")
     failed = [c for c in report.checks if not c.passed and not c.skipped]
     assert not failed, (
         "Baseline gate failed on the untouched fixture: "

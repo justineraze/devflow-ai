@@ -41,6 +41,7 @@ def run_sync(
     project_root: Path | None = None,
     dry_run: bool = False,
     keep_artifacts: bool = False,
+    prune_orphans: bool = False,
 ) -> SyncResult:
     """Orchestrate post-merge cleanup.
 
@@ -49,12 +50,16 @@ def run_sync(
     2. ``git switch main && git pull --ff-only``
     3. ``git fetch -p`` to prune stale remote-tracking branches.
     4. Delete local branches whose upstream is gone (squash-merged).
-    5. Unless *keep_artifacts*: archive features whose PR is merged.
+    5. If *prune_orphans*: also delete local ``feat/*`` branches with
+       zero commits ahead of the base branch (orphans left by rejected
+       plans).  **Destructive** — opt-in only.
+    6. Unless *keep_artifacts*: archive features whose PR is merged.
 
     Args:
         project_root: Root of the git repo. Defaults to ``Path.cwd()``.
         dry_run: Print what would happen without mutating anything.
-        keep_artifacts: Skip step 5 (archiving).
+        keep_artifacts: Skip step 6 (archiving).
+        prune_orphans: Also delete orphan ``feat/*`` branches (step 5).
 
     Returns:
         A :class:`SyncResult` describing all actions taken.
@@ -68,6 +73,7 @@ def run_sync(
         delete_branch,
         fetch_prune,
         get_gone_branches,
+        get_orphan_feature_branches,
         is_worktree_dirty,
         switch_and_pull_main,
     )
@@ -106,7 +112,20 @@ def run_sync(
                 result.actions.append(f"deleted branch: {branch}")
         result.branches_deleted.append(branch)
 
-    # Step 5 — archive features with merged PRs.
+    # Step 5 — delete orphan feat/* branches (opt-in, destructive).
+    if prune_orphans:
+        orphans = get_orphan_feature_branches(base_branch=main, cwd=cwd)
+        # Skip branches already removed in step 4 to avoid duplicates.
+        orphans = [b for b in orphans if b not in result.branches_deleted]
+        for branch in orphans:
+            if dry_run:
+                result.actions.append(f"would delete orphan branch: {branch}")
+            else:
+                if delete_branch(branch, cwd=cwd):
+                    result.actions.append(f"deleted orphan branch: {branch}")
+            result.branches_deleted.append(branch)
+
+    # Step 6 — archive features with merged PRs.
     if not keep_artifacts:
         state = load_state(cwd)
         done_features = [

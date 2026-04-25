@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from devflow.core.complexity import ComplexityScore
 from devflow.core.config import load_config
 from devflow.core.console import console
 from devflow.core.models import Feature, PhaseStatus, generate_feature_id
@@ -17,6 +18,8 @@ from devflow.core.state_machine import FeatureStatus, InvalidTransition
 from devflow.core.workflow import create_feature, load_state, mutate_feature, save_state
 from devflow.integrations.complexity import score_complexity
 from devflow.integrations.git.smart_messages import generate_feature_title
+from devflow.integrations.linear.client import is_configured
+from devflow.integrations.linear.sync import create_issue_for_feature
 
 # Keep the private alias for backwards compatibility (tests, epics.py).
 _generate_feature_id = generate_feature_id
@@ -33,8 +36,8 @@ def transition_safe(feature: Feature, target: FeatureStatus) -> bool:
 
 def _score_workflow(
     description: str, base: Path | None,
-) -> tuple[str, object | None]:
-    """Score complexity and return (workflow_name, complexity_or_None)."""
+) -> tuple[str, ComplexityScore]:
+    """Score complexity and return (workflow_name, complexity)."""
     cfg = load_config(base)
     complexity = score_complexity(description, base, workflow_floor=cfg.workflow)
     method_label = "scored by LLM" if complexity.method == "llm" else "heuristic fallback"
@@ -56,11 +59,6 @@ def _create_linear_issue_if_configured(
     linear_team = load_config(base).linear.team
     if not linear_team:
         return
-    # Lazy: linear deps are optional and pull in httpx; only import when
-    # the user has actually configured a team.
-    from devflow.integrations.linear.client import is_configured
-    from devflow.integrations.linear.sync import create_issue_for_feature
-
     if is_configured():
         key = create_issue_for_feature(feature, linear_team)
         if key:
@@ -97,7 +95,7 @@ def start_build(
         counter += 1
         feature_id = f"{original_id}-{counter}"
 
-    complexity = None
+    complexity: ComplexityScore | None = None
     if workflow_name is None:
         workflow_name, complexity = _score_workflow(prompt or description, base)
 

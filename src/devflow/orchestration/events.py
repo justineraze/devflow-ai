@@ -18,14 +18,30 @@ Two responsibilities are kept separate (Interface Segregation Principle):
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from devflow.core.metrics import BuildTotals, PhaseMetrics, PhaseResult
+    from devflow.core.metrics import BuildTotals, PhaseMetrics, PhaseResult, ToolUse
     from devflow.core.models import Feature
+
+# Type alias: factory yielding a per-tool callback for one phase run.
+# Callers (the runner) wrap their backend.execute() call in
+# ``with factory(phase_name) as on_tool:`` and forward on_tool to the
+# backend.  The default factory yields ``None`` — runner short-circuits
+# and no UI updates fire.
+PhaseToolListenerFactory = Callable[
+    [str], AbstractContextManager["Callable[[ToolUse], None] | None"],
+]
+
+
+def _silent_phase_listener(_phase_name: str) -> AbstractContextManager[None]:
+    """Default factory: yields ``None`` so the runner skips UI updates."""
+    return contextlib.nullcontext(None)
 
 
 def _noop(*_args: object, **_kwargs: object) -> None:  # noqa: ARG001
@@ -103,6 +119,18 @@ class BuildEventListener:
 
     on_do_success: Callable[[str, str], None] = field(default=_noop)
     """``devflow do`` success: arguments are ``(current_sha, initial_sha)``."""
+
+    phase_tool_listener: PhaseToolListenerFactory = field(
+        default=_silent_phase_listener,
+    )
+    """Factory yielding a per-tool callback for each phase execution.
+
+    The runner wraps ``backend.execute()`` in
+    ``with factory(phase_name) as on_tool: ...``.  The CLI plugs in a
+    Rich spinner; tests use the silent default which yields ``None``
+    and skips UI updates entirely — no UI imports leak into the
+    orchestration layer.
+    """
 
 
 @dataclass

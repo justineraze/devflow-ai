@@ -354,6 +354,49 @@ def delete_branch(name: str, cwd: Path | None = None) -> bool:
     return result.returncode == 0
 
 
+def get_orphan_feature_branches(
+    base_branch: str = "main",
+    prefix: str = "feat/",
+    cwd: Path | None = None,
+) -> list[str]:
+    """Return local feature branches with zero commits ahead of *base_branch*.
+
+    A branch is considered an orphan when:
+    - its name starts with *prefix* (defaults to ``feat/``);
+    - it is not the currently checked-out branch;
+    - ``git rev-list --count <base>..<branch>`` returns ``0`` — i.e. it
+      contributed no commits beyond the base branch.
+
+    These typically show up when the user rejected the plan after the
+    branch was created.  Caller decides whether to actually delete them
+    (the operation is destructive — it nukes the branch ref).
+    """
+    branches_result = _git(
+        "for-each-ref", "--format=%(refname:short)",
+        "refs/heads/", cwd=cwd,
+    )
+    if branches_result.returncode != 0:
+        return []
+
+    head_result = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    current = head_result.stdout.strip() if head_result.returncode == 0 else ""
+
+    orphans: list[str] = []
+    for branch in branches_result.stdout.splitlines():
+        branch = branch.strip()
+        if not branch.startswith(prefix) or branch == current:
+            continue
+        count_result = _git(
+            "rev-list", "--count", f"{base_branch}..{branch}", cwd=cwd,
+        )
+        if count_result.returncode != 0:
+            # Branch can't be compared to base — skip rather than guess.
+            continue
+        if count_result.stdout.strip() == "0":
+            orphans.append(branch)
+    return orphans
+
+
 def push_branch(
     branch: str, remote: str = "origin", cwd: Path | None = None,
 ) -> tuple[bool, str]:

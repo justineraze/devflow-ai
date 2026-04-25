@@ -43,7 +43,14 @@ def mock_claude_gate_retry(
     """
     bad_file = mini_python / "src" / "bad_module.py"
 
-    def _fake(feature: object, phase: object, agent_name: str, verbose: bool = False) -> tuple:  # type: ignore[type-arg]
+    def _fake(  # type: ignore[type-arg]
+        feature: object,
+        phase: object,
+        agent_name: str,
+        verbose: bool = False,
+        phase_tool_listener: object = None,
+    ) -> tuple:
+        del phase_tool_listener
         if phase.name == "implementing":  # type: ignore[union-attr]
             bad_file.write_text(_BAD_CODE)
         elif phase.name == "fixing":  # type: ignore[union-attr]

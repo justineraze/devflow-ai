@@ -21,6 +21,7 @@ from devflow.core.models import (
 )
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import advance_phase, mutate_feature
+from devflow.integrations.linear.sync import sync_single_feature
 from devflow.orchestration.lifecycle import transition_safe
 
 
@@ -33,9 +34,6 @@ def sync_linear_if_configured(
     linear_team = load_config(base).linear.team
     if not linear_team:
         return
-    # Lazy import keeps optional httpx out of the import path when Linear
-    # is not configured for this project.
-    from devflow.integrations.linear.sync import sync_single_feature
     sync_single_feature(feature, linear_team, base)
 
 

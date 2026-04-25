@@ -30,6 +30,7 @@ from .repo import (
     get_fix_commit_log,
     get_gone_branches,
     get_head_sha,
+    get_orphan_feature_branches,
     get_untracked_files,
     is_worktree_dirty,
     main_repo_root,
@@ -42,6 +43,7 @@ from .smart_messages import (
     generate_commit_message,
     generate_feature_title,
     generate_pr_body,
+    generate_pr_title,
 )
 
 __all__ = [
@@ -59,11 +61,13 @@ __all__ = [
     "generate_commit_message",
     "generate_feature_title",
     "generate_pr_body",
+    "generate_pr_title",
     "get_branch_diff_summary",
     "get_diff_stat",
     "get_fix_commit_log",
     "get_gone_branches",
     "get_head_sha",
+    "get_orphan_feature_branches",
     "get_untracked_files",
     "is_worktree_dirty",
     "main_repo_root",

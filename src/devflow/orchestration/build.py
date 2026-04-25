@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,7 +45,11 @@ from devflow.integrations.git import branch_name, main_repo_root
 from devflow.integrations.git.repo import git_status_porcelain
 from devflow.integrations.git.smart_messages import generate_commit_message
 from devflow.orchestration import runner
-from devflow.orchestration.events import BuildCallbacks
+from devflow.orchestration.events import (
+    BuildCallbacks,
+    PhaseToolListenerFactory,
+    _silent_phase_listener,
+)
 from devflow.orchestration.model_routing import get_phase_agent, resolve_model
 from devflow.orchestration.phase_artifacts import (
     collect_phase_result,
@@ -90,6 +96,7 @@ def _execute_phase(
     base: Path | None = None, verbose: bool = False,
     base_sha: str = "",
     stack: str | None = None,
+    phase_tool_listener: PhaseToolListenerFactory = _silent_phase_listener,
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a single phase via the backend or local gate."""
     if get_spec(phase.name).phase_type == PhaseType.GATE:
@@ -97,7 +104,10 @@ def _execute_phase(
             base, stack=stack,
             feature_id=feature.id, base_sha=base_sha,
         )
-    return runner.execute_phase(feature, phase, agent_name, verbose=verbose)
+    return runner.execute_phase(
+        feature, phase, agent_name, verbose=verbose,
+        phase_tool_listener=phase_tool_listener,
+    )
 
 
 # ── Planning loop ─────────────────────────────────────────────────
@@ -161,6 +171,7 @@ def _run_planning_loop(
         start = time.monotonic()
         success, output, metrics = _execute_phase(
             feature, phase, agent_name, base, verbose, stack=stack,
+            phase_tool_listener=callbacks.phase_tool_listener,
         )
         elapsed = time.monotonic() - start
 
@@ -282,8 +293,61 @@ def _maybe_re_review(
 # ── Post-phase dispatch ───────────────────────────────────────────
 
 
+@dataclass
+class _PostPhaseCtx:
+    """Bundle of arguments shared by post-phase and on-failure handlers.
+
+    Keeping this as one object lets the dispatcher signature stay
+    narrow (just ``ctx -> bool | None``) so adding a new handler is one
+    function + one entry in the dispatch table.
+    """
+
+    feature: Feature
+    phase: PhaseRecord
+    output: str
+    metrics: PhaseMetrics
+    elapsed: float
+    model_label: str
+    pre_phase_sha: str
+    initial_untracked: list[str]
+    totals: BuildTotals
+    callbacks: BuildCallbacks
+    base: Path | None
+    base_branch: str
+
+
+def _post_record_metrics(ctx: _PostPhaseCtx) -> None:
+    """Default success handler: emit phase chip and add to totals."""
+    ctx.callbacks.on_phase_success(ctx.phase.name, ctx.elapsed, ctx.metrics)
+    ctx.totals.add(
+        ctx.phase.name, ctx.metrics, ctx.elapsed, model=ctx.model_label,
+    )
+
+
+def _post_commit_changes(ctx: _PostPhaseCtx) -> None:
+    """Auto-commit + record commits/files-changed totals."""
+    _handle_post_phase_commit(
+        ctx.feature, ctx.phase, ctx.pre_phase_sha, True, ctx.output,
+        ctx.metrics, ctx.elapsed, ctx.model_label, ctx.initial_untracked,
+        ctx.totals, ctx.callbacks, ctx.base, ctx.base_branch,
+    )
+
+
+def _post_render_gate_panel(ctx: _PostPhaseCtx) -> None:
+    """Show the gate panel and record metrics."""
+    ctx.callbacks.on_gate_panel(ctx.feature.id, ctx.base)
+    ctx.totals.add(
+        ctx.phase.name, ctx.metrics, ctx.elapsed, model=ctx.model_label,
+    )
+
+
+_POST_PHASE_HANDLERS: dict[str, Callable[[_PostPhaseCtx], None]] = {
+    "commit_changes": _post_commit_changes,
+    "render_gate_panel": _post_render_gate_panel,
+}
+
+
 def _dispatch_post_phase_success(
-    phase_type: PhaseType,
     feature: Feature,
     phase: PhaseRecord,
     pre_phase_sha: str,
@@ -297,26 +361,67 @@ def _dispatch_post_phase_success(
     base: Path | None,
     base_branch: str,
 ) -> None:
-    """Route a successful phase to its type-specific post-handler.
+    """Route a successful phase to the handler named in its PhaseSpec.
 
-    Replaces the inline ``if/elif spec.phase_type == ...`` in the
-    execution loop, keeping the loop a pure orchestrator.
+    Reads ``PhaseSpec.post_phase`` and looks it up in the
+    ``_POST_PHASE_HANDLERS`` dispatch table.  ``None`` (or an unknown
+    key) falls back to the generic record-metrics handler.
+
+    Adding a new phase no longer requires modifying the build loop —
+    register a new handler under a new key, declare it in the spec.
     """
-    if phase_type is PhaseType.GATE:
-        callbacks.on_gate_panel(feature.id, base)
-        totals.add(phase.name, metrics, elapsed, model=model_label)
+    ctx = _PostPhaseCtx(
+        feature=feature, phase=phase, output=output, metrics=metrics,
+        elapsed=elapsed, model_label=model_label,
+        pre_phase_sha=pre_phase_sha, initial_untracked=initial_untracked,
+        totals=totals, callbacks=callbacks, base=base, base_branch=base_branch,
+    )
+    handler = _POST_PHASE_HANDLERS.get(get_spec(phase.name).post_phase or "")
+    if handler is None:
+        _post_record_metrics(ctx)
         return
+    handler(ctx)
 
-    if phase_type is PhaseType.CODE:
-        _handle_post_phase_commit(
-            feature, phase, pre_phase_sha, True, output, metrics,
-            elapsed, model_label, initial_untracked, totals, callbacks,
-            base, base_branch,
-        )
-        return
 
-    callbacks.on_phase_success(phase.name, elapsed, metrics)
-    totals.add(phase.name, metrics, elapsed, model=model_label)
+# ── On-failure dispatch ───────────────────────────────────────────
+
+
+def _on_failure_default(ctx: _PostPhaseCtx) -> bool:
+    """Default failure handler: record metrics, no retry."""
+    ctx.totals.add(
+        ctx.phase.name, ctx.metrics, ctx.elapsed,
+        model=ctx.model_label, success=False,
+    )
+    return False
+
+
+def _on_failure_gate_retry(ctx: _PostPhaseCtx) -> bool:
+    """Gate-specific failure: try to schedule a retry; return True on success."""
+    feature, should_retry = _handle_gate_result(
+        ctx.feature, ctx.phase, ctx.output, ctx.metrics, ctx.elapsed,
+        ctx.model_label, ctx.totals, ctx.callbacks, ctx.base,
+    )
+    ctx.feature = feature
+    return should_retry
+
+
+_ON_FAILURE_HANDLERS: dict[str, Callable[[_PostPhaseCtx], bool]] = {
+    "gate_retry": _on_failure_gate_retry,
+}
+
+
+def _dispatch_on_failure(ctx: _PostPhaseCtx) -> tuple[Feature, bool]:
+    """Route a failed phase to the handler named in its PhaseSpec.
+
+    Returns ``(refreshed_feature, should_retry)``. Default behaviour is
+    record-and-stop; only phases with an ``on_failure`` key get custom
+    handling (currently: gate → retry loop).
+    """
+    handler = _ON_FAILURE_HANDLERS.get(get_spec(ctx.phase.name).on_failure or "")
+    if handler is None:
+        return ctx.feature, _on_failure_default(ctx)
+    should_retry = handler(ctx)
+    return ctx.feature, should_retry
 
 
 # ── Execution loop ────────────────────────────────────────────────
@@ -349,21 +454,24 @@ def _run_execution_loop(
         model_label = get_backend().model_name(tier)
         callbacks.on_phase_header(phase_num, total, phase.name, model_label)
 
-        spec = get_spec(phase.name)
-        is_code_phase = spec.phase_type == PhaseType.CODE
-        pre_phase_sha = git.get_head_sha(short=False) if is_code_phase else ""
+        # Capture HEAD up front so post-phase handlers (commit_changes,
+        # …) can compute the diff window. Free for non-CODE phases — no
+        # commits land between capture and end-of-phase, so the value
+        # is harmless and the loop stays free of phase_type branching.
+        pre_phase_sha = git.get_head_sha(short=False)
 
         start = time.monotonic()
         success, output, metrics = _execute_phase(
             feature, phase, agent_name, base, verbose, base_sha=base_sha,
             stack=stack,
+            phase_tool_listener=callbacks.phase_tool_listener,
         )
         elapsed = time.monotonic() - start
 
         if success:
             complete_phase(feature.id, phase.name, output, base)
             _dispatch_post_phase_success(
-                spec.phase_type, feature, phase, pre_phase_sha, output, metrics,
+                feature, phase, pre_phase_sha, output, metrics,
                 elapsed, model_label, initial_untracked, totals, callbacks,
                 base, base_branch,
             )
@@ -374,15 +482,17 @@ def _run_execution_loop(
                 total = len(feature.phases)
                 continue
         else:
-            if spec.phase_type == PhaseType.GATE:
-                feature, should_retry = _handle_gate_result(
-                    feature, phase, output, metrics, elapsed,
-                    model_label, totals, callbacks, base,
-                )
-                if should_retry:
-                    continue
-            else:
-                totals.add(phase.name, metrics, elapsed, model=model_label, success=False)
+            ctx = _PostPhaseCtx(
+                feature=feature, phase=phase, output=output, metrics=metrics,
+                elapsed=elapsed, model_label=model_label,
+                pre_phase_sha=pre_phase_sha,
+                initial_untracked=initial_untracked,
+                totals=totals, callbacks=callbacks,
+                base=base, base_branch=base_branch,
+            )
+            feature, should_retry = _dispatch_on_failure(ctx)
+            if should_retry:
+                continue
 
             fail_phase(feature.id, phase.name, output, base)
             callbacks.on_phase_failure(phase.name, elapsed, output)
@@ -481,10 +591,14 @@ def execute_build_loop(
     """Run a feature through its phases end-to-end.
 
     When ``create_pr=True`` (default — ``devflow build``):
-        1. Create git branch (or worktree)
-        2. Run planning phases — show plan, ask confirmation
+        1. Plan first (no branch yet) — show plan, ask confirmation
+        2. **After confirmation**, create the git branch (or worktree)
         3. Run remaining phases with auto-commit
         4. Create PR on success
+
+    Branch creation is deferred so that rejecting the plan never leaves
+    an orphan branch behind (it stayed on the user's current branch
+    while planning).
 
     When ``create_pr=False`` (``devflow do``):
         1. Stay on current branch (no branch creation)
@@ -500,22 +614,26 @@ def execute_build_loop(
     config = load_config(base)
     stack = config.stack
     totals = BuildTotals()
-    branch = ""
+    branch = branch_name(feature.id) if create_pr else ""
 
     initial_sha = git.get_head_sha(short=False)
 
+    # Capture untracked-file snapshot up front so the auto-commit step
+    # later on can ignore files that already existed.  This is cheap and
+    # safe regardless of branch creation timing.
+    initial_untracked = git.get_untracked_files()
+
     if create_pr:
-        initial_untracked = _setup_branch(
-            feature, base, worktree, is_resuming, feedback,
-        )
-        branch = branch_name(feature.id)
         cb.on_banner(feature, branch, stack)
     else:
-        initial_untracked = git.get_untracked_files()
         cb.on_do_banner(feature)
 
-    if is_resuming and feedback is not None:
-        cb.on_resume_notice(feedback)
+    # Resume bookkeeping (feedback, planning reset) must happen before
+    # the planning loop runs — branch creation is *not* required yet.
+    if is_resuming:
+        _prepare_resume(feature.id, base, feedback)
+        if feedback is not None:
+            cb.on_resume_notice(feedback)
 
     feature, plan_output, ok = _run_planning_loop(feature, totals, stack, cb, base, verbose)
     if not ok:
@@ -524,7 +642,12 @@ def execute_build_loop(
         return False
 
     if plan_output and not cb.confirm_plan(plan_output, feature.id, create_pr):
+        # Plan rejected — no branch was created, nothing to clean up.
         return False
+
+    # Plan confirmed — now safe to create the branch.
+    if create_pr:
+        initial_untracked = _create_branch_or_worktree(feature, worktree)
 
     feature, ok = _run_execution_loop(
         feature, totals, initial_untracked, stack, cb, base, verbose,
@@ -556,33 +679,25 @@ def execute_build_loop(
     return True
 
 
-def _setup_branch(
-    feature: Feature,
-    base: Path | None,
-    worktree: bool,
-    is_resuming: bool,
-    feedback: str | None,
-) -> list[str]:
-    """Set up git branch or worktree, return initial untracked files."""
+def _prepare_resume(
+    feature_id: str, base: Path | None, feedback: str | None,
+) -> None:
+    """Reset planning phases and stash user feedback before re-planning."""
+    reset_planning_phases(feature_id, base)
+    with mutate_feature(feature_id, base) as tracked:
+        if tracked:
+            tracked.metadata.feedback = feedback
+
+
+def _create_branch_or_worktree(feature: Feature, worktree: bool) -> list[str]:
+    """Create branch (or worktree) after plan confirmation.
+
+    Returns the untracked-file snapshot rooted at the working location.
+    Safe to call when the branch already exists (e.g. resume) — git
+    falls back to a switch.
+    """
     if worktree:
         _branch, wt_path = git.create_worktree(feature.id)
-        initial_untracked = git.get_untracked_files(cwd=wt_path)
-        if is_resuming:
-            reset_planning_phases(feature.id, base)
-            with mutate_feature(feature.id, base) as tracked:
-                if tracked:
-                    tracked.metadata.feedback = feedback
-        return initial_untracked
-
-    initial_untracked = git.get_untracked_files()
-    branch = branch_name(feature.id)
-    if is_resuming:
-        reset_planning_phases(feature.id, base)
-        with mutate_feature(feature.id, base) as tracked:
-            if tracked:
-                tracked.metadata.feedback = feedback
-        git.switch_branch(branch)
-    else:
-        git.create_branch(feature.id)
-
-    return initial_untracked
+        return git.get_untracked_files(cwd=wt_path)
+    git.create_branch(feature.id)
+    return git.get_untracked_files()

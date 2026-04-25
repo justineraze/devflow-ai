@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import subprocess
 from pathlib import Path
@@ -20,6 +19,10 @@ from devflow.core.phases import (
     get_spec,
 )
 from devflow.core.workflow import load_workflow
+from devflow.orchestration.events import (
+    PhaseToolListenerFactory,
+    _silent_phase_listener,
+)
 from devflow.orchestration.model_routing import resolve_model
 
 log = logging.getLogger(__name__)
@@ -333,23 +336,22 @@ def execute_phase(
     phase: PhaseRecord,
     agent_name: str,
     verbose: bool = False,
+    phase_tool_listener: PhaseToolListenerFactory = _silent_phase_listener,
 ) -> tuple[bool, str, PhaseMetrics]:
     """Execute a phase by calling the active backend.
 
-    In default mode, shows a Rich spinner updated with the last tool action.
-    With ``verbose=True``, streams every tool line to the console instead
-    (matches the original behaviour, useful for debugging).
+    UI rendering for tool-use events is delegated to *phase_tool_listener*
+    (a factory yielding a per-phase ``on_tool`` callback).  The CLI plugs
+    in a Rich spinner; tests use the silent default.  ``verbose=True``
+    additionally echoes each tool line to the console.
 
-    The final phase-summary chip is rendered by the caller from the returned
-    PhaseMetrics — keeps the runner focused on I/O.
+    Keeping the listener as a parameter — instead of a lazy
+    ``from devflow.ui.spinner import …`` — preserves the orchestration →
+    UI layering: this module no longer imports anything from ``ui/``.
+
+    The final phase-summary chip is rendered by the caller from the
+    returned PhaseMetrics.
     """
-    # Lazy import: PhaseSpinner lives in ui/ which orchestration/ should not
-    # import at module level.  Kept lazy because the spinner is tightly
-    # coupled to the live execute loop and injecting it via callback would
-    # add complexity without real benefit; the layering is documented in
-    # CLAUDE.md.
-    from devflow.ui.spinner import PhaseSpinner
-
     backend = get_backend()
 
     system_prompt = build_system_prompt(phase.name, agent_name)
@@ -360,22 +362,12 @@ def execute_phase(
     cwd = Path.cwd()
     agent_env = venv_env(cwd)
 
-    # Build the on_tool callback that drives the UI.
-    spinner_ctx = (
-        contextlib.nullcontext(None) if verbose else PhaseSpinner(phase.name)
-    )
-
-    with spinner_ctx as spinner:
+    with phase_tool_listener(phase.name) as ui_on_tool:
         def _on_tool(tool: ToolUse) -> None:
-            tool_line = format_tool_line(tool)
             if verbose:
-                console.print(f"[dim]{tool_line}[/dim]")
-            elif spinner is not None:
-                parts = tool_line.split(None, 2)
-                spinner.update(
-                    parts[1] if len(parts) > 1 else "tool",
-                    parts[2] if len(parts) > 2 else "",
-                )
+                console.print(f"[dim]{format_tool_line(tool)}[/dim]")
+            if ui_on_tool is not None:
+                ui_on_tool(tool)
 
         try:
             return backend.execute(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -70,6 +72,30 @@ class _RichPrompter:
         return render_plan_confirmation(plan_output, feature_id, create_pr)
 
 
+@contextmanager
+def _spinner_phase_listener(
+    phase_name: str,
+) -> Generator[Callable[[object], None] | None, None, None]:
+    """Yield a spinner-update callback for one phase execution.
+
+    Wired into ``BuildCallbacks.phase_tool_listener`` so the runner stays
+    UI-agnostic — see :mod:`devflow.orchestration.events` for the
+    contract.
+    """
+    from devflow.core.formatting import format_tool_line
+    from devflow.ui.spinner import PhaseSpinner
+
+    with PhaseSpinner(phase_name) as spinner:
+        def _on_tool(tool: object) -> None:
+            tool_line = format_tool_line(tool)  # type: ignore[arg-type]
+            parts = tool_line.split(None, 2)
+            spinner.update(
+                parts[1] if len(parts) > 1 else "tool",
+                parts[2] if len(parts) > 2 else "",
+            )
+        yield _on_tool
+
+
 def _build_callbacks() -> BuildCallbacks:
     """Wire up UI renderers as build callbacks (lazy import)."""
     from devflow.orchestration.events import BuildCallbacks
@@ -109,6 +135,7 @@ def _build_callbacks() -> BuildCallbacks:
         on_epic_complete=render_epic_complete,
         on_revert_hint=render_revert_hint,
         on_do_success=render_do_success,
+        phase_tool_listener=_spinner_phase_listener,
         prompter=_RichPrompter(),
     )
 
@@ -318,6 +345,13 @@ def sync(
             help="Skip archiving .devflow/<feat>/ dirs for merged PRs",
         ),
     ] = False,
+    prune_orphans: Annotated[
+        bool,
+        typer.Option(
+            "--prune-orphans",
+            help="Also delete feat/* branches with 0 commits ahead of main",
+        ),
+    ] = False,
     linear: Annotated[
         bool,
         typer.Option("--linear", help="Sync feature statuses to Linear"),
@@ -333,16 +367,16 @@ def sync(
     if linear:
         from devflow.integrations.linear.sync import sync_all
 
-        result = sync_all()
-        if result.errors:
-            for err in result.errors:
+        linear_result = sync_all()
+        if linear_result.errors:
+            for err in linear_result.errors:
                 console.print(f"[red]✗ {err}[/red]")
             raise typer.Exit(1)
-        if result.created:
-            console.print(f"[green]Created {len(result.created)} issues[/green]")
-        if result.updated:
-            console.print(f"[green]Updated {len(result.updated)} issues[/green]")
-        if not result.created and not result.updated:
+        if linear_result.created:
+            console.print(f"[green]Created {len(linear_result.created)} issues[/green]")
+        if linear_result.updated:
+            console.print(f"[green]Updated {len(linear_result.updated)} issues[/green]")
+        if not linear_result.created and not linear_result.updated:
             console.print("[dim]Nothing to sync.[/dim]")
         return
 
@@ -350,12 +384,16 @@ def sync(
     from devflow.ui.rendering import render_sync_summary
 
     try:
-        result = run_sync(dry_run=dry_run, keep_artifacts=keep_artifacts)
+        sync_result = run_sync(
+            dry_run=dry_run,
+            keep_artifacts=keep_artifacts,
+            prune_orphans=prune_orphans,
+        )
     except DirtyWorktreeError as exc:
         console.print(f"[red]✗ {exc}[/red]")
         raise typer.Exit(1) from exc
 
-    render_sync_summary(result)
+    render_sync_summary(sync_result)
 
 
 # ---------------------------------------------------------------------------
