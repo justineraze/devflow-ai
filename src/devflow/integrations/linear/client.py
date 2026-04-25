@@ -61,10 +61,10 @@ def _request(query: str, variables: dict[str, Any] | None = None) -> dict[str, A
             "or write it to .devflow/linear.key"
         )
 
-    payload = json.dumps({"query": query, "variables": variables or {}}).encode()
+    body = json.dumps({"query": query, "variables": variables or {}}).encode()
     req = urllib.request.Request(
         LINEAR_API_URL,
-        data=payload,
+        data=body,
         headers={
             "Authorization": key,
             "Content-Type": "application/json",
@@ -75,8 +75,8 @@ def _request(query: str, variables: dict[str, Any] | None = None) -> dict[str, A
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")[:500]
-        raise LinearError(f"Linear API HTTP {exc.code}: {body}") from exc
+        err_body = exc.read().decode(errors="replace")[:500]
+        raise LinearError(f"Linear API HTTP {exc.code}: {err_body}") from exc
     except urllib.error.URLError as exc:
         raise LinearError(f"Linear API unreachable: {exc.reason}") from exc
 
@@ -85,7 +85,8 @@ def _request(query: str, variables: dict[str, Any] | None = None) -> dict[str, A
         msg = errors[0].get("message", "Unknown Linear API error")
         raise LinearError(f"Linear GraphQL error: {msg}")
 
-    return data.get("data", {})
+    payload: dict[str, Any] = data.get("data", {})
+    return payload
 
 
 # ── Queries ─────────────────────────────────────────────────────────
@@ -99,7 +100,8 @@ def get_teams() -> list[dict[str, str]]:
     data = _request("""
         query { teams { nodes { id key name } } }
     """)
-    return data.get("teams", {}).get("nodes", [])
+    nodes: list[dict[str, str]] = data.get("teams", {}).get("nodes", [])
+    return nodes
 
 
 def get_issue(issue_id: str) -> dict[str, Any] | None:
@@ -114,7 +116,8 @@ def get_issue(issue_id: str) -> dict[str, Any] | None:
             }
         }
     """, {"id": issue_id})
-    return data.get("issue")
+    issue: dict[str, Any] | None = data.get("issue")
+    return issue
 
 
 def search_issues(
@@ -137,7 +140,8 @@ def search_issues(
             }
         }
     """, {"teamId": team_id, "limit": limit})
-    return data.get("issues", {}).get("nodes", [])
+    nodes: list[dict[str, Any]] = data.get("issues", {}).get("nodes", [])
+    return nodes
 
 
 def get_workflow_states(team_id: str) -> list[dict[str, str]]:
@@ -151,7 +155,8 @@ def get_workflow_states(team_id: str) -> list[dict[str, str]]:
             }
         }
     """, {"teamId": team_id})
-    return data.get("workflowStates", {}).get("nodes", [])
+    nodes: list[dict[str, str]] = data.get("workflowStates", {}).get("nodes", [])
+    return nodes
 
 
 # ── Mutations ───────────────────────────────────────────────────────
@@ -198,7 +203,8 @@ def create_issue(
             }
         }
     """, variables)
-    return data.get("issueCreate", {}).get("issue", {})
+    issue: dict[str, Any] = data.get("issueCreate", {}).get("issue", {})
+    return issue
 
 
 def update_issue_state(
@@ -212,4 +218,5 @@ def update_issue_state(
             }
         }
     """, {"issueId": issue_id, "stateId": state_id})
-    return data.get("issueUpdate", {}).get("issue", {})
+    issue: dict[str, Any] = data.get("issueUpdate", {}).get("issue", {})
+    return issue

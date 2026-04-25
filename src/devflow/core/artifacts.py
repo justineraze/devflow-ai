@@ -74,9 +74,10 @@ def read_json_artifact(
     if raw is None:
         return None
     try:
-        return json.loads(raw)
+        parsed: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError:
         return None
+    return parsed
 
 
 def save_phase_output(

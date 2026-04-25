@@ -176,6 +176,7 @@ def get_phase_agent(
         pass
 
     if agent == "developer":
+        resolved_stack: str | None
         if stack is not None:
             resolved_stack = stack
         else:
