@@ -75,6 +75,18 @@ auto-sélectionné par le complexity scorer dans les deux cas.
 - **Review → fix → re-review** : max 2 cycles. Le reviewer re-vérifie
   que ses issues sont résolues après fixing.
 
+## Tests + lint (quality gate)
+
+Une seule commande pour savoir si le repo est vert :
+
+    make check       # = make test + make lint, exit 0 si vert
+    make test        # pytest (unit + e2e, smoke deselected)
+    make lint        # ruff check src/ tests/
+    make fix         # ruff --fix
+
+Ne pas multiplier les variantes (`pytest tests/unit -v`, `pytest tests/e2e`, etc.) :
+pyproject.toml configure déjà `testpaths` et `-m "not smoke"`.
+
 ## Commandes
 
     devflow do "..."                 → tâche sur la branche courante (revert si fail)
