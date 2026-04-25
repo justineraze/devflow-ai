@@ -79,13 +79,23 @@ auto-sélectionné par le complexity scorer dans les deux cas.
 
 Une seule commande pour savoir si le repo est vert :
 
-    make check       # = make test + make lint, exit 0 si vert
-    make test        # pytest (unit + e2e, smoke deselected)
+    make check       # = make test + make lint + make typecheck, exit 0 si vert
+    make test        # pytest (unit + e2e, smoke deselected) avec --cov-fail-under=80
     make lint        # ruff check src/ tests/
+    make typecheck   # mypy src/
     make fix         # ruff --fix
+    make coverage    # rapport HTML (htmlcov/index.html)
+    make smoke       # smoke tests (vrai claude -p, coûte des tokens)
 
 Ne pas multiplier les variantes (`pytest tests/unit -v`, `pytest tests/e2e`, etc.) :
 pyproject.toml configure déjà `testpaths` et `-m "not smoke"`.
+
+**Smoke tests** : exécutent le pipeline réel avec `claude -p`. Lancer
+manuellement avant chaque release ou avant un merge important :
+
+    make smoke    # nécessite ANTHROPIC_API_KEY ou claude CLI authentifié
+
+Coût indicatif : ~3 features × 1-5 min × ~$0.05-0.20 par run.
 
 ## Commandes
 
