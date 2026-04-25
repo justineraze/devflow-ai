@@ -17,33 +17,35 @@ state machine, quality gate automatisée, PR automatique, reprise après
 ### Ce qui vit dans les .md (skills + agents)
 
 **Skills de discipline (injectés dans le prompt par phase)** :
-- context-discipline — règles anti sur-exploration, toujours injecté
-- planning-rigor     — plans rigoureux avec audit qualité
-- refactor-first     — refactor plutôt que patch
-- incremental-build  — slices verticales, commit par step
-- tdd-discipline     — tests pendant, pas après
-- code-review        — review en 5 passes
+- `devflow-context`     — règles anti sur-exploration, toujours injecté
+- `devflow-planning`    — plans rigoureux avec audit qualité
+- `devflow-refactor`    — refactor plutôt que patch
+- `devflow-incremental` — slices verticales, commit par step
+- `devflow-tdd`         — tests pendant, pas après
+- `devflow-review`      — review en 5 passes
+- `devflow-debug`       — fix discipliné (reproduce → isoler → minimal → test)
 
-**Skills devflow-specific** :
-- build.md — décrit le flow de build devflow
-- check.md — checklist du quality gate
+Quel skill est injecté par quelle phase est piloté par `PHASE_SKILLS`
+dans `core/phases.py` (et `ALWAYS_ON_SKILLS` dans `orchestration/runner.py`
+pour ceux qui s'appliquent à toutes les phases).
 
 **Agents spécialisés** :
 - architect, planner, reviewer, tester (rôles)
 - developer (base) + developer-python / -typescript / -php / -frontend
+  (mappés au stack par `STACK_AGENT_MAP` dans `orchestration/model_routing.py`)
 
 ### Ce qui vit dans le Python (irremplaçable)
 
-- `config.yaml` — configuration projet (stack, gate, linear, backend)
-- `state.json` — état runtime des features, crash-safe (tmp + rename)
-- `backend.py` — Protocol abstrait pour les agents IA (Claude, Gemini, etc.)
-- State machine — transitions validées, recoverable depuis FAILED
-- Quality gate — lint, tests, secrets, complexité, taille modules
+- `core/config.py` / `config.yaml` — configuration projet (stack, gate, linear, backend)
+- `core/workflow.py` / `state.json` — état runtime des features, crash-safe (tmp + rename)
+- `core/backend.py` — Protocol abstrait pour les agents IA (Claude, Gemini, etc.)
+- `core/state_machine.py` — transitions validées, recoverable depuis FAILED
+- `integrations/gate/` — quality gate (lint, tests, secrets, complexité, taille)
 - Boucles de rétroaction — gate retry (3×, escalade modèle), review cycle (2×)
-- `runner.py` — bridge vers le backend avec prompt structuré et live progress
-- `smart_messages.py` — commit/PR messages générés par le backend (one-shot)
-- `git.py` — branch, atomic commits, PR via `gh`
-- `detect.py` — détection stack pour sélectionner l'agent spécialisé
+- `orchestration/runner.py` — bridge vers le backend avec prompt structuré et live progress
+- `integrations/git/smart_messages.py` — commit/PR messages générés par le backend (one-shot)
+- `integrations/git/repo.py` — branch, atomic commits, PR via `gh`
+- `integrations/detect.py` — détection stack pour sélectionner l'agent spécialisé
 
 ## Trois tiers d'exécution
 
@@ -114,41 +116,60 @@ Coût indicatif : ~3 features × 1-5 min × ~$0.05-0.20 par run.
     devflow-ai/
     ├── src/devflow/
     │   ├── cli.py                      — commandes Typer, zéro logique métier
-    │   ├── core/                       — état & domaine
-    │   │   ├── config.py               — DevflowConfig (Pydantic) + load/save config.yaml
+    │   ├── core/                       — état & domaine, aucune I/O externe
+    │   │   ├── artifacts.py            — I/O atomique sur .devflow/<feat-id>/
     │   │   ├── backend.py              — Backend Protocol + ModelTier + registry
-    │   │   ├── models.py               — Feature, PhaseName, PhaseStatus, WorkflowState
-    │   │   ├── phases.py               — registry unifié (PhaseSpec + PHASES)
-    │   │   ├── metrics.py              — DTOs PhaseMetrics / ToolUse
+    │   │   ├── complexity.py           — ComplexityScore (Pydantic)
+    │   │   ├── config.py               — DevflowConfig + load/save config.yaml
+    │   │   ├── console.py              — singleton Rich Console partagé
+    │   │   ├── epics.py                — hiérarchie parent/enfant des features
+    │   │   ├── errors.py               — DevflowError + sous-classes typées
+    │   │   ├── formatting.py           — formatters purs (cost / tokens / tool icon)
+    │   │   ├── gate_report.py          — DTOs CheckResult / GateReport / CheckDef
     │   │   ├── history.py              — BuildMetrics + persistence JSONL
+    │   │   ├── metrics.py              — DTOs PhaseMetrics / ToolUse / BuildTotals
+    │   │   ├── models.py               — Feature, PhaseName, PhaseStatus, WorkflowState
+    │   │   ├── paths.py                — assets_dir / venv_env / atomic_write_text
+    │   │   ├── phases.py               — registry unifié (PhaseSpec + PHASES)
+    │   │   ├── security.py             — CRITICAL_PATH_PATTERNS
+    │   │   ├── state_machine.py        — FeatureStatus + VALID_TRANSITIONS
+    │   │   ├── sync_results.py         — SyncResult + DirtyWorktreeError
     │   │   ├── workflow.py             — chargement YAML + persistance state.json
-    │   │   ├── track.py                — lecture/écriture state (haut niveau)
-    │   │   └── artifacts.py            — I/O atomique sur .devflow/<feat-id>/
+    │   │   └── workflow_def.py         — PhaseDefinition / WorkflowDefinition
     │   ├── orchestration/              — le moteur
     │   │   ├── build.py                — build loop + do loop + boucles retry/review
-    │   │   ├── lifecycle.py            — création/resume/retry features
-    │   │   ├── phase_exec.py           — state machine des phases + gate retry
-    │   │   ├── runner.py               — bridge backend + build_prompt
+    │   │   ├── events.py               — BuildEventListener / BuildPrompter / callbacks
+    │   │   ├── lifecycle.py            — création/resume/retry (typed errors)
     │   │   ├── model_routing.py        — routing modèle (YAML > sélecteur > défaut)
-    │   │   └── stream.py               — parser stream-json
+    │   │   ├── phase_artifacts.py      — git → PhaseResult / files.json
+    │   │   ├── phase_exec.py           — state machine des phases + gate retry
+    │   │   ├── plan_parser.py          — extraction title/scope/type du plan
+    │   │   ├── review.py               — re-review / re-fix après reviewing
+    │   │   ├── runner.py               — bridge backend + build_prompt
+    │   │   └── sync.py                 — post-merge cleanup (devflow sync)
     │   ├── integrations/               — ponts vers l'extérieur
-    │   │   ├── claude/                 — ClaudeCodeBackend (implémente Backend Protocol)
+    │   │   ├── claude/backend.py       — ClaudeCodeBackend + parse_event stream-json
+    │   │   ├── complexity.py           — scorer LLM + heuristique
+    │   │   ├── detect.py               — détection stack (python/ts/php/frontend)
     │   │   ├── gate/                   — quality gate (lint, test, secrets, complexité, taille)
-    │   │   ├── git/                    — branch, commit, PR, smart_messages
-    │   │   ├── linear/                 — client GraphQL + sync bidirectionnel
-    │   │   └── detect.py               — détection stack
+    │   │   ├── git/                    — repo, commit_message, pr_body, smart_messages
+    │   │   └── linear/                 — client GraphQL + sync bidirectionnel
     │   ├── setup/
-    │   │   ├── install.py              — sync assets vers ~/.claude/
+    │   │   ├── _settings.py            — JSON atomique partagé (install + doctor)
+    │   │   ├── install.py              — sync assets vers ~/.claude/ + hook PostCompact
     │   │   └── doctor.py               — checks de santé
     │   └── ui/
     │       ├── display.py              — composants Rich (status, log, metrics)
+    │       ├── gate_panel.py           — affichage gate results
     │       ├── rendering.py            — banner, phase chip, summary
-    │       └── gate_panel.py           — affichage gate results
+    │       └── spinner.py              — Live spinner pendant les phases
     ├── assets/
-    │   ├── agents/                     — 9 agents (.md)
-    │   └── skills/                     — 9 skills (.md)
+    │   ├── agents/                     — 9 agents (architect, planner, developer*, reviewer, tester)
+    │   ├── hooks/                      — devflow-post-compact.sh
+    │   └── skills/                     — 7 skills de discipline (.md)
     ├── workflows/                      — 4 YAML (quick / light / standard / full)
-    ├── tests/                          — mirror de src/devflow/ (~740 tests)
+    ├── tests/                          — mirror de src/devflow/ (>800 tests)
+    ├── uv.lock                         — lockfile committé pour installs reproductibles
     └── pyproject.toml
 
 ## Configuration (.devflow/)

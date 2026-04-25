@@ -66,30 +66,3 @@ class TestStartBuildAutoWorkflow:
         """When user provides an explicit workflow, no score is stored."""
         feature = start_build("test", workflow_name="standard", base=project_dir)
         assert feature.metadata.complexity is None
-
-    def test_auto_workflow_logs_to_console(self, project_dir: Path) -> None:
-        """A message is printed to console — verified by mocking the console object."""
-        from io import StringIO
-
-        from rich.console import Console
-
-        import devflow.orchestration.lifecycle as lifecycle_mod
-
-        buf = StringIO()
-        fake_console = Console(file=buf, force_terminal=False, no_color=True)
-        original = lifecycle_mod.console
-        lifecycle_mod.console = fake_console
-
-        mock_score = ComplexityScore(files_touched=1, integrations=0, security=0, scope=0)
-        try:
-            with patch(
-                "devflow.orchestration.lifecycle.score_complexity",
-                return_value=mock_score,
-            ):
-                start_build("minor fix", workflow_name=None, base=project_dir)
-        finally:
-            lifecycle_mod.console = original
-
-        output = buf.getvalue()
-        assert "Complexity:" in output
-        assert "quick" in output

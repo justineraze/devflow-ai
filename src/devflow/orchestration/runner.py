@@ -19,6 +19,7 @@ from devflow.core.phases import (
     get_spec,
 )
 from devflow.core.workflow import load_workflow
+from devflow.integrations.git import get_fix_commit_log
 from devflow.orchestration.events import (
     PhaseToolListenerFactory,
     _silent_phase_listener,
@@ -76,34 +77,42 @@ def _find_skill_file(skill_name: str) -> Path | None:
     return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, _bundled_dir("skills"))
 
 
-def _load_md_content(path: Path | None) -> str:
-    """Read an .md file and strip YAML frontmatter."""
-    if not path:
-        return ""
-    content = path.read_text(encoding="utf-8")
-    if content.startswith("---"):
-        end = content.find("---", 3)
-        if end != -1:
-            content = content[end + 3:].lstrip("\n")
-    return content
+def _read_md_split(path: Path | None) -> tuple[str | None, str]:
+    """Read an .md file once and return ``(extends_value, body)``.
 
-
-def _parse_extends(path: Path | None) -> str | None:
-    """Extract the ``extends`` field from a .md frontmatter, if present."""
+    Splits the YAML frontmatter from the body in a single I/O pass —
+    callers that need both the body and the ``extends:`` field do not
+    re-open the file. ``extends_value`` is ``None`` when the frontmatter
+    is missing or has no ``extends:`` key.
+    """
     if not path:
-        return None
+        return None, ""
+
     content = path.read_text(encoding="utf-8")
+
     if not content.startswith("---"):
-        return None
+        return None, content
+
     end = content.find("---", 3)
     if end == -1:
-        return None
+        return None, content
+
     frontmatter = content[3:end]
+    body = content[end + 3:].lstrip("\n")
+
+    extends: str | None = None
     for line in frontmatter.splitlines():
         if line.startswith("extends:"):
             value = line.split(":", 1)[1].strip()
-            return value or None
-    return None
+            extends = value or None
+            break
+
+    return extends, body
+
+
+def _load_md_content(path: Path | None) -> str:
+    """Read an .md file and strip YAML frontmatter."""
+    return _read_md_split(path)[1]
 
 
 def _load_agent_prompt(agent_name: str) -> str:
@@ -115,13 +124,13 @@ def _load_agent_prompt(agent_name: str) -> str:
     a stable prefix for prompt caching — identical across all stacks.
     """
     path = _find_agent_file(agent_name)
-    parent_name = _parse_extends(path)
+    parent_name, own_content = _read_md_split(path)
+
     parts: list[str] = []
     if parent_name:
         base_content = _load_md_content(_find_agent_file(parent_name))
         if base_content:
             parts.append(base_content)
-    own_content = _load_md_content(path)
     if own_content:
         parts.append(own_content)
     return "\n\n---\n\n".join(parts)
@@ -201,8 +210,6 @@ def _build_retry_context(feature: Feature) -> str:
         return ""
 
     parts = [f"# Tentatives précédentes ({retry})\n"]
-
-    from devflow.integrations.git import get_fix_commit_log
 
     commit_log = ""
     try:

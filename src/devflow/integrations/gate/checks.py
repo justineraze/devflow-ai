@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from devflow.core.gate_report import MAX_CHECK_DETAILS_LEN
 from devflow.core.paths import venv_env
 from devflow.integrations.gate.report import CheckDef, CheckResult, ParseOutput
 
@@ -14,7 +15,7 @@ def _parse_pytest(returncode: int, stdout: str) -> tuple[str, str]:
     last_line = stdout.strip().split("\n")[-1] if stdout.strip() else ""
     if returncode == 0:
         return last_line, ""
-    return last_line or "Tests failed", stdout[:2000]
+    return last_line or "Tests failed", stdout[:MAX_CHECK_DETAILS_LEN]
 
 
 STACK_CHECKS: dict[str, tuple[CheckDef, ...]] = {
@@ -57,7 +58,7 @@ def _build_command_result(
     else:
         issue_count = output.count("\n")
         message = f"{issue_count} issues found"
-        details = output[:2000]
+        details = output[:MAX_CHECK_DETAILS_LEN]
     return CheckResult(
         name=name, passed=returncode == 0, message=message, details=details,
     )

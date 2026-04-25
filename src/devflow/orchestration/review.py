@@ -9,6 +9,7 @@ from pathlib import Path
 
 from devflow.core.models import Feature, FeatureStatus, PhaseName
 from devflow.core.workflow import mutate_feature
+from devflow.orchestration.lifecycle import transition_safe
 
 MAX_REVIEW_CYCLES = 2
 
@@ -33,8 +34,6 @@ def setup_re_review(feature_id: str, base: Path | None = None) -> None:
 
 def setup_re_fix(feature_id: str, base: Path | None = None) -> None:
     """Reset fixing+gate to PENDING after a reviewer REQUEST_CHANGES."""
-    from devflow.orchestration.lifecycle import transition_safe
-
     with mutate_feature(feature_id, base) as feature:
         if not feature:
             return

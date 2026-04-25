@@ -37,6 +37,3 @@ Thumbs.db
 
 # Project state
 .devflow/
-
-# Lockfile
-uv.lock

@@ -14,10 +14,13 @@ import logging
 import re
 import subprocess
 
+from devflow.core.backend import ModelTier, get_backend
 from devflow.core.models import Feature
 
 from .commit_message import MAX_COMMIT_SUBJECT_LEN
 from .commit_message import build_commit_message as _template_commit_message
+
+_log = logging.getLogger(__name__)
 
 # Ceiling for diff content sent to the model (roughly 500 lines × ~80 chars).
 _MAX_DIFF_LINES = 500
@@ -30,10 +33,10 @@ def _call_one_shot(system: str, user: str) -> str | None:
     """Run a one-shot prompt via the active backend and return trimmed output.
 
     Returns ``None`` on any failure — the caller is responsible for
-    falling back to a deterministic template.
+    falling back to a deterministic template. The failure is logged at
+    warning level so prompt-generation regressions don't disappear into
+    silent fallbacks.
     """
-    from devflow.core.backend import ModelTier, get_backend
-
     backend = get_backend()
     model = backend.model_name(ModelTier.FAST)
     try:
@@ -43,8 +46,8 @@ def _call_one_shot(system: str, user: str) -> str | None:
             model=model,
             timeout=_ONE_SHOT_TIMEOUT,
         )
-    except Exception:  # noqa: BLE001
-        logging.getLogger(__name__).debug("one_shot failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — open fallback for any backend error
+        _log.warning("one_shot failed (%s); falling back to template", exc)
         return None
 
 

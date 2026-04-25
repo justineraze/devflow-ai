@@ -125,8 +125,8 @@ class TestSetupGateRetry:
 
         setup_gate_retry("feat-001", project_dir)
         feature = load_state(project_dir).get_feature("feat-001")
-        # Retry 2: escalate to sonnet.
-        assert feature.metadata.gate_retry_models == [None, "sonnet"]
+        # Retry 2: escalate to STANDARD (canonical tier).
+        assert feature.metadata.gate_retry_models == [None, "standard"]
 
         gate = feature.find_phase("gate")
         gate.status = PhaseStatus.DONE
@@ -134,8 +134,8 @@ class TestSetupGateRetry:
 
         setup_gate_retry("feat-001", project_dir)
         feature = load_state(project_dir).get_feature("feat-001")
-        # Retry 3: escalate to opus.
-        assert feature.metadata.gate_retry_models == [None, "sonnet", "opus"]
+        # Retry 3: escalate to THINKING.
+        assert feature.metadata.gate_retry_models == [None, "standard", "thinking"]
 
     def test_returns_false_for_unknown_feature(self, project_dir: Path) -> None:
         assert setup_gate_retry("ghost", project_dir) is False

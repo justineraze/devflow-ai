@@ -11,6 +11,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
+# Maximum byte length kept in CheckResult.details. Captures enough of a
+# tool's stdout/stderr to be actionable in the gate panel without bloating
+# the persisted gate.json artifact (and the prompts that read it).
+MAX_CHECK_DETAILS_LEN = 2000
+
 
 @dataclass
 class CheckResult:

@@ -11,12 +11,12 @@ def _register_default_backend() -> None:
 
     Without this, any test exercising code paths through the build loop
     would fail with RuntimeError since core/backend.py no longer
-    auto-creates a ClaudeCodeBackend.
+    auto-creates a ClaudeCodeBackend. Cleared after each test via the
+    public clear_backend() so registrations don't leak across modules.
     """
-    from devflow.core import backend as _mod
-    from devflow.core.backend import set_backend
+    from devflow.core.backend import clear_backend, set_backend
     from devflow.integrations.claude.backend import ClaudeCodeBackend
 
     set_backend(ClaudeCodeBackend())
     yield  # type: ignore[misc]
-    _mod._current_backend = None
+    clear_backend()

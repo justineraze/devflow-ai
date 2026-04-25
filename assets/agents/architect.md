@@ -184,34 +184,6 @@ Document each non-obvious decision with:
 [If this changes existing data structures or APIs, how to handle backwards compatibility]
 ```
 
-### Architecture decision (structured)
-
-Every architecture output MUST end with this JSON block. It is parseable by
-downstream tooling and summarizes the key decisions machine-readably.
-
-```json
-{
-  "modules_touched": ["core/models.py", "orchestration/build.py"],
-  "new_files": ["core/epic.py"],
-  "layer_violations": [],
-  "responsibilities": {"core/epic.py": "Epic lifecycle management"},
-  "public_api": {"core/epic.py": ["create_epic(name, children) -> Epic", "link_child(epic, feature) -> None"]},
-  "risk_level": "low | medium | high",
-  "refactor_required": false,
-  "refactor_reason": null
-}
-```
-
-Fields:
-- `modules_touched` — existing files that will be modified
-- `new_files` — files to create
-- `layer_violations` — list of problematic imports found (empty = clean)
-- `responsibilities` — one-sentence job description per new file
-- `public_api` — public function signatures per new file
-- `risk_level` — overall risk assessment
-- `refactor_required` — true if the codebase needs cleanup before the feature
-- `refactor_reason` — why the refactor is needed (null if not required)
-
 ## Constraints
 
 - **Don't plan implementation** — that's the planner's job. You decide WHERE code goes

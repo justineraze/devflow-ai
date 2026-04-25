@@ -32,7 +32,10 @@ DEVFLOW_DIR = Path(".devflow")
 STATE_FILE = DEVFLOW_DIR / "state.json"
 
 
-_workflow_cache: dict[str, WorkflowDefinition] = {}
+# Process-scoped cache, keyed by workflow file path. Invalidated by mtime
+# so external edits are picked up automatically — same pattern as
+# load_state and load_config; keep them aligned if any of the three changes.
+_workflow_cache: dict[Path, tuple[float, WorkflowDefinition]] = {}
 
 
 def clear_workflow_cache() -> None:
@@ -47,9 +50,9 @@ def clear_workflow_cache() -> None:
 def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefinition:
     """Load a workflow definition from a YAML file.
 
-    Results are cached by *name* when using the default workflows
-    directory. Pass *workflows_dir* explicitly to bypass the cache
-    (used in tests with temporary directories).
+    Results are cached by file path with mtime-based invalidation, so
+    edits to workflow YAML files are picked up automatically without
+    requiring a process restart.
 
     Args:
         name: Workflow name (without .yaml extension).
@@ -59,13 +62,15 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
     Raises:
         FileNotFoundError: If the workflow file doesn't exist.
     """
-    if workflows_dir is None and name in _workflow_cache:
-        return _workflow_cache[name]
-
     base = workflows_dir or _workflows_dir()
     path = base / f"{name}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"Workflow not found: {path}")
+
+    mtime = path.stat().st_mtime
+    cached = _workflow_cache.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     phases = [PhaseDefinition(**p) for p in raw.get("phases", [])]
@@ -75,8 +80,7 @@ def load_workflow(name: str, workflows_dir: Path | None = None) -> WorkflowDefin
         phases=phases,
     )
 
-    if workflows_dir is None:
-        _workflow_cache[name] = wf
+    _workflow_cache[path] = (mtime, wf)
     return wf
 
 

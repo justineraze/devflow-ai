@@ -13,8 +13,9 @@ Each concern raises its own subtype so handlers can react precisely:
   and is **not** an exception.
 - :class:`GitError` — git command failed unexpectedly (worktree dirty,
   branch creation failed, push rejected).
-- :class:`DirtyWorktreeError` is exported from
-  :mod:`devflow.core.sync_results` and inherits from this hierarchy.
+- :class:`DirtyWorktreeError` (in :mod:`devflow.core.sync_results`) and
+  :class:`LinearError` (in :mod:`devflow.integrations.linear.client`)
+  also inherit from :class:`DevflowError`.
 """
 
 from __future__ import annotations
@@ -36,9 +37,24 @@ class GitError(DevflowError):
     """A git command failed unexpectedly."""
 
 
+class FeatureNotFoundError(DevflowError):
+    """Raised when a feature ID is not present in the project state."""
+
+
+class FeatureAlreadyDoneError(DevflowError):
+    """Raised when ``resume`` targets a feature that has already finished."""
+
+
+class FeatureNotFailedError(DevflowError):
+    """Raised when ``retry`` is invoked on a feature that is not FAILED."""
+
+
 __all__ = [
     "BackendError",
     "DevflowError",
+    "FeatureAlreadyDoneError",
+    "FeatureNotFailedError",
+    "FeatureNotFoundError",
     "GateError",
     "GitError",
 ]

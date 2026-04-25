@@ -63,27 +63,41 @@ class TestLoadWorkflow:
 
 class TestWorkflowCache:
     def test_same_object_returned_on_second_call(self, workflows_dir: Path) -> None:
-        """Default-dir loads are cached — same object returned on repeated calls."""
-        from devflow.core import workflow as wf_mod
+        """Repeated loads with unchanged mtime return the cached instance."""
+        from devflow.core.workflow import clear_workflow_cache
 
-        # Pre-populate the cache with a known workflow dir.
+        clear_workflow_cache()
         wf1 = load_workflow("standard", workflows_dir)
-        # Manually seed the cache as if the default dir had been used.
-        wf_mod._workflow_cache["standard"] = wf1
-
-        wf2 = load_workflow("standard")
+        wf2 = load_workflow("standard", workflows_dir)
         assert wf2 is wf1
 
-        # Cleanup to avoid polluting other tests.
-        wf_mod._workflow_cache.pop("standard", None)
+    def test_mtime_change_invalidates_cache(self, workflows_dir: Path) -> None:
+        """Editing a workflow YAML invalidates the cached entry on next load."""
+        import os
+        import time
 
-    def test_explicit_dir_bypasses_cache(self, workflows_dir: Path) -> None:
-        from devflow.core import workflow as wf_mod
+        from devflow.core.workflow import clear_workflow_cache
 
-        wf_mod._workflow_cache["standard"] = load_workflow("standard", workflows_dir)
-        wf_fresh = load_workflow("standard", workflows_dir)
-        assert wf_fresh is not wf_mod._workflow_cache["standard"]
-        wf_mod._workflow_cache.pop("standard", None)
+        clear_workflow_cache()
+        wf1 = load_workflow("standard", workflows_dir)
+
+        # Touch the file with a forward-dated mtime so the cache treats it
+        # as modified even on filesystems with coarse timestamps.
+        path = workflows_dir / "standard.yaml"
+        future = time.time() + 5
+        os.utime(path, (future, future))
+
+        wf2 = load_workflow("standard", workflows_dir)
+        assert wf2 is not wf1
+
+    def test_clear_cache_forces_reload(self, workflows_dir: Path) -> None:
+        from devflow.core.workflow import clear_workflow_cache
+
+        clear_workflow_cache()
+        wf1 = load_workflow("standard", workflows_dir)
+        clear_workflow_cache()
+        wf2 = load_workflow("standard", workflows_dir)
+        assert wf2 is not wf1
 
 
 class TestStatePersistence:
@@ -213,3 +227,35 @@ class TestMutateFeature:
             assert feature is None
 
         assert calls == []
+
+
+class TestStateLock:
+    """File-lock semantics around .devflow/state.lock (POSIX-only)."""
+
+    def test_mutate_feature_persists_changes(self, project_dir: Path) -> None:
+        from devflow.core.models import Feature, FeatureStatus
+        from devflow.core.workflow import load_state, mutate_feature, save_state
+
+        state = load_state(project_dir)
+        feature = Feature(
+            id="feat-lock-001",
+            description="test locking",
+            status=FeatureStatus.PENDING,
+            phases=[],
+        )
+        state.add_feature(feature)
+        save_state(state, project_dir)
+
+        with mutate_feature("feat-lock-001", project_dir) as feat:
+            assert feat is not None
+            feat.description = "updated"
+
+        reloaded = load_state(project_dir)
+        assert reloaded.get_feature("feat-lock-001").description == "updated"
+
+    def test_lock_file_is_created(self, project_dir: Path) -> None:
+        from devflow.core.workflow import _state_lock
+
+        with _state_lock(project_dir):
+            lock_path = project_dir / ".devflow" / "state.lock"
+            assert lock_path.exists()

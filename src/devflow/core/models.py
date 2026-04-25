@@ -3,17 +3,16 @@
 This module owns the *feature* domain (Feature, PhaseRecord, PhaseStatus,
 PhaseName, PhaseType, FeatureMetadata, WorkflowState, generate_feature_id).
 
-Sibling modules own everything else, kept here only as re-exports for
-backward compatibility:
+A handful of types are also re-exported here because consumers still
+import them from ``models`` rather than from the sibling module:
 
-- :mod:`devflow.core.state_machine` — :class:`FeatureStatus`,
-  :data:`VALID_TRANSITIONS`, :class:`InvalidTransition`.
-- :mod:`devflow.core.complexity` — :class:`ComplexityScore`.
-- :mod:`devflow.core.security`   — :data:`CRITICAL_PATH_PATTERNS`.
-- :mod:`devflow.core.sync_results` — :class:`SyncResult`,
-  :class:`DirtyWorktreeError`.
-- :mod:`devflow.core.workflow_def` — :class:`PhaseDefinition`,
-  :class:`WorkflowDefinition`.
+- :class:`FeatureStatus` from :mod:`devflow.core.state_machine`.
+- :class:`ComplexityScore` from :mod:`devflow.core.complexity`.
+- :class:`SyncResult` from :mod:`devflow.core.sync_results`.
+
+Anything else (VALID_TRANSITIONS, InvalidTransition, DirtyWorktreeError,
+CRITICAL_PATH_PATTERNS, WorkflowDefinition, PhaseDefinition) must be
+imported from its canonical module.
 """
 
 from __future__ import annotations
@@ -22,16 +21,11 @@ import re
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from devflow.core.complexity import ComplexityScore
-from devflow.core.security import CRITICAL_PATH_PATTERNS
-from devflow.core.state_machine import (
-    VALID_TRANSITIONS,
-    FeatureStatus,
-    InvalidTransition,
-)
-from devflow.core.sync_results import DirtyWorktreeError, SyncResult
+from devflow.core.state_machine import VALID_TRANSITIONS, FeatureStatus, InvalidTransition
+from devflow.core.sync_results import SyncResult
 
 
 class FeatureMetadata(BaseModel):
@@ -200,6 +194,18 @@ class Feature(BaseModel):
                 return phase
         return None
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def current_phase_name(self) -> str | None:
+        """Name of the in-progress phase, serialised into state.json.
+
+        Exposed so external consumers (e.g. the post-compact hook) can read
+        the active phase from the JSON snapshot without having to walk the
+        ``phases`` array themselves.
+        """
+        current = self.current_phase
+        return current.name.value if current else None
+
     @property
     def is_terminal(self) -> bool:
         """Return True if the feature is done. Failed features can be resumed."""
@@ -245,25 +251,18 @@ class WorkflowState(BaseModel):
         return any(f.parent_id == feature_id for f in self.features.values())
 
 
-# Workflow YAML DTOs live in workflow_def.py; re-export for compatibility.
-from devflow.core.workflow_def import PhaseDefinition, WorkflowDefinition  # noqa: E402
-
 __all__ = [
-    "CRITICAL_PATH_PATTERNS",
     "VALID_TRANSITIONS",
     "ComplexityScore",
-    "DirtyWorktreeError",
     "Feature",
     "FeatureMetadata",
     "FeatureStatus",
     "InvalidTransition",
-    "PhaseDefinition",
     "PhaseName",
     "PhaseRecord",
     "PhaseStatus",
     "PhaseType",
     "SyncResult",
-    "WorkflowDefinition",
     "WorkflowState",
     "generate_feature_id",
 ]

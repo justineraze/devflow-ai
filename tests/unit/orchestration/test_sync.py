@@ -61,11 +61,11 @@ def test_sync_dry_run_no_mutation(tmp_path: Path) -> None:
     feat_dir = _make_feat_dir(tmp_path, "f-001")
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=["feat/old-branch"]),
-        patch("devflow.integrations.git.delete_branch") as mock_del,
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=["feat/old-branch"]),
+        patch("devflow.orchestration.sync.delete_branch") as mock_del,
         patch("devflow.orchestration.sync._pr_is_merged", return_value=True),
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
@@ -94,11 +94,11 @@ def test_sync_deletes_gone_branches(tmp_path: Path) -> None:
     _make_state(tmp_path, [])
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=["feat/done-feat"]),
-        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=["feat/done-feat"]),
+        patch("devflow.orchestration.sync.delete_branch", return_value=True) as mock_del,
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
         result = run_sync(project_root=tmp_path)
@@ -118,10 +118,10 @@ def test_sync_archives_merged_features(tmp_path: Path) -> None:
     feat_dir = _make_feat_dir(tmp_path, "f-002")
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=[]),
         patch("devflow.orchestration.sync._pr_is_merged", return_value=True),
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
@@ -150,10 +150,10 @@ def test_sync_skips_non_merged_pr(tmp_path: Path) -> None:
     feat_dir = _make_feat_dir(tmp_path, "f-003")
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=[]),
         patch("devflow.orchestration.sync._pr_is_merged", return_value=False),
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
@@ -177,9 +177,9 @@ def test_sync_refuses_dirty_worktree(tmp_path: Path) -> None:
     _make_state(tmp_path, [])
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=True),
-        patch("devflow.integrations.git.switch_and_pull_main") as mock_pull,
-        patch("devflow.integrations.git.fetch_prune") as mock_fetch,
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=True),
+        patch("devflow.orchestration.sync.switch_and_pull_main") as mock_pull,
+        patch("devflow.orchestration.sync.fetch_prune") as mock_fetch,
         pytest.raises(DirtyWorktreeError),
     ):
         run_sync(project_root=tmp_path)
@@ -199,11 +199,11 @@ def test_keep_artifacts_skips_archiving(tmp_path: Path) -> None:
     feat_dir = _make_feat_dir(tmp_path, "f-004")
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=["feat/f-004"]),
-        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=["feat/f-004"]),
+        patch("devflow.orchestration.sync.delete_branch", return_value=True) as mock_del,
         patch("devflow.orchestration.sync._pr_is_merged") as mock_pr,
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
@@ -235,15 +235,15 @@ def test_sync_does_not_prune_orphans_by_default(tmp_path: Path) -> None:
     _make_state(tmp_path, [])
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=[]),
         patch(
-            "devflow.integrations.git.get_orphan_feature_branches",
+            "devflow.orchestration.sync.get_orphan_feature_branches",
             return_value=["feat/orphan-1"],
         ) as mock_orphans,
-        patch("devflow.integrations.git.delete_branch") as mock_del,
+        patch("devflow.orchestration.sync.delete_branch") as mock_del,
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
         result = run_sync(project_root=tmp_path)
@@ -265,15 +265,15 @@ def test_sync_prune_orphans_deletes_them(tmp_path: Path) -> None:
     _make_state(tmp_path, [])
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
-        patch("devflow.integrations.git.get_gone_branches", return_value=[]),
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
+        patch("devflow.orchestration.sync.get_gone_branches", return_value=[]),
         patch(
-            "devflow.integrations.git.get_orphan_feature_branches",
+            "devflow.orchestration.sync.get_orphan_feature_branches",
             return_value=["feat/orphan-1", "feat/orphan-2"],
         ),
-        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync.delete_branch", return_value=True) as mock_del,
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
         result = run_sync(project_root=tmp_path, prune_orphans=True)
@@ -293,17 +293,17 @@ def test_sync_prune_orphans_dedupes_against_gone(tmp_path: Path) -> None:
     _make_state(tmp_path, [])
 
     with (
-        patch("devflow.integrations.git.is_worktree_dirty", return_value=False),
-        patch("devflow.integrations.git.switch_and_pull_main"),
-        patch("devflow.integrations.git.fetch_prune"),
+        patch("devflow.orchestration.sync.is_worktree_dirty", return_value=False),
+        patch("devflow.orchestration.sync.switch_and_pull_main"),
+        patch("devflow.orchestration.sync.fetch_prune"),
         patch(
-            "devflow.integrations.git.get_gone_branches", return_value=["feat/old"],
+            "devflow.orchestration.sync.get_gone_branches", return_value=["feat/old"],
         ),
         patch(
-            "devflow.integrations.git.get_orphan_feature_branches",
+            "devflow.orchestration.sync.get_orphan_feature_branches",
             return_value=["feat/old", "feat/new-orphan"],
         ),
-        patch("devflow.integrations.git.delete_branch", return_value=True) as mock_del,
+        patch("devflow.orchestration.sync.delete_branch", return_value=True) as mock_del,
         patch("devflow.orchestration.sync._current_branch", return_value="main"),
     ):
         result = run_sync(project_root=tmp_path, prune_orphans=True)

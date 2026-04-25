@@ -189,7 +189,7 @@ class TestAppendAndRead:
 
 class TestBuildMetricsFrom:
     def test_successful_build(self, project_dir: Path) -> None:
-        from devflow.ui.rendering import BuildTotals, PhaseMetricSnapshot
+        from devflow.core.metrics import BuildTotals, PhaseSnapshot
 
         feature = Feature(
             id="feat-test",
@@ -213,12 +213,12 @@ class TestBuildMetricsFrom:
         totals.tool_count = 60
         totals.duration_s = 500.0
         totals.phase_snapshots = [
-            PhaseMetricSnapshot(
+            PhaseSnapshot(
                 name="planning", model="sonnet", cost_usd=0.30,
                 input_tokens=100, output_tokens=5000, cache_creation=40000,
                 cache_read=80000, tool_count=20, duration_s=100.0, success=True,
             ),
-            PhaseMetricSnapshot(
+            PhaseSnapshot(
                 name="implementing", model="sonnet", cost_usd=1.20,
                 input_tokens=200, output_tokens=10000, cache_creation=5000,
                 cache_read=170000, tool_count=40, duration_s=400.0, success=True,
@@ -239,7 +239,7 @@ class TestBuildMetricsFrom:
         assert record.phases[1].cost_usd == 1.20
 
     def test_failed_build(self, project_dir: Path) -> None:
-        from devflow.ui.rendering import BuildTotals, PhaseMetricSnapshot
+        from devflow.core.metrics import BuildTotals, PhaseSnapshot
 
         feature = Feature(
             id="feat-fail",
@@ -254,12 +254,12 @@ class TestBuildMetricsFrom:
 
         totals = BuildTotals()
         totals.phase_snapshots = [
-            PhaseMetricSnapshot(
+            PhaseSnapshot(
                 name="planning", model="sonnet", cost_usd=0.30,
                 input_tokens=100, output_tokens=5000, cache_creation=40000,
                 cache_read=80000, tool_count=20, duration_s=100.0, success=True,
             ),
-            PhaseMetricSnapshot(
+            PhaseSnapshot(
                 name="implementing", model="sonnet", cost_usd=0.50,
                 input_tokens=200, output_tokens=3000, cache_creation=5000,
                 cache_read=90000, tool_count=15, duration_s=200.0, success=False,

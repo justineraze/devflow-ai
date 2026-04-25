@@ -14,7 +14,6 @@ from pathlib import Path
 
 from devflow.core.backend import ModelTier, get_backend
 from devflow.core.complexity import ComplexityScore
-from devflow.core.security import CRITICAL_PATH_PATTERNS
 from devflow.integrations.detect import walk_files
 
 log = logging.getLogger(__name__)
@@ -89,10 +88,30 @@ def _clamp(value: int | float | str, lo: int = 0, hi: int = 3) -> int:
 
 # ── Heuristic scorer (fallback) ──────────────────────────────────
 
-# Additional security terms not covered by CRITICAL_PATH_PATTERNS.
-_SECURITY_EXTRA: frozenset[str] = frozenset(
-    {"rbac", "permission", "acl", "privilege", "cors", "csrf"}
-)
+# Security keywords — listed explicitly with their common derivations so we
+# can score on word boundaries without false positives ("author" must not
+# match "auth", "secretary" must not match "secret"). Path-style stems live
+# in ``CRITICAL_PATH_PATTERNS`` because phase_artifacts substring-matches
+# them against file paths, which is a different problem than scoring a
+# free-text description.
+_SECURITY_KEYWORDS: frozenset[str] = frozenset({
+    # Authentication / authorization.
+    "auth", "authentication", "authorization",
+    "authenticate", "authorize", "authn", "authz",
+    # Secrets / credentials.
+    "secret", "secrets", "credential", "credentials",
+    "password", "passwords", "passwd",
+    # Tokens / sessions.
+    "token", "tokens", "session", "sessions",
+    # Crypto.
+    "crypto", "cryptography", "encryption", "decryption",
+    "hash", "hashing",
+    # Money flows (CRITICAL_PATH_PATTERNS path stems).
+    "payment", "payments", "billing",
+    # Access control.
+    "rbac", "permission", "permissions", "acl",
+    "privilege", "privileges", "cors", "csrf",
+})
 
 # External integration keywords.
 _INTEGRATION_KEYWORDS: frozenset[str] = frozenset({
@@ -159,10 +178,18 @@ def _score_integrations(description: str) -> int:
 
 
 def _score_security(description: str) -> int:
-    """Score 0-3: security-sensitive surface area in the description."""
+    """Score 0-3: security-sensitive surface area in the description.
+
+    Matches each keyword as a whole word (``\\b...\\b``) so descriptions
+    that mention ``author`` or ``secretary`` aren't flagged as
+    auth/secret work. Common derivations (``authentication``, ``tokens``…)
+    are listed explicitly in :data:`_SECURITY_KEYWORDS`.
+    """
     desc = description.lower()
-    all_patterns = frozenset(CRITICAL_PATH_PATTERNS) | _SECURITY_EXTRA
-    hits = sum(1 for pat in all_patterns if pat in desc)
+    hits = sum(
+        1 for pat in _SECURITY_KEYWORDS
+        if re.search(r"\b" + re.escape(pat) + r"\b", desc)
+    )
     if hits == 0:
         return 0
     if hits == 1:

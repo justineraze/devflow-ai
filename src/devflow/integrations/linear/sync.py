@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 from devflow.core.config import load_config
@@ -34,18 +35,33 @@ from devflow.integrations.linear.client import (
 
 _log = logging.getLogger(__name__)
 
+
+class LinearStateType(StrEnum):
+    """Workflow state types defined by Linear's API.
+
+    These are the ``type`` field on a Linear ``WorkflowState`` and must
+    match the strings Linear returns from its GraphQL API exactly.
+    """
+
+    BACKLOG = "backlog"
+    UNSTARTED = "unstarted"
+    STARTED = "started"
+    COMPLETED = "completed"
+    CANCELED = "canceled"
+
+
 # Map devflow FeatureStatus → Linear workflow state type.
-_STATUS_TO_LINEAR_TYPE: dict[FeatureStatus, str] = {
-    FeatureStatus.PENDING: "backlog",
-    FeatureStatus.PLANNING: "unstarted",
-    FeatureStatus.PLAN_REVIEW: "unstarted",
-    FeatureStatus.IMPLEMENTING: "started",
-    FeatureStatus.REVIEWING: "started",
-    FeatureStatus.FIXING: "started",
-    FeatureStatus.GATE: "started",
-    FeatureStatus.DONE: "completed",
-    FeatureStatus.BLOCKED: "canceled",
-    FeatureStatus.FAILED: "canceled",
+_STATUS_TO_LINEAR_TYPE: dict[FeatureStatus, LinearStateType] = {
+    FeatureStatus.PENDING: LinearStateType.BACKLOG,
+    FeatureStatus.PLANNING: LinearStateType.UNSTARTED,
+    FeatureStatus.PLAN_REVIEW: LinearStateType.UNSTARTED,
+    FeatureStatus.IMPLEMENTING: LinearStateType.STARTED,
+    FeatureStatus.REVIEWING: LinearStateType.STARTED,
+    FeatureStatus.FIXING: LinearStateType.STARTED,
+    FeatureStatus.GATE: LinearStateType.STARTED,
+    FeatureStatus.DONE: LinearStateType.COMPLETED,
+    FeatureStatus.BLOCKED: LinearStateType.CANCELED,
+    FeatureStatus.FAILED: LinearStateType.CANCELED,
 }
 
 
@@ -64,9 +80,11 @@ class LinearSyncResult:
 
 
 def _resolve_state_id(
-    team_id: str, target_type: str, _cache: dict[str, dict[str, str]] | None = None,
+    team_id: str,
+    target_type: LinearStateType,
+    _cache: dict[str, dict[str, str]] | None = None,
 ) -> str | None:
-    """Find the Linear workflow state ID for a given type (backlog, started, etc.).
+    """Find the Linear workflow state ID for a given type.
 
     Uses caller-provided cache to avoid redundant API calls in the same sync run.
     """
@@ -75,7 +93,7 @@ def _resolve_state_id(
     if team_id not in _cache:
         states = get_workflow_states(team_id)
         _cache[team_id] = {s["type"]: s["id"] for s in states}
-    return _cache[team_id].get(target_type)
+    return _cache[team_id].get(target_type.value)
 
 
 def sync_feature_to_linear(
@@ -91,7 +109,7 @@ def sync_feature_to_linear(
     Sets ``feature.metadata.linear_issue_id`` (UUID) and
     ``feature.metadata.linear_issue_key`` (identifier) on creation.
     """
-    target_type = _STATUS_TO_LINEAR_TYPE.get(feature.status, "backlog")
+    target_type = _STATUS_TO_LINEAR_TYPE.get(feature.status, LinearStateType.BACKLOG)
 
     if feature.metadata.linear_issue_id is None:
         # Create new issue.

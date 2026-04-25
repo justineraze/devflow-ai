@@ -68,7 +68,9 @@ feature = max(active, key=get_timestamp)
 
 feat_id = feature.get("id", "?")
 description = feature.get("description", "")
-phase_name = feature.get("current_phase", "?")
+# current_phase_name is a Pydantic computed_field on Feature — present in any
+# state.json written by devflow ≥ 0.1.1. Older states fall back to "?".
+phase_name = feature.get("current_phase_name") or "?"
 phase_status = feature.get("status", "?")
 
 print("# devflow context (post-compact)")

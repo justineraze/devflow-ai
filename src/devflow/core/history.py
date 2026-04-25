@@ -8,6 +8,7 @@ and makes diffs easy to review.
 from __future__ import annotations
 
 import json
+import logging
 from collections import deque
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
@@ -17,6 +18,8 @@ from typing import TYPE_CHECKING
 from devflow.core.metrics import BuildTotals, PhaseSnapshot, compute_cache_hit_rate
 from devflow.core.models import PhaseStatus
 from devflow.core.workflow import ensure_devflow_dir
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from devflow.core.models import Feature
@@ -177,7 +180,7 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
 
     tail: deque[BuildMetrics] = deque(maxlen=limit)
     with path.open(encoding="utf-8") as f:
-        for line in f:
+        for line_no, line in enumerate(f, start=1):
             stripped = line.strip()
             if not stripped:
                 continue
@@ -191,7 +194,11 @@ def read_history(base: Path | None = None, limit: int = 50) -> list[BuildMetrics
                     for p in raw_phases
                 ]
                 tail.append(rec)
-            except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+            except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+                log.warning(
+                    "metrics.jsonl line %d skipped (%s): %s",
+                    line_no, type(exc).__name__, exc,
+                )
                 continue
 
     # Most-recent-first.

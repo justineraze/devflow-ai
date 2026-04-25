@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from devflow.core import backend as _backend_mod
-from devflow.core.backend import Backend, ModelTier, get_backend, set_backend
+from devflow.core.backend import Backend, ModelTier, clear_backend, get_backend, set_backend
 from devflow.core.metrics import PhaseMetrics, ToolUse
 from devflow.integrations.claude.backend import ClaudeCodeBackend, parse_event
 
 
 @pytest.fixture(autouse=True)
 def _reset_backend() -> None:
-    """Reset global backend after each test."""
+    """Reset the global backend after each test."""
     yield  # type: ignore[misc]
-    _backend_mod._current_backend = None
+    clear_backend()
 
 
 class TestModelTier:
@@ -50,49 +51,110 @@ class TestClaudeCodeBackend:
 
 
 class TestParseEvent:
-    def test_tool_event(self) -> None:
-        line = (
-            '{"type":"assistant","message":{"content":'
-            '[{"type":"tool_use","name":"Read","input":{"file_path":"src/foo.py"}}]}}'
-        )
-        result = parse_event(line)
+    def test_empty_line(self) -> None:
+        assert parse_event("") is None
+        assert parse_event("   ") is None
+
+    def test_malformed_json(self) -> None:
+        assert parse_event("not json") is None
+
+    def test_ignores_system_events(self) -> None:
+        line = json.dumps({"type": "system", "subtype": "init"})
+        assert parse_event(line) is None
+
+    def test_extracts_read_tool(self) -> None:
+        event = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Read",
+                        "input": {"file_path": "/path/to/src/devflow/models.py"},
+                    }
+                ]
+            },
+        }
+        result = parse_event(json.dumps(event))
         assert result is not None
         kind, payload = result
         assert kind == "tool"
         assert isinstance(payload, ToolUse)
         assert payload.name == "Read"
-        assert "foo.py" in payload.summary
+        assert "models.py" in payload.summary
 
-    def test_result_event(self) -> None:
-        line = (
-            '{"type":"result","duration_ms":1500,"total_cost_usd":0.05,'
-            '"result":"done","usage":{"input_tokens":200,"output_tokens":80,'
-            '"cache_creation_input_tokens":50,"cache_read_input_tokens":100}}'
-        )
-        result = parse_event(line)
+    def test_extracts_bash_tool(self) -> None:
+        event = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "Bash",
+                        "input": {"command": "pytest tests/"},
+                    }
+                ]
+            },
+        }
+        result = parse_event(json.dumps(event))
+        assert result is not None
+        kind, payload = result
+        assert kind == "tool"
+        assert payload.name == "Bash"
+        assert "pytest" in payload.summary
+
+    def test_truncates_long_bash_command(self) -> None:
+        long_cmd = "a" * 200
+        event = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": long_cmd}}
+                ]
+            },
+        }
+        result = parse_event(json.dumps(event))
+        assert result is not None
+        _, payload = result
+        assert len(payload.summary) <= 61  # 60 + ellipsis
+
+    def test_ignores_text_only_assistant(self) -> None:
+        event = {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Hello"}]},
+        }
+        assert parse_event(json.dumps(event)) is None
+
+    def test_extracts_result_metrics(self) -> None:
+        event = {
+            "type": "result",
+            "duration_ms": 12345,
+            "total_cost_usd": 0.042,
+            "result": "done",
+            "usage": {
+                "input_tokens": 1234,
+                "output_tokens": 567,
+                "cache_creation_input_tokens": 4500,
+                "cache_read_input_tokens": 89,
+            },
+        }
+        result = parse_event(json.dumps(event))
         assert result is not None
         kind, payload = result
         assert kind == "metrics"
         assert isinstance(payload, PhaseMetrics)
-        assert payload.cost_usd == 0.05
-        assert payload.input_tokens == 200
-        assert payload.cache_creation == 50
-        assert payload.cache_read == 100
+        assert payload.duration_ms == 12345
+        assert payload.cost_usd == 0.042
+        assert payload.input_tokens == 1234
+        assert payload.output_tokens == 567
+        assert payload.cache_creation == 4500
+        assert payload.cache_read == 89
         assert payload.final_text == "done"
-
-    def test_empty_line(self) -> None:
-        assert parse_event("") is None
-
-    def test_malformed_json(self) -> None:
-        assert parse_event("not json") is None
-
-    def test_irrelevant_event_type(self) -> None:
-        assert parse_event('{"type":"system","data":"ignored"}') is None
 
 
 class TestGetSetBackend:
     def test_raises_when_no_backend_registered(self) -> None:
-        _backend_mod._current_backend = None
+        clear_backend()
         with pytest.raises(RuntimeError, match="No backend registered"):
             get_backend()
 

@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from devflow.core.gate_report import MAX_CHECK_DETAILS_LEN
 from devflow.core.paths import venv_env
 from devflow.integrations.gate.report import CheckResult
 
@@ -57,7 +58,7 @@ def _build_complexity_result(
         name="complexity",
         passed=True,
         message=f"{count} function(s) exceed complexity {max_complexity} (warning)",
-        details=output[:2000],
+        details=output[:MAX_CHECK_DETAILS_LEN],
     )
 
 

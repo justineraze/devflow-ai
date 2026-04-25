@@ -248,24 +248,34 @@ def build(
 
     base_branch = _resolve_base_branch(base)
 
-    if retry:
-        feature = retry_build(retry)
-        feedback = None
-    elif resume:
-        if not description:
-            console.print("[red]--resume requires a description (feedback on the plan).[/red]")
-            raise typer.Exit(1)
-        feature = resume_build(resume)
-        feedback = description
-    else:
-        if not description:
-            console.print("[red]Missing description. Usage: devflow build \"what to build\"[/red]")
-            raise typer.Exit(1)
-        feature = start_build(description, workflow)
-        feedback = None
+    from devflow.core.errors import DevflowError
 
-    if not feature:
-        raise typer.Exit(1)
+    try:
+        if retry:
+            feature = retry_build(retry)
+            feedback = None
+        elif resume:
+            if not description:
+                console.print(
+                    "[red]--resume requires a description (feedback on the plan).[/red]"
+                )
+                raise typer.Exit(1)
+            feature = resume_build(resume)
+            feedback = description
+        else:
+            if not description:
+                console.print(
+                    "[red]Missing description. Usage: devflow build \"what to build\"[/red]"
+                )
+                raise typer.Exit(1)
+            feature = start_build(description, workflow)
+            feedback = None
+    except DevflowError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if feature.metadata.linear_issue_key:
+        console.print(f"[dim]Linear: {feature.metadata.linear_issue_key}[/dim]")
 
     success = execute_build_loop(
         feature, feedback=feedback, verbose=verbose,
@@ -514,13 +524,16 @@ def retry_cmd(
 ) -> None:
     """(Deprecated) Use ``devflow build --retry <feat-id>``."""
     _deprecation_hint("retry", f"devflow build --retry {feature_id}")
+    from devflow.core.errors import DevflowError
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import retry_build
 
     _ensure_backend()
-    feature = retry_build(feature_id)
-    if not feature:
-        raise typer.Exit(1)
+    try:
+        feature = retry_build(feature_id)
+    except DevflowError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
 
     base_branch = _resolve_base_branch(base)
     success = execute_build_loop(

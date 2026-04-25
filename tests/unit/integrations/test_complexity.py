@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from devflow.core.models import ComplexityScore
+from devflow.core.security import CRITICAL_PATH_PATTERNS
 from devflow.integrations.complexity import (
-    CRITICAL_PATH_PATTERNS,
     _clamp,
     _score_files_touched,
     _score_heuristic,

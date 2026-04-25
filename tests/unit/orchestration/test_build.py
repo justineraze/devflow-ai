@@ -6,11 +6,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from devflow.core.metrics import PhaseMetrics
-from devflow.core.models import FeatureStatus, PhaseStatus
+from devflow.core.models import FeatureStatus, PhaseStatus, generate_feature_id
 from devflow.core.workflow import load_state, save_state
 from devflow.orchestration.build import execute_build_loop
 from devflow.orchestration.lifecycle import (
-    _generate_feature_id,
     resume_build,
     retry_build,
     start_build,
@@ -117,15 +116,15 @@ class TestParsePlanType:
 
 class TestGenerateFeatureId:
     def test_generates_slug_from_description(self) -> None:
-        fid = _generate_feature_id("Add user authentication")
+        fid = generate_feature_id("Add user authentication")
         assert fid.startswith("feat-add-user-authentication-")
 
     def test_handles_empty_description(self) -> None:
-        fid = _generate_feature_id("")
+        fid = generate_feature_id("")
         assert fid.startswith("feat-")
 
     def test_strips_special_characters(self) -> None:
-        fid = _generate_feature_id("Fix bug #123 — urgent!")
+        fid = generate_feature_id("Fix bug #123 — urgent!")
         assert "#" not in fid
         assert "!" not in fid
 
@@ -161,19 +160,25 @@ class TestResumeBuild:
     def test_resumes_existing_feature(self, project_dir: Path) -> None:
         original = start_build("test", "standard", project_dir)
         resumed = resume_build(original.id, project_dir)
-        assert resumed is not None
         assert resumed.id == original.id
 
-    def test_returns_none_for_missing(self, project_dir: Path) -> None:
-        assert resume_build("nonexistent", project_dir) is None
+    def test_raises_for_missing(self, project_dir: Path) -> None:
+        from devflow.core.errors import FeatureNotFoundError
 
-    def test_returns_none_for_done(self, project_dir: Path) -> None:
+        with pytest.raises(FeatureNotFoundError):
+            resume_build("nonexistent", project_dir)
+
+    def test_raises_for_done(self, project_dir: Path) -> None:
+        from devflow.core.errors import FeatureAlreadyDoneError
+
         feature = start_build("test", "standard", project_dir)
         state = load_state(project_dir)
         tracked = state.get_feature(feature.id)
         tracked.status = FeatureStatus.DONE
         save_state(state, project_dir)
-        assert resume_build(feature.id, project_dir) is None
+
+        with pytest.raises(FeatureAlreadyDoneError):
+            resume_build(feature.id, project_dir)
 
     def test_recovers_failed_feature(self, project_dir: Path) -> None:
         feature = start_build("test", "standard", project_dir)
@@ -187,7 +192,6 @@ class TestResumeBuild:
 
         # Resume should recover.
         resumed = resume_build(feature.id, project_dir)
-        assert resumed is not None
         assert resumed.status != FeatureStatus.FAILED
 
         # The failed phase should be pending again.
@@ -209,19 +213,24 @@ class TestRetryBuild:
         fail_phase(feature.id, "implementing", "broke", project_dir)
 
         retried = retry_build(feature.id, project_dir)
-        assert retried is not None
         assert retried.status != FeatureStatus.FAILED
 
         # The failed phase should be pending again.
         impl_phase = next(p for p in retried.phases if p.name == "implementing")
         assert impl_phase.status == PhaseStatus.PENDING
 
-    def test_returns_none_for_non_failed(self, project_dir: Path) -> None:
-        feature = start_build("test", "standard", project_dir)
-        assert retry_build(feature.id, project_dir) is None
+    def test_raises_for_non_failed(self, project_dir: Path) -> None:
+        from devflow.core.errors import FeatureNotFailedError
 
-    def test_returns_none_for_unknown(self, project_dir: Path) -> None:
-        assert retry_build("nonexistent", project_dir) is None
+        feature = start_build("test", "standard", project_dir)
+        with pytest.raises(FeatureNotFailedError):
+            retry_build(feature.id, project_dir)
+
+    def test_raises_for_unknown(self, project_dir: Path) -> None:
+        from devflow.core.errors import FeatureNotFoundError
+
+        with pytest.raises(FeatureNotFoundError):
+            retry_build("nonexistent", project_dir)
 
 
 class TestRunPhase:

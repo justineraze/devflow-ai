@@ -35,7 +35,7 @@ class TestPostCompactHookNormal:
             "f-001": {
                 "id": "f-001",
                 "description": "My cool feature",
-                "current_phase": "implementing",
+                "current_phase_name": "implementing",
                 "status": "in_progress",
                 "updated_at": "2026-04-15T10:00:00",
             }
@@ -56,7 +56,7 @@ class TestPostCompactHookNormal:
             "f-002": {
                 "id": "f-002",
                 "description": "Feature with plan",
-                "current_phase": "planning",
+                "current_phase_name": "planning",
                 "status": "pending",
                 "updated_at": "2026-04-15T12:00:00",
             }
@@ -79,7 +79,7 @@ class TestPostCompactHookNormal:
             "f-003": {
                 "id": "f-003",
                 "description": "Big plan",
-                "current_phase": "planning",
+                "current_phase_name": "planning",
                 "status": "pending",
                 "updated_at": "2026-04-15T12:00:00",
             }
@@ -103,14 +103,14 @@ class TestPostCompactHookNormal:
             "f-old": {
                 "id": "f-old",
                 "description": "Old feature",
-                "current_phase": "implementing",
+                "current_phase_name": "implementing",
                 "status": "in_progress",
                 "updated_at": "2026-04-10T10:00:00",
             },
             "f-new": {
                 "id": "f-new",
                 "description": "New feature",
-                "current_phase": "gate",
+                "current_phase_name": "gate",
                 "status": "in_progress",
                 "updated_at": "2026-04-15T18:00:00",
             },
@@ -135,7 +135,7 @@ class TestPostCompactHookEdgeCases:
             "f-done": {
                 "id": "f-done",
                 "description": "Finished",
-                "current_phase": "gate",
+                "current_phase_name": "gate",
                 "status": "done",
                 "updated_at": "2026-04-15T10:00:00",
             }
@@ -152,7 +152,7 @@ class TestPostCompactHookEdgeCases:
             "f-blocked": {
                 "id": "f-blocked",
                 "description": "Blocked work",
-                "current_phase": "implementing",
+                "current_phase_name": "implementing",
                 "status": "blocked",
                 "updated_at": "2026-04-15T10:00:00",
             }

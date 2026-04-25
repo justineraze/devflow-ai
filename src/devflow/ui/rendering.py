@@ -25,10 +25,6 @@ from devflow.core.metrics import (
 )
 from devflow.core.models import Feature, SyncResult
 
-# Backward-compat alias used by tests; prefer importing PhaseSnapshot from
-# devflow.core.metrics in new code.
-PhaseMetricSnapshot = PhaseSnapshot  # noqa: F401
-
 
 def _plural(n: int, word: str) -> str:
     """Return ``word`` with an 's' appended when ``n`` is not 1."""

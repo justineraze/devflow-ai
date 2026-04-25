@@ -6,8 +6,20 @@ import contextlib
 import subprocess
 from pathlib import Path
 
+from devflow.core.artifacts import archive_feature
+from devflow.core.config import load_config
 from devflow.core.models import FeatureStatus
 from devflow.core.sync_results import DirtyWorktreeError, SyncResult
+from devflow.core.workflow import load_state, save_state
+from devflow.integrations.git import (
+    branch_name,
+    delete_branch,
+    fetch_prune,
+    get_gone_branches,
+    get_orphan_feature_branches,
+    is_worktree_dirty,
+    switch_and_pull_main,
+)
 
 
 def _current_branch(cwd: Path) -> str:
@@ -25,8 +37,6 @@ def _pr_is_merged(feature_id: str, cwd: Path) -> bool:
     Uses ``gh pr view`` on the feature's branch.
     Returns False when the branch has no PR or the PR is not merged.
     """
-    from devflow.integrations.git import branch_name
-
     branch = branch_name(feature_id)
     result = subprocess.run(
         ["gh", "pr", "view", branch, "--json", "state", "--jq", ".state"],
@@ -67,17 +77,6 @@ def run_sync(
     Raises:
         DirtyWorktreeError: If the working tree has uncommitted changes.
     """
-    from devflow.core.artifacts import archive_feature
-    from devflow.core.workflow import load_state, save_state
-    from devflow.integrations.git import (
-        delete_branch,
-        fetch_prune,
-        get_gone_branches,
-        get_orphan_feature_branches,
-        is_worktree_dirty,
-        switch_and_pull_main,
-    )
-
     cwd = project_root or Path.cwd()
     result = SyncResult(dry_run=dry_run)
 
@@ -88,8 +87,6 @@ def run_sync(
         )
 
     # Step 2 — switch base branch + pull.
-    from devflow.core.config import load_config
-
     main = load_config(cwd).base_branch
     if dry_run:
         result.actions.append(f"would: git switch {main} && git pull --ff-only")

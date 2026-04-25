@@ -7,8 +7,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from devflow.integrations.gate import STACK_CHECKS
 from devflow.integrations.gate.checks import (
+    STACK_CHECKS,
     CheckDef,
     _parse_pytest,
     checks_for_stack,

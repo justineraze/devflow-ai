@@ -121,3 +121,13 @@ def set_backend(backend: Backend) -> None:
     """Override the active backend (useful for tests and alternative providers)."""
     global _current_backend  # noqa: PLW0603
     _current_backend = backend
+
+
+def clear_backend() -> None:
+    """Reset the registry so the next ``get_backend()`` call raises again.
+
+    Intended for test teardown — keeps tests from leaking a registered
+    backend across modules without poking at the private global.
+    """
+    global _current_backend  # noqa: PLW0603
+    _current_backend = None

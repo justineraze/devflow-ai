@@ -9,6 +9,7 @@ from typing import Any
 
 from devflow.core.console import console
 from devflow.core.paths import assets_dir
+from devflow.setup._settings import load_settings, write_settings_atomic
 
 # Package assets directory (relative to this file).
 ASSETS_DIR = assets_dir()
@@ -82,8 +83,6 @@ def install_hook(
 
     Returns the installed script filename.
     """
-    from devflow.setup._settings import load_settings, write_settings_atomic
-
     src = (source or ASSETS_DIR) / "hooks" / HOOK_SCRIPT_NAME
     dst_dir = hooks_dir or HOOKS_DIR
     dst = dst_dir / HOOK_SCRIPT_NAME

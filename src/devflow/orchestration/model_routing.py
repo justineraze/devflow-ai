@@ -3,7 +3,7 @@
 Resolution order for a phase, first hit wins:
 
 1. PhaseRecord.model — explicit override from the workflow YAML
-   (still a string, mapped to ModelTier via ``_tier_from_legacy``).
+   (string, mapped to ModelTier via ``_tier_from_string``).
 2. A phase-specific selector that inspects artifacts (gate.json,
    files.json). Lets us downgrade to FAST for trivial fixes or
    STANDARD for small reviews.
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from devflow.core.artifacts import read_json_artifact
 from devflow.core.backend import ModelTier
+from devflow.core.config import load_config
 from devflow.core.models import Feature, PhaseName, PhaseRecord
 from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import load_workflow
@@ -45,15 +46,12 @@ def _tier_from_string(name: str) -> ModelTier:
     return _TIER_ALIASES.get(name.lower(), DEFAULT_TIER)
 
 
-# Backwards-compat alias retained for any external imports.
-_tier_from_legacy = _tier_from_string
-
-
 # Stack → specialized developer agent.
 STACK_AGENT_MAP: dict[str, str] = {
     "python": "developer-python",
     "typescript": "developer-typescript",
     "php": "developer-php",
+    "frontend": "developer-frontend",
 }
 
 
@@ -92,7 +90,7 @@ def _select_for_fixing(
         if models:
             last = models[-1]
             if last is not None:
-                return _tier_from_legacy(last)
+                return _tier_from_string(last)
 
     data = read_json_artifact(feature_id, "gate.json", base)
     if not data:
@@ -134,7 +132,7 @@ def resolve_model(
 ) -> ModelTier:
     """Return the model tier to use for *phase*."""
     if phase.model:
-        return _tier_from_legacy(phase.model)
+        return _tier_from_string(phase.model)
 
     selector = PHASE_SELECTORS.get(phase.name)
     if selector is not None:
@@ -176,12 +174,7 @@ def get_phase_agent(
         pass
 
     if agent == "developer":
-        resolved_stack: str | None
-        if stack is not None:
-            resolved_stack = stack
-        else:
-            from devflow.core.config import load_config
-            resolved_stack = load_config(base).stack
+        resolved_stack = stack if stack is not None else load_config(base).stack
         specialized = agent_for_stack(resolved_stack)
         if specialized:
             agent = specialized

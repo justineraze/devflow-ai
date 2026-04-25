@@ -138,19 +138,31 @@ class TestReviewingSelector:
 class TestFixingEscalation:
     """Model tier is forced on gate retry >= 2 via gate_retry_models."""
 
-    def test_retry_2_forces_sonnet(self, project_dir: Path) -> None:
+    def test_retry_2_forces_standard(self, project_dir: Path) -> None:
         feature = _make_feature()
         feature.metadata.gate_retry = 2
-        feature.metadata.gate_retry_models = [None, "sonnet"]
+        feature.metadata.gate_retry_models = [None, ModelTier.STANDARD.value]
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == ModelTier.STANDARD  # sonnet = STANDARD
+        assert resolve_model(feature, phase) == ModelTier.STANDARD
 
-    def test_retry_3_forces_opus(self, project_dir: Path) -> None:
+    def test_retry_3_forces_thinking(self, project_dir: Path) -> None:
+        feature = _make_feature()
+        feature.metadata.gate_retry = 3
+        feature.metadata.gate_retry_models = [
+            None, ModelTier.STANDARD.value, ModelTier.THINKING.value,
+        ]
+        phase = PhaseRecord(name="fixing")
+        assert resolve_model(feature, phase) == ModelTier.THINKING
+
+    def test_legacy_claude_aliases_still_resolved(self, project_dir: Path) -> None:
+        """Old state.json files written before the canonical-tier migration
+        used Claude-specific aliases (sonnet/opus). _tier_from_string still
+        accepts them so resuming a stale build does not break."""
         feature = _make_feature()
         feature.metadata.gate_retry = 3
         feature.metadata.gate_retry_models = [None, "sonnet", "opus"]
         phase = PhaseRecord(name="fixing")
-        assert resolve_model(feature, phase) == ModelTier.THINKING  # opus = THINKING
+        assert resolve_model(feature, phase) == ModelTier.THINKING
 
     def test_retry_1_uses_selector(self, project_dir: Path) -> None:
         """Retry 1 stores None → selector runs normally."""

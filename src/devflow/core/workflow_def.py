@@ -13,7 +13,6 @@ class PhaseDefinition(BaseModel):
     name: PhaseName
     agent: str = ""
     description: str = ""
-    required: bool = True
     timeout: int = 300
     model: str | None = None
 

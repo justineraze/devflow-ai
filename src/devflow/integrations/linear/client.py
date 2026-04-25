@@ -18,10 +18,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from devflow.core.errors import DevflowError
+
 LINEAR_API_URL = "https://api.linear.app/graphql"
 
 
-class LinearError(Exception):
+class LinearError(DevflowError):
     """Raised on Linear API errors or missing configuration."""
 
 

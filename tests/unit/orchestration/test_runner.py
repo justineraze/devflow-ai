@@ -14,10 +14,15 @@ from devflow.orchestration.runner import (
     _find_skill_file,
     _load_agent_prompt,
     _load_skills_for_phase,
-    _parse_extends,
+    _read_md_split,
     build_prompt,
     execute_phase,
 )
+
+
+def _extends(path: Path | None) -> str | None:
+    """Helper for tests: extract the ``extends:`` value via _read_md_split."""
+    return _read_md_split(path)[0]
 
 
 @pytest.fixture
@@ -232,22 +237,22 @@ class TestSkillInjection:
         assert "Context Discipline" in prompt
 
 
-class TestParseExtends:
+class TestReadMdSplit:
     def test_returns_parent_name_from_frontmatter(self) -> None:
         path = _find_agent_file("developer-python")
-        assert _parse_extends(path) == "developer"
+        assert _extends(path) == "developer"
 
     def test_returns_none_for_agent_without_extends(self) -> None:
         path = _find_agent_file("developer")
-        assert _parse_extends(path) is None
+        assert _extends(path) is None
 
     def test_returns_none_for_missing_path(self) -> None:
-        assert _parse_extends(None) is None
+        assert _extends(None) is None
 
     def test_returns_none_for_no_frontmatter(self, tmp_path: Path) -> None:
         md = tmp_path / "agent.md"
         md.write_text("# No frontmatter\nJust content.")
-        assert _parse_extends(md) is None
+        assert _extends(md) is None
 
 
 class TestLoadAgentPrompt:
@@ -273,7 +278,7 @@ class TestLoadAgentPrompt:
         for name in ("developer-python", "developer-typescript",
                       "developer-php", "developer-frontend"):
             path = _find_agent_file(name)
-            assert _parse_extends(path) == "developer", f"{name} should extend developer"
+            assert _extends(path) == "developer", f"{name} should extend developer"
 
     def test_system_prompt_with_specialist_includes_base(self) -> None:
         from devflow.orchestration.runner import build_system_prompt

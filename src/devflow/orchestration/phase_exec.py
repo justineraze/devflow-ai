@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from devflow.core.artifacts import save_phase_output
+from devflow.core.backend import ModelTier
 from devflow.core.config import load_config
 from devflow.core.models import (
     Feature,
@@ -115,11 +116,13 @@ def reset_planning_phases(feature_id: str, base: Path | None = None) -> None:
 MAX_GATE_AUTO_RETRIES = 3
 
 # Tier escalation per retry attempt (1-indexed).
-# retry 1 = same model (None → let selector decide),
-# retry 2 = sonnet, retry 3 = opus.
-_RETRY_TIER_ESCALATION: dict[int, str] = {
-    2: "sonnet",
-    3: "opus",
+# retry 1 → no escalation (None lets the selector decide),
+# retry 2 → STANDARD, retry 3 → THINKING. Stays in core ModelTier
+# space so we don't leak Claude-specific aliases (haiku/sonnet/opus) up
+# into orchestration; each backend maps ModelTier to its own model id.
+_RETRY_TIER_ESCALATION: dict[int, ModelTier] = {
+    2: ModelTier.STANDARD,
+    3: ModelTier.THINKING,
 }
 
 
@@ -156,9 +159,11 @@ def setup_gate_retry(feature_id: str, base: Path | None = None) -> bool:
         next_attempt = attempts + 1
         feature.metadata.gate_retry = next_attempt
 
-        # Record the tier to use for this retry's fixing phase.
+        # Record the tier to use for this retry's fixing phase. We persist
+        # the canonical ModelTier value (a StrEnum) so state.json stays
+        # backend-agnostic; each backend maps it to its own model name.
         tier = _RETRY_TIER_ESCALATION.get(next_attempt)
-        feature.metadata.gate_retry_models.append(tier)
+        feature.metadata.gate_retry_models.append(tier.value if tier else None)
 
         transition_safe(feature, FeatureStatus.FIXING)
         return True

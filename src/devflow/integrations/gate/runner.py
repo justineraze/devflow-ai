@@ -8,7 +8,8 @@ import subprocess
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
-from devflow.core.gate_report import CheckResult, GateReport
+from devflow.core.artifacts import write_artifact
+from devflow.core.gate_report import MAX_CHECK_DETAILS_LEN, CheckResult, GateReport
 from devflow.core.metrics import PhaseMetrics
 from devflow.core.paths import venv_env
 from devflow.integrations.gate.checks import checks_for_stack, run_command_check
@@ -48,7 +49,7 @@ def _run_custom_check(
         message, details = "No issues", ""
     else:
         message = f"{name} failed (exit {result.returncode})"
-        details = output[:2000]
+        details = output[:MAX_CHECK_DETAILS_LEN]
 
     return CheckResult(name=name, passed=result.returncode == 0, message=message, details=details)
 
@@ -133,9 +134,6 @@ def run_gate_phase(
 
     Returns ``(passed, summary_text, metrics)``.
     """
-    # Lazy: keep run_gate() usable without artifact persistence
-    from devflow.core.artifacts import write_artifact
-
     ctx = build_context(mode="build", base_sha=base_sha, base=base)
     report = run_gate(ctx, base, stack=stack)
 

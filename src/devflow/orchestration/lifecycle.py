@@ -3,6 +3,10 @@
 Responsible for one thing: managing the birth and recovery of Feature
 objects in the project state. The build loop lives in build.py; the
 phase state machine lives in phase_exec.py.
+
+Errors are raised as typed :class:`DevflowError` subclasses so the
+caller (CLI or higher-level orchestrator) decides how to render them.
+This module performs no I/O on stdout/stderr.
 """
 
 from __future__ import annotations
@@ -11,7 +15,11 @@ from pathlib import Path
 
 from devflow.core.complexity import ComplexityScore
 from devflow.core.config import load_config
-from devflow.core.console import console
+from devflow.core.errors import (
+    FeatureAlreadyDoneError,
+    FeatureNotFailedError,
+    FeatureNotFoundError,
+)
 from devflow.core.models import Feature, PhaseStatus, generate_feature_id
 from devflow.core.phases import get_spec
 from devflow.core.state_machine import FeatureStatus, InvalidTransition
@@ -20,9 +28,6 @@ from devflow.integrations.complexity import score_complexity
 from devflow.integrations.git.smart_messages import generate_feature_title
 from devflow.integrations.linear.client import is_configured
 from devflow.integrations.linear.sync import create_issue_for_feature
-
-# Keep the private alias for backwards compatibility (tests, epics.py).
-_generate_feature_id = generate_feature_id
 
 
 def transition_safe(feature: Feature, target: FeatureStatus) -> bool:
@@ -40,29 +45,22 @@ def _score_workflow(
     """Score complexity and return (workflow_name, complexity)."""
     cfg = load_config(base)
     complexity = score_complexity(description, base, workflow_floor=cfg.workflow)
-    method_label = "scored by LLM" if complexity.method == "llm" else "heuristic fallback"
-    console.print(
-        f"[dim]Complexity: "
-        f"files={complexity.files_touched} "
-        f"integrations={complexity.integrations} "
-        f"security={complexity.security} "
-        f"scope={complexity.scope} "
-        f"→ {complexity.workflow} ({method_label})[/dim]"
-    )
     return complexity.workflow, complexity
 
 
 def _create_linear_issue_if_configured(
     feature: Feature, base: Path | None,
 ) -> None:
-    """Auto-create a Linear issue for *feature* if the integration is configured."""
+    """Auto-create a Linear issue for *feature* if the integration is configured.
+
+    Mutates ``feature.metadata`` in place; the resulting ``linear_issue_key``
+    is what the caller surfaces to the user.
+    """
     linear_team = load_config(base).linear.team
     if not linear_team:
         return
     if is_configured():
-        key = create_issue_for_feature(feature, linear_team)
-        if key:
-            console.print(f"[dim]Linear: {key}[/dim]")
+        create_issue_for_feature(feature, linear_team)
 
 
 def start_build(
@@ -74,8 +72,9 @@ def start_build(
 
     When *workflow_name* is ``None``, the workflow is auto-selected by scoring
     the feature description and project structure via :func:`score_complexity`.
-    The resulting :class:`~devflow.core.models.ComplexityScore` is stored in
-    ``feature.metadata.complexity`` for display in ``devflow status``.
+    The resulting :class:`~devflow.core.complexity.ComplexityScore` is stored
+    in ``feature.metadata.complexity`` so callers can render it without
+    re-running the scorer.
     """
     state = load_state(base)
 
@@ -87,7 +86,7 @@ def start_build(
         prompt = description
         description = title
 
-    feature_id = _generate_feature_id(description)
+    feature_id = generate_feature_id(description)
 
     counter = 1
     original_id = feature_id
@@ -132,51 +131,45 @@ def _recover_failed_feature(feature: Feature) -> None:
 def resume_build(
     feature_id: str,
     base: Path | None = None,
-) -> Feature | None:
+) -> Feature:
     """Resume an existing feature build.
 
-    If the feature is failed, resets the failed phase to pending
-    so it can be retried.
+    Raises :class:`FeatureNotFoundError` when the ID is unknown and
+    :class:`FeatureAlreadyDoneError` when the feature is in a terminal state.
+    A failed feature is recovered (its last failed phase resets to pending)
+    before being returned.
     """
     with mutate_feature(feature_id, base) as feature:
         if not feature:
-            console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-            return None
+            raise FeatureNotFoundError(f"Feature {feature_id!r} not found.")
         if feature.is_terminal:
-            console.print(
-                f"[yellow]Feature {feature_id!r} is already {feature.status.value}.[/yellow]"
+            raise FeatureAlreadyDoneError(
+                f"Feature {feature_id!r} is already {feature.status.value}.",
             )
-            return None
-
         if feature.status == FeatureStatus.FAILED:
             _recover_failed_feature(feature)
-            console.print(f"[cyan]Recovering {feature_id} from failed state.[/cyan]")
-
         return feature
 
 
 def retry_build(
     feature_id: str,
     base: Path | None = None,
-) -> Feature | None:
+) -> Feature:
     """Retry a failed feature by resetting the failed phase.
 
-    Unlike resume_build, this is strictly for FAILED features
-    and skips any feedback/re-planning flow.
+    Unlike :func:`resume_build`, this is strictly for FAILED features and
+    skips any feedback / re-planning flow. Raises
+    :class:`FeatureNotFoundError` when the ID is unknown and
+    :class:`FeatureNotFailedError` when the feature is not in FAILED status.
     """
     with mutate_feature(feature_id, base) as feature:
         if not feature:
-            console.print(f"[red]Feature {feature_id!r} not found.[/red]")
-            return None
-
+            raise FeatureNotFoundError(f"Feature {feature_id!r} not found.")
         if feature.status != FeatureStatus.FAILED:
-            console.print(
-                f"[yellow]Feature {feature_id!r} is {feature.status.value}, not failed.[/yellow]"
+            raise FeatureNotFailedError(
+                f"Feature {feature_id!r} is {feature.status.value}, not failed.",
             )
-            return None
-
         _recover_failed_feature(feature)
-        console.print(f"[cyan]Retrying {feature_id} — reset failed phase to pending.[/cyan]")
         return feature
 
 

@@ -72,6 +72,64 @@ class TestDetectStack:
         assert detect_stack(tmp_path) == "python"
 
 
+class TestFrontendDetection:
+    """A typescript project with a frontend framework should resolve to 'frontend'."""
+
+    def _ts_project(self, tmp_path: Path) -> None:
+        (tmp_path / "index.ts").touch()
+        (tmp_path / "app.tsx").touch()
+
+    def test_react_project_detected_as_frontend(self, tmp_path: Path) -> None:
+        import json
+        self._ts_project(tmp_path)
+        (tmp_path / "package.json").write_text(json.dumps({
+            "dependencies": {"react": "^18.0.0", "react-dom": "^18.0.0"},
+        }))
+        assert detect_stack(tmp_path) == "frontend"
+
+    def test_next_project_detected_as_frontend(self, tmp_path: Path) -> None:
+        import json
+        self._ts_project(tmp_path)
+        (tmp_path / "package.json").write_text(json.dumps({
+            "dependencies": {"next": "^14.0.0"},
+        }))
+        assert detect_stack(tmp_path) == "frontend"
+
+    def test_devdependencies_count(self, tmp_path: Path) -> None:
+        import json
+        self._ts_project(tmp_path)
+        (tmp_path / "package.json").write_text(json.dumps({
+            "devDependencies": {"vue": "^3.0.0"},
+        }))
+        assert detect_stack(tmp_path) == "frontend"
+
+    def test_typescript_without_framework_stays_typescript(self, tmp_path: Path) -> None:
+        import json
+        self._ts_project(tmp_path)
+        (tmp_path / "package.json").write_text(json.dumps({
+            "dependencies": {"express": "^4.0.0"},
+        }))
+        assert detect_stack(tmp_path) == "typescript"
+
+    def test_no_package_json_stays_typescript(self, tmp_path: Path) -> None:
+        self._ts_project(tmp_path)
+        assert detect_stack(tmp_path) == "typescript"
+
+    def test_malformed_package_json_stays_typescript(self, tmp_path: Path) -> None:
+        self._ts_project(tmp_path)
+        (tmp_path / "package.json").write_text("{not valid json")
+        assert detect_stack(tmp_path) == "typescript"
+
+    def test_python_project_with_react_package_stays_python(self, tmp_path: Path) -> None:
+        """Frontend promotion only applies when the primary language is JS/TS."""
+        import json
+        (tmp_path / "main.py").touch()
+        (tmp_path / "package.json").write_text(json.dumps({
+            "dependencies": {"react": "^18.0.0"},
+        }))
+        assert detect_stack(tmp_path) == "python"
+
+
 class TestResolveStack:
     """Tests for resolve_stack — saved state takes precedence over detection."""
 
