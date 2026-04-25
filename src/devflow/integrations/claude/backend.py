@@ -255,6 +255,15 @@ class ClaudeCodeBackend:
 
         if proc.returncode == 0:
             return True, metrics.final_text or "Phase completed", metrics
+
+        # Warn (don't crash) when the stderr drainer is still alive: we're
+        # about to read *stderr_buf* concurrently with its last appends.
+        # The GIL keeps the read safe but the message may be truncated.
+        if stderr_reader.is_alive():
+            log.warning(
+                "claude stderr drain thread still alive after 1s join; "
+                "error message may be truncated.",
+            )
         stderr_text = "".join(stderr_buf).strip()
         return False, stderr_text or metrics.final_text or "Unknown error", metrics
 

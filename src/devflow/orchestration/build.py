@@ -210,7 +210,11 @@ def _handle_post_phase_commit(
     """
     if git_status_porcelain():
         msg = generate_commit_message(feature, phase=phase.name)
-        git.commit_changes(msg, exclude=initial_untracked)
+        # Return value (False = nothing actually committed because every
+        # change matched *exclude*) is intentionally discarded: the
+        # subsequent collect_phase_result picks up the real state
+        # whether the commit happened or not.
+        _ = git.commit_changes(msg, exclude=initial_untracked)
 
     phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
@@ -542,9 +546,12 @@ def execute_build_loop(
     record = build_metrics_from(feature, totals, success=True)
     append_build_metrics(record, base)
 
-    current_sha = git.get_head_sha()
+    # Compare full SHAs — `git rev-parse --short` may emit more than 7
+    # chars to disambiguate large repos, so the previous `[:7]` slice
+    # could spuriously trigger on_do_success for an unchanged HEAD.
+    current_sha = git.get_head_sha(short=False)
     cb.on_build_summary(feature, totals, None, "", None)
-    if current_sha != initial_sha[:7]:
+    if current_sha != initial_sha:
         cb.on_do_success(current_sha, initial_sha)
     return True
 

@@ -12,12 +12,13 @@ from __future__ import annotations
 
 # Backwards-compat re-export — the test suite still imports STACK_CHECKS
 # from this façade.  Internal modules should import from .checks directly.
-from devflow.integrations.gate.checks import STACK_CHECKS  # noqa: F401
+from devflow.integrations.gate.checks import STACK_CHECKS
 from devflow.integrations.gate.context import GateContext, build_context
 from devflow.integrations.gate.report import CheckResult, GateReport
 from devflow.integrations.gate.runner import run_gate, run_gate_phase
 
 __all__ = [
+    "STACK_CHECKS",
     "CheckResult",
     "GateContext",
     "GateReport",

@@ -480,6 +480,10 @@ class TestReviewLoop:
 
 
 class TestAutoCommitAfterPhase:
+    # Stub porcelain so the build loop *thinks* the agent left dirty changes
+    # — required since the auto-commit guard short-circuits when the working
+    # tree is clean (the unit test runs in tmp_path with no real git repo).
+    @patch("devflow.orchestration.build.git_status_porcelain", return_value=" M f")
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")
     @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_OK)
@@ -488,14 +492,17 @@ class TestAutoCommitAfterPhase:
     def test_commit_called_after_implementing(
         self, mock_pr: MagicMock, mock_branch: MagicMock,
         mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,
+        mock_porcelain: MagicMock,
         project_dir: Path,
     ) -> None:
         feature = start_build("test", "quick", project_dir)
         execute_build_loop(feature, base=project_dir)
-        # commit_changes should be called with a message containing "implementing".
         commit_msgs = [c[0][0] for c in mock_commit.call_args_list]
-        assert any("implementing" in msg for msg in commit_msgs)
+        assert any("implementing" in msg for msg in commit_msgs), (
+            f"expected an 'implementing' commit, got {commit_msgs!r}"
+        )
 
+    @patch("devflow.orchestration.build.git_status_porcelain", return_value=" M f")
     @patch("devflow.integrations.git.commit_changes", return_value=False)
     @patch("devflow.integrations.git.get_diff_stat", return_value="")
     @patch("devflow.orchestration.build._execute_phase", return_value=_PHASE_OK)
@@ -504,6 +511,7 @@ class TestAutoCommitAfterPhase:
     def test_commit_not_called_for_gate(
         self, mock_pr: MagicMock, mock_branch: MagicMock,
         mock_exec: MagicMock, mock_diff: MagicMock, mock_commit: MagicMock,
+        mock_porcelain: MagicMock,
         project_dir: Path,
     ) -> None:
         feature = start_build("test", "quick", project_dir)
