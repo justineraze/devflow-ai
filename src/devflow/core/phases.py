@@ -19,21 +19,39 @@ from typing import Self
 
 from pydantic import BaseModel, model_validator
 
-from devflow.core.models import FeatureStatus, PhaseName
+from devflow.core.backend import ModelTier
+from devflow.core.models import FeatureStatus, PhaseName, PhaseType
 
 
 class PhaseSpec(BaseModel):
-    """Static metadata for one phase of the build state machine."""
+    """Static metadata for one phase of the build state machine.
+
+    ``post_phase`` and ``on_failure`` are string keys into a dispatch
+    table maintained by :mod:`devflow.orchestration.build`. They stay as
+    strings (not callables) so the spec remains a pure ``BaseModel`` —
+    serializable, hashable, comparable — while still letting the build
+    loop add a new phase by registering exactly one handler under each
+    key. The build loop never branches on ``phase_type`` directly.
+    """
 
     model_config = {"frozen": True}
 
     name: PhaseName
+    phase_type: PhaseType
     feature_status: FeatureStatus
-    model_default: str
+    model_default: ModelTier
     skills: tuple[str, ...] = ()
     context_deps: tuple[PhaseName, ...] = ()
     instructions: str = ""
     runs_claude: bool = True
+    post_phase: str | None = None
+    """Handler key for the post-success path. Resolved against the
+    dispatcher in :mod:`devflow.orchestration.build`. ``None`` falls
+    back to a generic no-op (just record metrics)."""
+
+    on_failure: str | None = None
+    """Handler key for the failure path. ``None`` falls back to the
+    standard fail-and-record-metrics behaviour."""
 
     @model_validator(mode="after")
     def _no_self_dep(self) -> Self:
@@ -76,6 +94,16 @@ _INSTRUCTIONS_IMPLEMENTING = (
     "Each commit = one plan step, verified green (ruff + pytest pass)."
 )
 
+INSTRUCTIONS_IMPLEMENTING_QUICK = (
+    "## Instructions\n\n"
+    "Implement the requested change.\n"
+    "Write tests alongside the code.\n"
+    "Run ruff and pytest after each change.\n\n"
+    "**IMPORTANT — Do NOT commit.**\n"
+    "Do NOT run git add, git commit, or any git command.\n"
+    "The caller will handle the single commit after you're done."
+)
+
 _INSTRUCTIONS_REVIEWING = (
     "## Instructions\n\n"
     "Review the implementation changes.\n"
@@ -100,60 +128,71 @@ _INSTRUCTIONS_FIXING = (
 PHASES: dict[PhaseName, PhaseSpec] = {
     PhaseName.ARCHITECTURE: PhaseSpec(
         name=PhaseName.ARCHITECTURE,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLANNING,
-        model_default="opus",
-        skills=("planning-rigor",),
+        model_default=ModelTier.THINKING,
+        skills=("devflow-planning",),
         context_deps=(),
         instructions=_INSTRUCTIONS_ARCHITECTURE,
     ),
     PhaseName.PLANNING: PhaseSpec(
         name=PhaseName.PLANNING,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLANNING,
-        model_default="opus",
-        skills=("planning-rigor",),
+        model_default=ModelTier.THINKING,
+        skills=("devflow-planning",),
         context_deps=(PhaseName.ARCHITECTURE,),
         instructions=_INSTRUCTIONS_PLANNING,
     ),
     PhaseName.PLAN_REVIEW: PhaseSpec(
         name=PhaseName.PLAN_REVIEW,
+        phase_type=PhaseType.PLANNING,
         feature_status=FeatureStatus.PLAN_REVIEW,
-        model_default="sonnet",
-        skills=("code-review", "planning-rigor"),
+        model_default=ModelTier.STANDARD,
+        skills=("devflow-review", "devflow-planning"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_PLAN_REVIEW,
     ),
     PhaseName.IMPLEMENTING: PhaseSpec(
         name=PhaseName.IMPLEMENTING,
+        phase_type=PhaseType.CODE,
         feature_status=FeatureStatus.IMPLEMENTING,
-        model_default="sonnet",
-        skills=("incremental-build", "tdd-discipline"),
+        model_default=ModelTier.STANDARD,
+        skills=("devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_IMPLEMENTING,
+        post_phase="commit_changes",
     ),
     PhaseName.REVIEWING: PhaseSpec(
         name=PhaseName.REVIEWING,
+        phase_type=PhaseType.REVIEW,
         feature_status=FeatureStatus.REVIEWING,
-        model_default="opus",
-        skills=("code-review", "refactor-first"),
+        model_default=ModelTier.THINKING,
+        skills=("devflow-review", "devflow-refactor"),
         context_deps=(PhaseName.PLANNING,),
         instructions=_INSTRUCTIONS_REVIEWING,
     ),
     PhaseName.FIXING: PhaseSpec(
         name=PhaseName.FIXING,
+        phase_type=PhaseType.CODE,
         feature_status=FeatureStatus.FIXING,
-        model_default="sonnet",
-        skills=("incremental-build", "tdd-discipline"),
+        model_default=ModelTier.STANDARD,
+        skills=("devflow-debug", "devflow-incremental", "devflow-tdd"),
         context_deps=(PhaseName.REVIEWING,),
         instructions=_INSTRUCTIONS_FIXING,
+        post_phase="commit_changes",
     ),
     PhaseName.GATE: PhaseSpec(
         name=PhaseName.GATE,
+        phase_type=PhaseType.GATE,
         feature_status=FeatureStatus.GATE,
-        model_default="sonnet",
+        model_default=ModelTier.STANDARD,
         skills=(),
         context_deps=(),
         instructions="",
         runs_claude=False,
+        post_phase="render_gate_panel",
+        on_failure="gate_retry",
     ),
 }
 
@@ -197,8 +236,8 @@ def is_known_phase(name: str | PhaseName) -> bool:
 
 
 __all__ = [
+    "INSTRUCTIONS_IMPLEMENTING_QUICK",
     "PHASES",
-    "PhaseName",
     "PhaseSpec",
     "UnknownPhase",
     "get_spec",

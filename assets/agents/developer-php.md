@@ -7,9 +7,8 @@ trigger: auto-detected when project uses PHP
 
 # Agent: Developer — PHP Specialist
 
-Extends the base developer agent with PHP-specific expertise.
-All rules from `developer.md` apply. This agent covers modern PHP 8.x,
-PSR standards, and framework patterns (Laravel, Symfony).
+Modern PHP 8.x, PSR standards, and framework patterns (Laravel, Symfony).
+Base developer rules are loaded automatically via `extends`.
 
 ## PHP version & style
 

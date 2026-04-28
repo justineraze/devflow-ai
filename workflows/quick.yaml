@@ -5,11 +5,9 @@ phases:
   - name: implementing
     agent: developer
     description: Write the code directly
-    required: true
     timeout: 900
 
   - name: gate
     agent: tester
     description: Run quality gate
-    required: true
     timeout: 300

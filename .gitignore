@@ -23,6 +23,7 @@ htmlcov/
 # Linting
 .ruff_cache/
 .mypy_cache/
+.import_linter_cache/
 
 # IDE
 .vscode/
@@ -38,5 +39,7 @@ Thumbs.db
 # Project state
 .devflow/
 
-# Lockfile
-uv.lock
+# devflow
+.devflow/state.json
+.devflow/.worktrees/
+.devflow/*.lock

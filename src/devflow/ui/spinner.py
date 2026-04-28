@@ -9,36 +9,30 @@ from __future__ import annotations
 from types import TracebackType
 
 from rich.live import Live
-from rich.text import Text
+from rich.spinner import Spinner
+from rich.table import Table
 
-from devflow.ui.console import console
-
-# Emoji icon per tool name prefix (first word of the tool name).
-_TOOL_ICONS: dict[str, str] = {
-    "read": "📖",
-    "write": "✏️",
-    "edit": "✏️",
-    "bash": "⚡",
-    "grep": "🔍",
-    "glob": "🔍",
-    "agent": "🤖",
-    "task": "📋",
-    "web": "🌐",
-    "todo": "📝",
-}
-
-
-def _tool_icon(tool_name: str) -> str:
-    """Return an emoji for *tool_name* (case-insensitive prefix match)."""
-    key = tool_name.lower().split("(")[0].strip()
-    for prefix, icon in _TOOL_ICONS.items():
-        if key.startswith(prefix):
-            return icon
-    return "🔧"
+from devflow.core.console import console
+from devflow.core.formatting import tool_icon
 
 
 class PhaseSpinner:
     """Rich Live spinner showing the last tool action in-place.
+
+    Polling loop
+    ------------
+    Rich's ``Live`` widget runs an internal refresh loop at 8 fps — it
+    re-renders the display grid on each tick without any external prompt.
+    Callers drive the *content* of that display by calling :meth:`update`
+    each time the backend emits a new tool event.  The two loops are
+    intentionally decoupled: the render loop keeps the terminal alive and
+    the spinner animating even if the agent is silent, while ``update``
+    only changes what text is shown on the next tick.
+
+    In practice ``update`` is wired to ``BuildCallbacks.phase_tool_listener``
+    (see :mod:`devflow.cli`) so the spinner reflects the agent's most recent
+    tool call throughout the phase, then stays visible after the phase
+    completes (``transient=False``).
 
     Usage::
 
@@ -49,28 +43,28 @@ class PhaseSpinner:
 
     def __init__(self, phase_name: str) -> None:
         self._phase_name = phase_name
-        self._renderable = self._make_text("…")
+        self._action = "waiting for agent…"
+        self._spinner = Spinner("dots", style="cyan bold")
         self._live = Live(
-            self._renderable,
+            self._make_renderable(),
             console=console,
             refresh_per_second=8,
             transient=False,
         )
 
-    def _make_text(self, action: str) -> Text:
-        t = Text()
-        t.append("⠋ ", style="cyan bold")
-        t.append(self._phase_name, style="bold")
-        t.append("  ·  ", style="dim")
-        t.append(action, style="dim")
-        return t
+    def _make_renderable(self) -> Table:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_row(
+            self._spinner,
+            f"[bold]{self._phase_name}[/bold]  [dim]·  {self._action}[/dim]",
+        )
+        return grid
 
     def update(self, tool_name: str, summary: str) -> None:
         """Update the spinner text with the latest tool action."""
-        icon = _tool_icon(tool_name)
-        action = f"{icon} {tool_name}  {summary}"
-        self._renderable = self._make_text(action)
-        self._live.update(self._renderable)
+        icon = tool_icon(tool_name)
+        self._action = f"{icon} {tool_name}  {summary}"
+        self._live.update(self._make_renderable())
 
     def stop(self) -> None:
         """Stop the live display."""

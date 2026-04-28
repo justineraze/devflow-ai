@@ -97,19 +97,17 @@ message = "Feature {!r} not found".format(feature_id)
 3. **Run pytest** — verify your test passes AND no existing tests broke
 4. **Verify the step is complete** — re-read the plan step, make sure nothing is missing
 
-## Architecture rules
+## Architecture layers
 
 - **cli.py** — Typer commands only. Imports business logic, calls it, renders output. Zero logic.
-- **models.py** — Pydantic models and enums. State machine transitions here.
-- **workflow.py** — YAML loading, state persistence. Uses models.
-- **track.py** — Thin wrapper for reading/writing state. Uses workflow.
-- **gate.py** — Quality checks (ruff, pytest, secrets). Subprocess calls here.
-- **install.py** — File sync to ~/.claude/. Uses shutil.
-- **display.py** — All Rich rendering. Console output only here.
-- **build.py** — Orchestration logic. Coordinates other modules.
+- **core/** — Pydantic models, state machine, pure helpers, no I/O.
+- **orchestration/** — Build loop, runner, prompt assembly, model routing.
+- **integrations/** — Bridges to external tools (git, gate, claude, linear).
+- **ui/** — Rich rendering only.
+- **setup/** — Install, doctor — one-time ops.
 
-If your change doesn't fit any of these, create a new module with a clear single
-responsibility.
+If your change doesn't fit any of these, propose a new submodule with a clear
+single responsibility — never grow a god module.
 
 ## Error handling
 

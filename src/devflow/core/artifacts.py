@@ -8,13 +8,28 @@ prompt compact and stable enough to benefit from prompt caching.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
+from devflow.core.paths import atomic_write_text
+from devflow.core.phases import UnknownPhase, get_spec
 from devflow.core.workflow import ensure_devflow_dir
 
 
+def _validate_path_component(value: str, label: str = "ID") -> None:
+    """Reject path separators and traversal sequences in user-supplied IDs."""
+    if "/" in value or "\\" in value or ".." in value:
+        raise ValueError(f"Invalid {label}: {value!r}")
+
+
 def feature_dir(feature_id: str, base: Path | None = None) -> Path:
-    """Return .devflow/<feature_id>/, creating it if missing."""
+    """Return .devflow/<feature_id>/, creating it if missing.
+
+    Raises ``ValueError`` if *feature_id* contains path separators or
+    traversal sequences (defense-in-depth against crafted ``--resume`` args).
+    """
+    _validate_path_component(feature_id, "feature ID")
     devflow = ensure_devflow_dir(base)
     path = devflow / feature_id
     path.mkdir(parents=True, exist_ok=True)
@@ -31,9 +46,7 @@ def write_artifact(
 ) -> Path:
     """Write an artifact atomically (tmp + rename) to avoid partial writes."""
     target = artifact_path(feature_id, name, base)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(content)
-    tmp.rename(target)
+    atomic_write_text(target, content)
     return target
 
 
@@ -44,7 +57,27 @@ def read_artifact(
     target = artifact_path(feature_id, name, base)
     if not target.exists():
         return None
-    return target.read_text()
+    return target.read_text(encoding="utf-8")
+
+
+def read_json_artifact(
+    feature_id: str, name: str, base: Path | None = None,
+) -> dict[str, Any] | None:
+    """Read an artifact and parse it as JSON, or None if missing/malformed.
+
+    Used by ``build.py`` (gate panel rendering) and ``model_routing.py``
+    (gate.json / files.json selectors). Swallows ``JSONDecodeError`` the
+    same way the callers previously did — a corrupt artifact is equivalent
+    to a missing one for routing/rendering purposes.
+    """
+    raw = read_artifact(feature_id, name, base)
+    if raw is None:
+        return None
+    try:
+        parsed: dict[str, Any] = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed
 
 
 def save_phase_output(
@@ -68,8 +101,7 @@ def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
     Returns the destination path.
     Raises ``FileNotFoundError`` if the feature directory does not exist.
     """
-    from devflow.core.workflow import ensure_devflow_dir
-
+    _validate_path_component(feature_id, "feature ID")
     devflow = ensure_devflow_dir(project_root)
     src = devflow / feature_id
     if not src.exists():
@@ -85,8 +117,6 @@ def archive_feature(feature_id: str, project_root: Path | None = None) -> Path:
 
 def context_deps_for(phase_name: str) -> tuple[str, ...]:
     """Return the phase names whose outputs should be injected as context."""
-    from devflow.core.phases import UnknownPhase, get_spec
-
     try:
         return tuple(dep.value for dep in get_spec(phase_name).context_deps)
     except UnknownPhase:

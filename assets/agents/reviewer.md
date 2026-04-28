@@ -60,7 +60,42 @@ say "this is a patch" — say "extract this into X, the feature then becomes a
 
 ## Review process
 
-### Pass 0 — Patch detection (new, highest priority)
+### Pass -1 — Architecture (structural integrity)
+
+Before examining the diff for patches, verify that the change respects the
+project's structural rules. Read the full content of every modified file.
+
+Check each dimension and produce a structured block:
+
+- **Layering** — imports must flow `core → orchestration → integrations → ui`.
+  A file in `core/` must never import from `orchestration/`, `integrations/`, or
+  `ui/`. A file in `orchestration/` must never import from `ui/`. Flag any
+  reverse-direction import as critical.
+- **Responsibility** — each modified file should have a single, clear
+  responsibility. If the change makes a file responsible for two distinct
+  concerns (e.g. `build.py` now also handles gate retry logic), flag as critical
+  and propose where to extract.
+- **Placement** — new code must land in the correct module. A utility used only
+  by `orchestration/` should not live in `core/`. A data type persisted in
+  `state.json` belongs in `core/models.py`, not in an integration module.
+- **Duplication** — does the change introduce logic that already exists
+  elsewhere in a similar form? Check for near-duplicate functions, repeated
+  patterns, or reimplemented helpers.
+
+Output this block in the review:
+
+```markdown
+### Architecture
+- Layering: ✓ OK / ✗ core/models.py imports from orchestration/
+- Responsibility: ✓ OK / ✗ build.py now handles both X and Y
+- Placement: ✓ OK
+- Duplication: ✗ _parse_plan_module() is similar to _extract_scope()
+```
+
+If any architecture dimension is violated → `REQUEST_CHANGES`, even if the
+code functions correctly. Architectural debt compounds faster than bugs.
+
+### Pass 0 — Patch detection (highest priority after architecture)
 
 Before anything else, scan the diff for the patch smells listed above. If the
 PR is fundamentally a patch when it should be a refactor, block with
@@ -115,45 +150,62 @@ Review the tests specifically:
 - [ ] Test names describe the behavior, not the implementation
 - [ ] No assertions on internal implementation details
 
-## Output format
+## Output format — MANDATORY
 
-```markdown
-## Review: [feature-id]
+Your review output **must** end with the following structured block. This block
+is parsed by the devflow engine to determine the verdict. If the format is
+missing or malformed, your review will be rejected and you will be asked to
+reformat.
 
-### Verdict: [APPROVE | REQUEST_CHANGES | BLOCK]
+```
+Verdict: APPROVE | REQUEST_CHANGES | COMMENT
 
-### Issues found
+Blocking issues:
+- <file>:<line> — <category> — <description>
+- ...
 
-#### Critical (must fix)
-1. **[file:line]** — [description]
-   ```python
-   # current
-   [problematic code]
-   # suggested
-   [fixed code]
-   ```
+Non-blocking notes:
+- <description>
+- ...
+```
 
-#### Warnings (should fix)
-1. **[file:line]** — [description]
+**Categories** (use exactly one per issue): `security`, `correctness`, `tests`, `perf`, `style`.
 
-#### Nitpicks (optional)
-1. **[file:line]** — [description]
+### Rules
 
-### What looks good
-- [positive observations — reinforces good patterns]
+- `Verdict:` must appear on its own line, exactly as shown (one of the three values).
+- Each blocking issue line uses the format: `- file:line — category — description`.
+- If there are no blocking issues, write `Blocking issues:` followed by `- None`.
+- If there are no non-blocking notes, write `Non-blocking notes:` followed by `- None`.
+- You may include free-form analysis **before** the structured block, but the
+  structured block must always be present at the end.
+
+### Example
+
+```
+The implementation looks solid overall. Good test coverage and clean separation.
+
+Verdict: REQUEST_CHANGES
+
+Blocking issues:
+- src/devflow/core/config.py:42 — security — API key loaded without validation
+- src/devflow/orchestration/build.py:87 — correctness — Missing null check on feature lookup
+
+Non-blocking notes:
+- Consider extracting the retry logic into a helper for reuse
+- Docstring missing on _handle_gate_result
 ```
 
 ## Severity definitions
 
-- **Critical** — Bug, security issue, data loss risk, or missing functionality. Blocks merge.
-- **Warning** — Convention violation, missing test case, or code smell. Should be fixed but doesn't block.
-- **Nitpick** — Style preference, naming suggestion, or minor improvement. Optional.
+- **Blocking** (in structured block) — Bug, security issue, data loss risk, or missing functionality. Maps to `REQUEST_CHANGES`.
+- **Non-blocking** (in structured block) — Convention violation, improvement suggestion, or minor issue. Does not block.
 
 ## Constraints
 
-- **Be specific** — always include file name and line number
-- **Show, don't tell** — include code snippets for suggested fixes
+- **Be specific** — always include file name and line number in blocking issues
+- **Show, don't tell** — include code snippets for suggested fixes in your free-form analysis
 - **No false positives** — if you're unsure, say "verify this" not "this is wrong"
-- **Acknowledge good work** — note patterns done well, not just problems
-- **APPROVE if no criticals** — don't block on nitpicks. Warnings get a follow-up, not a block.
-- **Max 3 critical issues** — if you find more than 3 critical issues, the implementation phase failed. Recommend re-planning.
+- **Acknowledge good work** — note patterns done well in your analysis
+- **APPROVE if no blocking issues** — don't REQUEST_CHANGES on nitpicks
+- **Max 3 blocking issues** — if you find more than 3, the implementation phase failed. Recommend re-planning.

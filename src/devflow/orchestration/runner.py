@@ -1,35 +1,62 @@
-"""Runner — prompt building and Claude Code execution."""
+"""Runner — prompt building and phase execution via the backend."""
 
 from __future__ import annotations
 
-import contextlib
-import os
 import subprocess
-import sys
 from pathlib import Path
 
-from devflow.core.artifacts import context_deps_for, load_phase_output
-from devflow.core.metrics import PhaseMetrics
-from devflow.core.models import Feature, PhaseRecord
-from devflow.core.phases import UnknownPhase, get_spec
+import structlog
+
+from devflow.core.artifacts import context_deps_for, load_phase_output, read_artifact
+from devflow.core.backend import get_backend
+from devflow.core.console import console
+from devflow.core.formatting import format_tool_line
+from devflow.core.metrics import PhaseMetrics, ToolUse
+from devflow.core.models import Feature, PhaseName, PhaseRecord
+from devflow.core.paths import assets_dir, venv_env
+from devflow.core.phases import (
+    INSTRUCTIONS_IMPLEMENTING_QUICK,
+    UnknownPhase,
+    get_spec,
+)
+from devflow.core.workflow import load_workflow
+from devflow.integrations.git import get_fix_commit_log
+from devflow.orchestration.events import (
+    PhaseToolListenerFactory,
+    _silent_phase_listener,
+)
 from devflow.orchestration.model_routing import resolve_model
-from devflow.ui.console import console
+
+log = structlog.get_logger(__name__)
 
 # Where agents and skills live after `devflow install`.
 INSTALLED_AGENTS_DIR = Path.home() / ".claude" / "agents"
 INSTALLED_SKILLS_DIR = Path.home() / ".claude" / "skills"
-# Fallback: bundled assets in the package.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-BUNDLED_AGENTS_DIR = _PROJECT_ROOT / "assets" / "agents"
-BUNDLED_SKILLS_DIR = _PROJECT_ROOT / "assets" / "skills"
+
+
+def _bundled_dir(subdir: str) -> Path:
+    """Locate a bundled asset directory shipped with the package."""
+    return assets_dir() / subdir
 
 # Skills always injected on every phase.
-ALWAYS_ON_SKILLS: tuple[str, ...] = ("context-discipline",)
+ALWAYS_ON_SKILLS: tuple[str, ...] = ("devflow-context",)
 
-# Hard ceiling for a single Claude phase. 30 minutes covers planning
-# and implementing on large features; anything past that is almost
-# certainly a hung process and we'd rather kill it than freeze the CLI.
-PHASE_TIMEOUT_S: int = 30 * 60
+# Hard ceiling for a single phase when no per-phase timeout is
+# configured in the workflow YAML. 30 minutes covers planning and
+# implementing on large features.
+DEFAULT_PHASE_TIMEOUT_S: int = 30 * 60
+
+
+def _phase_timeout(feature: Feature, phase: PhaseRecord) -> int:
+    """Return the timeout for *phase*, preferring the workflow YAML value."""
+    try:
+        wf = load_workflow(feature.workflow)
+        for phase_def in wf.phases:
+            if phase_def.name == phase.name:
+                return phase_def.timeout
+    except FileNotFoundError:
+        pass
+    return DEFAULT_PHASE_TIMEOUT_S
 
 
 def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path | None:
@@ -43,29 +70,71 @@ def _find_asset_file(name: str, installed_dir: Path, bundled_dir: Path) -> Path 
 
 def _find_agent_file(agent_name: str) -> Path | None:
     """Locate the agent .md file."""
-    return _find_asset_file(agent_name, INSTALLED_AGENTS_DIR, BUNDLED_AGENTS_DIR)
+    return _find_asset_file(agent_name, INSTALLED_AGENTS_DIR, _bundled_dir("agents"))
 
 
 def _find_skill_file(skill_name: str) -> Path | None:
     """Locate the skill .md file."""
-    return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, BUNDLED_SKILLS_DIR)
+    return _find_asset_file(skill_name, INSTALLED_SKILLS_DIR, _bundled_dir("skills"))
+
+
+def _read_md_split(path: Path | None) -> tuple[str | None, str]:
+    """Read an .md file once and return ``(extends_value, body)``.
+
+    Splits the YAML frontmatter from the body in a single I/O pass —
+    callers that need both the body and the ``extends:`` field do not
+    re-open the file. ``extends_value`` is ``None`` when the frontmatter
+    is missing or has no ``extends:`` key.
+    """
+    if not path:
+        return None, ""
+
+    content = path.read_text(encoding="utf-8")
+
+    if not content.startswith("---"):
+        return None, content
+
+    end = content.find("---", 3)
+    if end == -1:
+        return None, content
+
+    frontmatter = content[3:end]
+    body = content[end + 3:].lstrip("\n")
+
+    extends: str | None = None
+    for line in frontmatter.splitlines():
+        if line.startswith("extends:"):
+            value = line.split(":", 1)[1].strip()
+            extends = value or None
+            break
+
+    return extends, body
 
 
 def _load_md_content(path: Path | None) -> str:
     """Read an .md file and strip YAML frontmatter."""
-    if not path:
-        return ""
-    content = path.read_text()
-    if content.startswith("---"):
-        end = content.find("---", 3)
-        if end != -1:
-            content = content[end + 3:].lstrip("\n")
-    return content
+    return _read_md_split(path)[1]
 
 
 def _load_agent_prompt(agent_name: str) -> str:
-    """Load the agent's .md file content."""
-    return _load_md_content(_find_agent_file(agent_name))
+    """Load the agent's .md file content, resolving ``extends`` chains.
+
+    When a specialist agent (e.g. ``developer-python``) declares
+    ``extends: developer`` in its frontmatter, the base agent content is
+    loaded first, followed by the specialist delta. This makes the base
+    a stable prefix for prompt caching — identical across all stacks.
+    """
+    path = _find_agent_file(agent_name)
+    parent_name, own_content = _read_md_split(path)
+
+    parts: list[str] = []
+    if parent_name:
+        base_content = _load_md_content(_find_agent_file(parent_name))
+        if base_content:
+            parts.append(base_content)
+    if own_content:
+        parts.append(own_content)
+    return "\n\n---\n\n".join(parts)
 
 
 def _load_skills_for_phase(phase_name: str) -> str:
@@ -110,7 +179,7 @@ def build_system_prompt(phase_name: str, agent_name: str) -> str:
     """Build the stable part of the prompt (skills + agent role).
 
     This content depends only on the phase type and agent, not on the
-    specific feature. Passing it via `--system-prompt` lets Anthropic
+    specific feature. Passing it via `--system-prompt` lets the backend
     cache it across calls, reducing cost significantly.
     """
     sections = []
@@ -126,6 +195,46 @@ def build_system_prompt(phase_name: str, agent_name: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
+MAX_RETRY_CONTEXT_CHARS = 2000
+"""Rough ceiling (~500 tokens) per previous attempt in the retry section."""
+
+
+def _build_retry_context(feature: Feature) -> str:
+    """Build a 'Tentatives précédentes' section for fixing retries.
+
+    When gate_retry > 0, inject a summary of what was tried before so
+    the model can take a different approach.  Includes the fix commit
+    log and gate errors from the last attempt.
+    """
+    retry = feature.metadata.gate_retry
+    if retry <= 0:
+        return ""
+
+    parts = [f"# Tentatives précédentes ({retry})\n"]
+
+    commit_log = ""
+    try:
+        commit_log = get_fix_commit_log()
+    except (subprocess.SubprocessError, OSError):
+        log.warning("Could not read fix commit log", exc_info=True)
+
+    gate_json = read_artifact(feature.id, "gate.json")
+
+    section = ""
+    if commit_log:
+        trimmed = commit_log[:MAX_RETRY_CONTEXT_CHARS]
+        if len(commit_log) > MAX_RETRY_CONTEXT_CHARS:
+            trimmed += "\n… (tronqué)"
+        section += f"Commits fix ({retry} tentatives):\n```\n{trimmed}\n```\n"
+    if gate_json:
+        truncated_gate = gate_json[:MAX_RETRY_CONTEXT_CHARS]
+        section += f"Erreur gate (dernière):\n```json\n{truncated_gate}\n```\n"
+    section += "\nCes fixes n'ont pas marché. Essaie une approche différente.\n"
+    parts.append(section)
+
+    return "\n".join(parts)
+
+
 def build_user_prompt(feature: Feature, phase: PhaseRecord) -> str:
     """Build the variable part of the prompt (task + context + feedback).
 
@@ -133,10 +242,14 @@ def build_user_prompt(feature: Feature, phase: PhaseRecord) -> str:
     """
     sections = []
 
+    # Use the full original prompt when available (long prompts are
+    # summarised into feature.description at creation time).
+    task_description = feature.prompt or feature.description
+
     sections.append(f"""# Current task
 
 Feature: {feature.id}
-Description: {feature.description}
+Description: {task_description}
 Workflow: {feature.workflow}
 Current phase: {phase.name}
 Feature status: {feature.status.value}""")
@@ -145,18 +258,25 @@ Feature status: {feature.status.value}""")
     if previous_context:
         sections.append(f"# Context from previous phases\n\n{previous_context}")
 
-    if phase.name == "fixing":
-        from devflow.core.artifacts import read_artifact
-
+    if phase.name == PhaseName.FIXING:
         gate_json = read_artifact(feature.id, "gate.json")
         if gate_json:
             sections.append(
                 "# Gate failures to fix (structured)\n\n"
                 "The quality gate failed with the following checks. This is "
                 "the authoritative source of truth — not the reviewer's "
-                "free-form text. For each check with `passed: false`:\n"
-                "- Read `details` for the exact errors (ruff rule codes, "
-                "pytest test names with tracebacks, secret patterns).\n"
+                "free-form text.\n\n"
+                "## How to read the report\n\n"
+                "Each check has three possible states:\n"
+                "- `passed: true` — nothing to do.\n"
+                "- `passed: false, skipped: false` — **code error**: fix it in "
+                "the source. Read `details` for exact error codes/tracebacks.\n"
+                "- `passed: false, skipped: true` — **environment error**: the "
+                "tool was not found or could not run. Do NOT modify source code "
+                "for skipped checks. Instead: (1) verify the tool is installed "
+                "by running it directly, (2) check PATH, (3) if the tool is "
+                "genuinely missing, report it and stop — do not loop.\n\n"
+                "## Rules for code errors (`skipped: false`)\n\n"
                 "- Fix the failing check at its source, do not silence it.\n"
                 "- After each fix, commit atomically "
                 "(`git add -A && git commit -m 'fix: ...'`).\n"
@@ -164,8 +284,14 @@ Feature status: {feature.status.value}""")
                 f"```json\n{gate_json}\n```"
             )
 
+        # Inject previous retry context so the model avoids repeating
+        # the same failed approach.
+        retry_section = _build_retry_context(feature)
+        if retry_section:
+            sections.append(retry_section)
+
     feedback = feature.metadata.feedback
-    if feedback and phase.name == "planning":
+    if feedback and phase.name == PhaseName.PLANNING:
         sections.append(
             "# User feedback on previous plan\n\n"
             "The user rejected the previous plan with this feedback:\n\n"
@@ -174,7 +300,7 @@ Feature status: {feature.status.value}""")
             "Don't repeat the unchanged parts; focus on the requested changes."
         )
 
-    phase_instructions = _get_phase_instructions(phase.name)
+    phase_instructions = _get_phase_instructions(phase.name, workflow=feature.workflow)
     if phase_instructions:
         sections.append(phase_instructions)
 
@@ -198,8 +324,15 @@ def build_prompt(
     return "\n\n---\n\n".join(parts)
 
 
-def _get_phase_instructions(phase_name: str) -> str:
-    """Return the instructions string for *phase_name*."""
+def _get_phase_instructions(phase_name: str, workflow: str = "") -> str:
+    """Return the instructions string for *phase_name*.
+
+    When the workflow is ``"quick"`` and the phase is ``implementing``,
+    returns alternate instructions that forbid intermediate commits
+    (the caller handles the single commit).
+    """
+    if workflow == "quick" and phase_name == PhaseName.IMPLEMENTING:
+        return INSTRUCTIONS_IMPLEMENTING_QUICK
     try:
         return get_spec(phase_name).instructions
     except UnknownPhase:
@@ -211,107 +344,50 @@ def execute_phase(
     phase: PhaseRecord,
     agent_name: str,
     verbose: bool = False,
+    phase_tool_listener: PhaseToolListenerFactory = _silent_phase_listener,
+    cwd: Path | None = None,
 ) -> tuple[bool, str, PhaseMetrics]:
-    """Execute a phase by calling Claude Code.
+    """Execute a phase by calling the active backend.
 
-    In default mode, shows a Rich spinner updated with the last tool action.
-    With ``verbose=True``, streams every tool line to the console instead
-    (matches the original behaviour, useful for debugging).
+    UI rendering for tool-use events is delegated to *phase_tool_listener*
+    (a factory yielding a per-phase ``on_tool`` callback).  The CLI plugs
+    in a Rich spinner; tests use the silent default.  ``verbose=True``
+    additionally echoes each tool line to the console.
 
-    The final phase-summary chip is rendered by the caller from the returned
-    PhaseMetrics — keeps the runner focused on I/O.
+    Keeping the listener as a parameter — instead of a lazy
+    ``from devflow.ui.spinner import …`` — preserves the orchestration →
+    UI layering: this module no longer imports anything from ``ui/``.
+
+    The final phase-summary chip is rendered by the caller from the
+    returned PhaseMetrics.
     """
-    from devflow.orchestration.stream import format_tool_line, parse_event
-    from devflow.ui.spinner import PhaseSpinner
+    backend = get_backend()
 
     system_prompt = build_system_prompt(phase.name, agent_name)
     user_prompt = build_user_prompt(feature, phase)
-    model = resolve_model(feature, phase)
-    cwd = str(Path.cwd())
+    tier = resolve_model(feature, phase)
+    model = backend.model_name(tier)
+    timeout = _phase_timeout(feature, phase)
+    cwd = cwd or Path.cwd()
+    agent_env = venv_env(cwd)
 
-    # Prepend the active virtualenv's bin dir so the agent can run ruff,
-    # pytest, devflow, etc. without PATH issues.
-    venv_bin = str(Path(sys.executable).parent)
-    agent_env = os.environ.copy()
-    agent_env["PATH"] = f"{venv_bin}{os.pathsep}{agent_env.get('PATH', '')}"
-
-    cmd = [
-        "claude", "-p", "-",
-        "--model", model,
-        "--permission-mode", "acceptEdits",
-        "--output-format", "stream-json",
-        "--verbose",
-    ]
-    if system_prompt:
-        cmd.extend(["--system-prompt", system_prompt])
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=cwd,
-            env=agent_env,
-        )
-
-        proc.stdin.write(user_prompt)
-        proc.stdin.close()
-
-        metrics = PhaseMetrics()
-        tool_count = 0
-
-        # verbose=True: stream every tool line (original behaviour).
-        # verbose=False (default): spinner updated in-place with last action.
-        spinner_ctx = (
-            contextlib.nullcontext(None) if verbose else PhaseSpinner(phase.name)
-        )
-        with spinner_ctx as spinner:
-            for line in proc.stdout:
-                parsed = parse_event(line)
-                if not parsed:
-                    continue
-                kind, payload = parsed
-                if kind == "tool":
-                    tool_count += 1
-                    tool_line = format_tool_line(payload)
-                    if verbose:
-                        console.print(f"[dim]{tool_line}[/dim]")
-                    elif spinner is not None:
-                        parts = tool_line.split(None, 2)
-                        spinner.update(
-                            parts[1] if len(parts) > 1 else "tool",
-                            parts[2] if len(parts) > 2 else "",
-                        )
-                elif kind == "metrics":
-                    metrics = payload
-                    metrics.tool_count = tool_count
+    with phase_tool_listener(phase.name) as ui_on_tool:
+        def _on_tool(tool: ToolUse) -> None:
+            if verbose:
+                console.print(f"[dim]{format_tool_line(tool)}[/dim]")
+            if ui_on_tool is not None:
+                ui_on_tool(tool)
 
         try:
-            proc.wait(timeout=PHASE_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            return False, (
-                f"Phase timed out after {PHASE_TIMEOUT_S}s. "
-                "Increase PHASE_TIMEOUT_S or split the feature."
-            ), metrics
-
-        if proc.returncode == 0:
-            return True, metrics.final_text or "Phase completed", metrics
-        stderr = proc.stderr.read().strip()
-        return False, stderr or metrics.final_text or "Unknown error", metrics
-
-    except FileNotFoundError:
-        return False, (
-            "Claude Code CLI not found. "
-            "Install it: https://docs.anthropic.com/en/docs/claude-code"
-        ), PhaseMetrics()
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted.[/yellow]")
-        with contextlib.suppress(Exception):
-            proc.terminate()
-        return False, "Interrupted by user", PhaseMetrics()
-
-
+            return backend.execute(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                timeout=timeout,
+                cwd=cwd,
+                env=agent_env,
+                on_tool=_on_tool,
+            )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted.[/yellow]")
+            return False, "Interrupted by user", PhaseMetrics()

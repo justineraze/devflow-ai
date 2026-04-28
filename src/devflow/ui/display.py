@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from devflow.core.console import console, is_quiet
+from devflow.core.epics import epic_progress
+from devflow.core.formatting import format_cost, format_duration, format_tokens
+from devflow.core.history import BuildMetrics
+from devflow.core.kpis import MetricsDashboard
 from devflow.core.models import Feature, FeatureStatus, PhaseStatus, WorkflowState
-from devflow.ui.console import console
+
+
+@dataclass
+class _PhaseAccumulator:
+    """Running totals for a single phase type across multiple builds."""
+
+    cost: float = 0.0
+    duration: float = 0.0
+    tokens: int = 0
+    runs: int = 0
+    cache_read: int = 0
+    cache_total: int = 0
 
 # Status colors for visual feedback.
 STATUS_COLORS: dict[str, str] = {
@@ -35,10 +52,62 @@ def status_style(status: str) -> str:
 
 def render_header(title: str = "devflow-ai", subtitle: str = "") -> None:
     """Render the app header panel."""
+    if is_quiet():
+        return
     content = Text(title, style="bold cyan")
     if subtitle:
         content.append(f"\n{subtitle}", style="dim")
     console.print(Panel(content, border_style="cyan", padding=(0, 2)))
+
+
+def _epic_status_cell(state: WorkflowState, epic_id: str) -> Text:
+    """Build a status cell showing epic progress (e.g. '3/5 done')."""
+    progress = epic_progress(state, epic_id)
+    if progress.all_done:
+        return Text("done", style="green bold")
+    parts = f"{progress.done}/{progress.total} done"
+    if progress.in_progress:
+        parts += f", {progress.in_progress} active"
+    if progress.failed:
+        parts += f", {progress.failed} blocked"
+    return Text(parts, style="cyan")
+
+
+def _add_feature_row(
+    table: Table,
+    feature: Feature,
+    state: WorkflowState,
+    indent: str = "",
+) -> None:
+    """Add a single feature row to the table, with optional indent."""
+    is_epic = state.is_epic(feature.id)
+    phase_info = _current_phase_info(feature)
+    workflow_cell = feature.workflow
+    if feature.metadata.complexity is not None:
+        workflow_cell = f"{feature.workflow} ({feature.metadata.complexity.total}/12)"
+
+    if is_epic:
+        status_cell = _epic_status_cell(state, feature.id)
+        phase_info = ""
+    else:
+        style = status_style(feature.status.value)
+        status_cell = Text(feature.status.value, style=style)
+
+    if feature.metadata.worktree_path:
+        phase_info = f"{phase_info} [dim][wt][/dim]" if phase_info else "[dim][worktree][/dim]"
+
+    linear_cell = feature.metadata.linear_issue_key or "—"
+
+    label = f"{indent}{feature.id}"
+    table.add_row(
+        label,
+        _truncate(feature.description, 50),
+        status_cell,
+        workflow_cell,
+        phase_info,
+        linear_cell,
+        feature.updated_at.strftime("%Y-%m-%d %H:%M"),
+    )
 
 
 def render_status_table(
@@ -46,6 +115,7 @@ def render_status_table(
 ) -> None:
     """Render a table showing features and their current status.
 
+    Epics are shown with their sub-features indented below them.
     Archived features (post-sync) are hidden by default.
     Pass ``include_archived=True`` to show them.
     """
@@ -66,19 +136,30 @@ def render_status_table(
     table.add_column("Status")
     table.add_column("Workflow", style="dim")
     table.add_column("Phase")
+    table.add_column("Linear", style="dim")
     table.add_column("Updated")
 
+    # Separate epics, children, and standalone features.
+    child_ids = {f.id for f in visible if f.parent_id}
+    rendered: set[str] = set()
+
     for feature in visible:
-        style = status_style(feature.status.value)
-        phase_info = _current_phase_info(feature)
-        table.add_row(
-            feature.id,
-            _truncate(feature.description, 50),
-            Text(feature.status.value, style=style),
-            feature.workflow,
-            phase_info,
-            feature.updated_at.strftime("%Y-%m-%d %H:%M"),
-        )
+        if feature.id in rendered:
+            continue
+
+        if state.is_epic(feature.id):
+            # Render epic header + children indented.
+            _add_feature_row(table, feature, state)
+            rendered.add(feature.id)
+            for child in state.children_of(feature.id):
+                if not include_archived and child.metadata.archived:
+                    continue
+                _add_feature_row(table, child, state, indent="  └ ")
+                rendered.add(child.id)
+        elif feature.id not in child_ids:
+            # Standalone feature (no parent).
+            _add_feature_row(table, feature, state)
+            rendered.add(feature.id)
 
     console.print(table)
 
@@ -90,9 +171,21 @@ def render_feature_detail(feature: Feature) -> None:
     console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
     console.print(f"Workflow: [dim]{feature.workflow}[/dim]")
 
+    if feature.metadata.worktree_path:
+        console.print(f"Worktree: [dim]{feature.metadata.worktree_path}[/dim]")
+
+    if feature.metadata.complexity is not None:
+        c = feature.metadata.complexity
+        console.print(
+            f"Complexity: [dim]{c.total}/12 "
+            f"(files:{c.files_touched} integrations:{c.integrations} "
+            f"security:{c.security} scope:{c.scope})[/dim] "
+            f"→ [bold]{c.workflow}[/bold]"
+        )
+
     if feature.phases:
         console.print("\nPhases:")
-        for _i, phase in enumerate(feature.phases, 1):
+        for phase in feature.phases:
             ps = status_style(phase.status.value)
             marker = _phase_marker(phase.status)
             console.print(f"  {marker} [{ps}]{phase.name}[/{ps}]")
@@ -143,7 +236,7 @@ def _truncate(text: str, max_len: int) -> str:
     return text[: max_len - 1] + "…"
 
 
-def _format_duration(start: datetime, end: datetime) -> str:
+def _format_elapsed(start: datetime, end: datetime) -> str:
     """Format the duration between two datetimes as a human-readable string."""
     total_seconds = int((end - start).total_seconds())
     if total_seconds < 60:
@@ -184,7 +277,7 @@ def render_log_table(features: list[Feature]) -> None:
         style = status_style(feature.status.value)
         total = len(feature.phases)
         done = sum(1 for p in feature.phases if p.status == PhaseStatus.DONE)
-        duration = _format_duration(feature.created_at, feature.updated_at)
+        duration = _format_elapsed(feature.created_at, feature.updated_at)
         table.add_row(
             feature.id,
             Text(feature.status.value, style=style),
@@ -197,14 +290,335 @@ def render_log_table(features: list[Feature]) -> None:
     console.print(table)
 
 
+def render_metrics_table(records: list[BuildMetrics]) -> None:
+    """Render build metrics: last build summary, phase averages, build history."""
+    if not records:
+        console.print("[dim]No build history yet. Run a build to start tracking.[/dim]")
+        return
+
+    _render_last_build(records[0])
+
+    if len(records) > 1:
+        _render_phase_averages(records)
+
+    _render_build_history(records)
+
+
+def _render_last_build(record: BuildMetrics) -> None:
+    """Render a summary panel for the most recent build."""
+    success_style = "green" if record.success else "red bold"
+    success_icon = "✓" if record.success else "✗"
+    header = (
+        f"[bold]{record.feature_id}[/bold]  "
+        f"[{success_style}]{success_icon}[/{success_style}]  "
+        f"[yellow]{format_cost(record.cost_usd)}[/yellow]  ·  "
+        f"{format_duration(record.duration_s)}  ·  "
+        f"[dim]{record.timestamp[:10]}[/dim]"
+    )
+    console.print(Panel(header, title="Last build", border_style="dim", padding=(0, 1)))
+
+    if not record.phases:
+        return
+
+    phase_table = Table(border_style="dim", padding=(0, 1))
+    phase_table.add_column("Phase")
+    phase_table.add_column("Model", style="dim")
+    phase_table.add_column("Cost", justify="right")
+    phase_table.add_column("Tokens", justify="right")
+    phase_table.add_column("Cache%", justify="right")
+    phase_table.add_column("Changes", justify="right", style="dim")
+    phase_table.add_column("Duration", justify="right")
+    phase_table.add_column("", justify="center")
+
+    for p in record.phases:
+        total_tokens = p.input_tokens + p.cache_creation + p.cache_read
+        cache_pct = f"{int(p.cache_read / total_tokens * 100)}%" if total_tokens > 0 else "—"
+        p_icon = Text("✓", style="green") if p.success else Text("✗", style="red")
+        row_style = "" if p.success else "red"
+
+        # Show commit/change stats if available.
+        changes = ""
+        if p.commits:
+            parts = [f"{p.commits} commit{'s' if p.commits != 1 else ''}"]
+            if p.insertions or p.deletions:
+                parts.append(f"+{p.insertions}/-{p.deletions}")
+            changes = " ".join(parts)
+
+        phase_table.add_row(
+            Text(p.name, style=row_style or "default"),
+            p.model or "—",
+            format_cost(p.cost_usd),
+            format_tokens(p.input_tokens + p.cache_creation + p.cache_read),
+            cache_pct,
+            changes,
+            format_duration(p.duration_s),
+            p_icon,
+            style=row_style,
+        )
+
+    console.print(phase_table)
+
+
+def _accumulate_phase_stats(
+    records: list[BuildMetrics],
+) -> dict[str, _PhaseAccumulator]:
+    """Aggregate per-phase totals across multiple build records."""
+    acc: dict[str, _PhaseAccumulator] = {}
+    for r in records:
+        for p in r.phases:
+            a = acc.setdefault(p.name, _PhaseAccumulator())
+            a.cost += p.cost_usd
+            a.duration += p.duration_s
+            total_tokens = p.input_tokens + p.cache_creation + p.cache_read
+            a.tokens += total_tokens
+            a.cache_read += p.cache_read
+            a.cache_total += total_tokens
+            a.runs += 1
+    return acc
+
+
+def _phase_average_row(name: str, a: _PhaseAccumulator) -> tuple[str, Text, str, str, Text, str]:
+    """Build one row for the phase-averages table."""
+    avg_cost = a.cost / a.runs
+    avg_duration = a.duration / a.runs
+    avg_tokens = a.tokens // a.runs
+
+    if a.cache_total > 0:
+        cpct = int(a.cache_read / a.cache_total * 100)
+        cache_style = "green" if cpct >= 60 else "yellow"
+        cache_cell = Text(f"{cpct}%", style=cache_style)
+    else:
+        cache_cell = Text("—", style="dim")
+
+    return (
+        name,
+        Text(format_cost(avg_cost)),
+        format_duration(avg_duration),
+        format_tokens(avg_tokens),
+        cache_cell,
+        str(a.runs),
+    )
+
+
+def _render_phase_averages(records: list[BuildMetrics]) -> None:
+    """Render avg cost/duration/tokens per phase type across all builds, sorted by cost."""
+    acc = _accumulate_phase_stats(records)
+    if not acc:
+        return
+
+    sorted_phases = sorted(
+        acc.items(),
+        key=lambda x: x[1].cost / x[1].runs if x[1].runs > 0 else 0.0,
+        reverse=True,
+    )
+
+    table = Table(title="Avg cost by phase", border_style="dim")
+    table.add_column("Phase", style="bold")
+    table.add_column("Avg Cost", justify="right")
+    table.add_column("Avg Duration", justify="right")
+    table.add_column("Avg Tokens", justify="right")
+    table.add_column("Cache %", justify="right")
+    table.add_column("Runs", justify="right", style="dim")
+
+    total_avg_cost = 0.0
+    total_avg_duration = 0.0
+    total_avg_tokens = 0
+    total_cache_read = 0
+    total_cache_total = 0
+
+    for name, a in sorted_phases:
+        total_avg_cost += a.cost / a.runs
+        total_avg_duration += a.duration / a.runs
+        total_avg_tokens += a.tokens // a.runs
+        total_cache_read += a.cache_read
+        total_cache_total += a.cache_total
+        table.add_row(*_phase_average_row(name, a))
+
+    if total_cache_total > 0:
+        total_cpct = int(total_cache_read / total_cache_total * 100)
+        total_cache_style = "green" if total_cpct >= 60 else "yellow"
+        total_cache_cell = Text(f"{total_cpct}%", style=total_cache_style)
+    else:
+        total_cache_cell = Text("—", style="dim")
+
+    table.add_section()
+    table.add_row(
+        "[dim]Total avg[/dim]",
+        Text(format_cost(total_avg_cost), style="yellow"),
+        format_duration(total_avg_duration),
+        format_tokens(total_avg_tokens),
+        total_cache_cell,
+        "[dim]—[/dim]",
+    )
+
+    console.print(table)
+
+
+def _aggregate_model_costs(record: BuildMetrics) -> dict[str, float]:
+    """Sum cost per model tier across all phases of a single build record."""
+    model_costs: dict[str, float] = {}
+    for p in record.phases:
+        tier = p.model or "unknown"
+        model_costs[tier] = model_costs.get(tier, 0.0) + p.cost_usd
+    return model_costs
+
+
+def _render_build_history(records: list[BuildMetrics]) -> None:
+    """Render the per-build history table with a summary line."""
+    table = Table(title="Build history", border_style="dim")
+    table.add_column("Feature", style="bold", max_width=28)
+    table.add_column("", justify="center")  # status icon
+    table.add_column("Cost", justify="right")
+    table.add_column("Tokens in", justify="right")
+    table.add_column("Cache %", justify="right")
+    table.add_column("Duration", justify="right")
+    table.add_column("Gate", justify="center")
+    table.add_column("Models", style="dim", max_width=20)
+    table.add_column("Date", style="dim")
+
+    for r in records:
+        status_icon = Text("✓", style="green") if r.success else Text("✗", style="red")
+        cache_pct = f"{int(r.cache_hit_rate * 100)}%"
+        cache_style = "green" if r.cache_hit_rate > 0.5 else "yellow"
+        duration = format_duration(r.duration_s)
+
+        if r.success:
+            gate = "✓" if r.gate_passed_first_try else f"retry ×{r.gate_retries}"
+            gate_style = "green" if r.gate_passed_first_try else "yellow"
+        else:
+            gate = r.failed_phase or "—"
+            gate_style = "red"
+
+        model_costs = _aggregate_model_costs(r)
+        if model_costs:
+            parts = []
+            for tier, cost in sorted(model_costs.items(), key=lambda x: -x[1]):
+                parts.append(f"{tier} {format_cost(cost)}")
+            models_str = " · ".join(parts)
+        else:
+            models_str = "—"
+
+        table.add_row(
+            _truncate(r.feature_id, 28),
+            status_icon,
+            Text(format_cost(r.cost_usd), style="yellow"),
+            format_tokens(r.input_tokens + r.cache_creation + r.cache_read),
+            Text(cache_pct, style=cache_style),
+            duration,
+            Text(gate, style=gate_style),
+            models_str,
+            r.timestamp[:10],
+        )
+
+    console.print(table)
+
+    if len(records) > 1:
+        successes = [r for r in records if r.success]
+        avg_cost = sum(r.cost_usd for r in records) / len(records)
+        avg_cache = sum(r.cache_hit_rate for r in records) / len(records)
+        total_cost = sum(r.cost_usd for r in records)
+        success_rate = len(successes) / len(records) * 100
+        console.print(
+            f"  [dim]{len(records)} builds · "
+            f"{int(success_rate)}% success · "
+            f"avg {format_cost(avg_cost)}/build · "
+            f"avg cache {int(avg_cache * 100)}% · "
+            f"total {format_cost(total_cost)}[/dim]"
+        )
+
+
+
+def render_metrics_dashboard(dashboard: MetricsDashboard) -> None:
+    """Render the KPI dashboard as a Rich panel."""
+    if dashboard.total_features == 0:
+        console.print("[dim]No metrics data. Run a build to start tracking.[/dim]")
+        return
+
+    lines: list[str] = []
+    lines.append(
+        f"  Total: [yellow]{format_cost(dashboard.total_cost)}[/yellow] "
+        f"across {dashboard.total_features} feature"
+        f"{'s' if dashboard.total_features != 1 else ''}"
+    )
+    lines.append("")
+
+    if dashboard.top_features_by_cost:
+        lines.append("  [bold]Top features by cost:[/bold]")
+        for fid, cost in dashboard.top_features_by_cost:
+            pct = int(cost / dashboard.total_cost * 100) if dashboard.total_cost else 0
+            lines.append(
+                f"    {fid:<24} [yellow]{format_cost(cost)}[/yellow]  ({pct}%)"
+            )
+        lines.append("")
+
+    gate_n = int(dashboard.gate_first_try_rate * dashboard.total_features)
+    lines.append(
+        f"  Gate first-try rate: [bold]{int(dashboard.gate_first_try_rate * 100)}%[/bold] "
+        f"({gate_n}/{dashboard.total_features})"
+    )
+
+    lines.append(
+        f"  Time-to-PR: median {_format_compact_duration(dashboard.time_to_pr_median_s)}, "
+        f"p90 {_format_compact_duration(dashboard.time_to_pr_p90_s)}"
+    )
+
+    cache_pct = int(dashboard.cache_hit_rate * 100)
+    cache_style = "green" if cache_pct >= 60 else "yellow"
+    lines.append(f"  Cache hit rate: [{cache_style}]{cache_pct}%[/{cache_style}]")
+
+    if dashboard.cost_by_backend:
+        parts = [
+            f"{b} {format_cost(c)}"
+            for b, c in sorted(dashboard.cost_by_backend.items(), key=lambda x: -x[1])
+        ]
+        lines.append(f"  Cost by backend: {', '.join(parts)}")
+
+    if dashboard.budget_warnings:
+        lines.append("")
+        for fid, cost, limit in dashboard.budget_warnings:
+            lines.append(
+                f"  [yellow]⚠ {fid} exceeded budget "
+                f"({format_cost(cost)} > {format_cost(limit)})[/yellow]"
+            )
+
+    body = "\n".join(lines)
+    console.print(Panel(body, title="devflow metrics", border_style="cyan", padding=(1, 0)))
+
+
+def _format_compact_duration(seconds: float) -> str:
+    """Format seconds as compact human string (e.g. '4m12s', '1h30m')."""
+    if seconds <= 0:
+        return "—"
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    minutes = total // 60
+    secs = total % 60
+    if minutes < 60:
+        return f"{minutes}m{secs:02d}s" if secs else f"{minutes}m"
+    hours = minutes // 60
+    remaining = minutes % 60
+    if remaining:
+        return f"{hours}h{remaining:02d}m"
+    return f"{hours}h"
+
+
 def render_log_detail(feature: Feature) -> None:
     """Render detailed log view for a single feature."""
     style = status_style(feature.status.value)
-    duration = _format_duration(feature.created_at, feature.updated_at)
+    duration = _format_elapsed(feature.created_at, feature.updated_at)
 
     console.print(f"\n[bold]{feature.id}[/bold] — {feature.description}")
     console.print(f"Status: [{style}]{feature.status.value}[/{style}]")
     console.print(f"Workflow: [dim]{feature.workflow}[/dim]")
+    if feature.metadata.complexity is not None:
+        c = feature.metadata.complexity
+        console.print(
+            f"Complexity: [dim]{c.total}/12 "
+            f"(files:{c.files_touched} integrations:{c.integrations} "
+            f"security:{c.security} scope:{c.scope})[/dim] "
+            f"→ [bold]{c.workflow}[/bold]"
+        )
     console.print(f"Created: [dim]{feature.created_at.strftime('%Y-%m-%d %H:%M')}[/dim]")
     console.print(f"Duration: [dim]{duration}[/dim]")
 
@@ -222,7 +636,7 @@ def render_log_detail(feature: Feature) -> None:
         ps = status_style(phase.status.value)
         marker = _phase_marker(phase.status)
         if phase.started_at and phase.completed_at:
-            phase_duration = _format_duration(phase.started_at, phase.completed_at)
+            phase_duration = _format_elapsed(phase.started_at, phase.completed_at)
         else:
             phase_duration = "—"
         error = _truncate(phase.error, 60) if phase.error else ""

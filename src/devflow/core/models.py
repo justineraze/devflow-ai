@@ -1,11 +1,31 @@
-"""Pydantic models and state machine for devflow-ai."""
+"""Feature lifecycle models — the persisted domain objects.
+
+This module owns the *feature* domain (Feature, PhaseRecord, PhaseStatus,
+PhaseName, PhaseType, FeatureMetadata, WorkflowState, generate_feature_id).
+
+A handful of types are also re-exported here because consumers still
+import them from ``models`` rather than from the sibling module:
+
+- :class:`FeatureStatus` from :mod:`devflow.core.state_machine`.
+- :class:`ComplexityScore` from :mod:`devflow.core.complexity`.
+- :class:`SyncResult` from :mod:`devflow.core.sync_results`.
+
+Anything else (VALID_TRANSITIONS, InvalidTransition, DirtyWorktreeError,
+CRITICAL_PATH_PATTERNS, WorkflowDefinition, PhaseDefinition) must be
+imported from its canonical module.
+"""
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from devflow.core.complexity import ComplexityScore
+from devflow.core.state_machine import VALID_TRANSITIONS, FeatureStatus, InvalidTransition
+from devflow.core.sync_results import SyncResult
 
 
 class FeatureMetadata(BaseModel):
@@ -17,6 +37,13 @@ class FeatureMetadata(BaseModel):
     gate_retry: int = 0
     """Number of automatic gate→fixing→gate retry cycles consumed."""
 
+    gate_retry_models: list[str | None] = Field(default_factory=list)
+    """Model tier used at each gate retry (e.g. [None, 'sonnet', 'opus']).
+    None entries mean "no escalation, let the selector decide"."""
+
+    review_cycles: int = 0
+    """Number of review→fix→review cycles consumed (max 2)."""
+
     archived: bool = False
     """True after devflow sync archives a merged feature."""
 
@@ -24,8 +51,45 @@ class FeatureMetadata(BaseModel):
     """Primary module touched (e.g. 'runner', 'gate'). Parsed from the plan's
     Module: line — used as the Conventional Commits scope in commit messages."""
 
+    title: str | None = None
+    """Concise title parsed from the plan header (e.g. 'document Pydantic vs
+    dataclass convention'). Used instead of the raw description for PR titles."""
+
+    commit_type: str | None = None
+    """Conventional Commits type parsed from the plan's Type: line.  Mapped from
+    plan types (new-feature→feat, bugfix→fix, refactor→refactor, docs→docs,
+    ci→ci, test→test).  Falls back to workflow-based default when absent."""
+
+    complexity: ComplexityScore | None = None
+    """Complexity score computed at feature creation (auto-select workflow)."""
+
+    worktree_path: str | None = None
+    """Absolute path to the git worktree for this feature, if any.
+    None when the feature runs on the current branch."""
+
+    review_reformat_retries: int = 0
+    """Number of reviewer reformat retries consumed (max 1)."""
+
+    double_review_done: bool = False
+    """True after the second independent review has been scheduled."""
+
+    linear_issue_id: str | None = None
+    """Linear issue UUID. Set when synced to Linear."""
+
+    linear_issue_key: str | None = None
+    """Linear issue identifier for display (e.g. 'ABC-123')."""
+
     model_config = {"extra": "allow"}
     """Allow unknown keys so old state.json files deserialise without error."""
+
+
+class PhaseType(StrEnum):
+    """Semantic category for phases — replaces scattered name checks."""
+
+    PLANNING = "planning"
+    CODE = "code"
+    REVIEW = "review"
+    GATE = "gate"
 
 
 class PhaseStatus(StrEnum):
@@ -48,102 +112,6 @@ class PhaseName(StrEnum):
     REVIEWING = "reviewing"
     FIXING = "fixing"
     GATE = "gate"
-
-
-class FeatureStatus(StrEnum):
-    """Lifecycle status of a feature."""
-
-    PENDING = "pending"
-    PLANNING = "planning"
-    PLAN_REVIEW = "plan_review"
-    IMPLEMENTING = "implementing"
-    REVIEWING = "reviewing"
-    FIXING = "fixing"
-    GATE = "gate"
-    DONE = "done"
-    BLOCKED = "blocked"
-    FAILED = "failed"
-
-
-# Valid transitions: current_status -> set of allowed next statuses.
-# Every non-terminal state can also fall into BLOCKED (waiting on user)
-# or FAILED (recoverable via --resume) — listed inline below for one
-# truth-table at a glance, no post-init mutation required.
-_RECOVERY: frozenset[FeatureStatus] = frozenset(
-    {FeatureStatus.BLOCKED, FeatureStatus.FAILED},
-)
-VALID_TRANSITIONS: dict[FeatureStatus, set[FeatureStatus]] = {
-    FeatureStatus.PENDING: {
-        FeatureStatus.PLANNING,
-        FeatureStatus.IMPLEMENTING,
-        *_RECOVERY,
-    },
-    # PLANNING can skip plan_review in workflows that don't include it.
-    FeatureStatus.PLANNING: {
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        *_RECOVERY,
-    },
-    FeatureStatus.PLAN_REVIEW: {
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.PLANNING,
-        *_RECOVERY,
-    },
-    # IMPLEMENTING can skip review in light/quick workflows.
-    FeatureStatus.IMPLEMENTING: {
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        *_RECOVERY,
-    },
-    FeatureStatus.REVIEWING: {
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-        *_RECOVERY,
-    },
-    FeatureStatus.FIXING: {
-        FeatureStatus.REVIEWING,
-        FeatureStatus.GATE,
-        FeatureStatus.DONE,
-        *_RECOVERY,
-    },
-    FeatureStatus.GATE: {
-        FeatureStatus.DONE,
-        FeatureStatus.FIXING,
-        *_RECOVERY,
-    },
-    FeatureStatus.DONE: set(),
-    FeatureStatus.BLOCKED: {
-        FeatureStatus.PENDING,
-        FeatureStatus.PLANNING,
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-        FeatureStatus.BLOCKED,
-        FeatureStatus.FAILED,
-    },
-    # FAILED is recoverable via --resume: can go back to any non-terminal state.
-    FeatureStatus.FAILED: {
-        FeatureStatus.PENDING,
-        FeatureStatus.PLANNING,
-        FeatureStatus.PLAN_REVIEW,
-        FeatureStatus.IMPLEMENTING,
-        FeatureStatus.REVIEWING,
-        FeatureStatus.FIXING,
-        FeatureStatus.GATE,
-    },
-}
-
-
-class InvalidTransition(Exception):
-    """Raised when a feature status transition is not allowed."""
-
-    def __init__(self, current: FeatureStatus, target: FeatureStatus) -> None:
-        self.current = current
-        self.target = target
-        super().__init__(f"Cannot transition from {current.value!r} to {target.value!r}")
 
 
 class PhaseRecord(BaseModel):
@@ -183,25 +151,50 @@ class PhaseRecord(BaseModel):
         self.error = error
 
 
+def generate_feature_id(description: str) -> str:
+    """Generate a short feature ID from a description.
+
+    Format: ``feat-<slug>-<MMDD>`` where slug is the first 3 words,
+    lowercased and stripped of special characters.
+    """
+    words = re.sub(r"[^a-zA-Z0-9\s]", "", description.lower()).split()
+    slug = "-".join(words[:3])
+    timestamp = datetime.now(UTC).strftime("%m%d")
+    return f"feat-{slug}-{timestamp}" if slug else f"feat-{timestamp}"
+
+
 class Feature(BaseModel):
     """A tracked feature with its lifecycle state."""
 
     id: str
     description: str
+    prompt: str | None = None
+    """Original user prompt when description was summarised by Haiku.
+    None when the description *is* the original prompt (short enough)."""
     status: FeatureStatus = FeatureStatus.PENDING
     workflow: str = "standard"
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     phases: list[PhaseRecord] = Field(default_factory=list)
     metadata: FeatureMetadata = Field(default_factory=FeatureMetadata)
+    parent_id: str | None = None
+    """ID of the parent epic. None for standalone features and epics themselves."""
 
     def transition_to(self, target: FeatureStatus) -> None:
         """Transition to a new status, raising InvalidTransition if not allowed."""
-        allowed = VALID_TRANSITIONS.get(self.status, set())
+        allowed = VALID_TRANSITIONS.get(self.status, frozenset())
         if target not in allowed:
             raise InvalidTransition(self.status, target)
         self.status = target
         self.updated_at = datetime.now(UTC)
+
+    def find_phase(self, name: str | PhaseName) -> PhaseRecord | None:
+        """Return the phase with *name* (first match), or None."""
+        target = name.value if isinstance(name, PhaseName) else name
+        for phase in self.phases:
+            if phase.name == target:
+                return phase
+        return None
 
     @property
     def current_phase(self) -> PhaseRecord | None:
@@ -211,6 +204,18 @@ class Feature(BaseModel):
                 return phase
         return None
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def current_phase_name(self) -> str | None:
+        """Name of the in-progress phase, serialised into state.json.
+
+        Exposed so external consumers (e.g. the post-compact hook) can read
+        the active phase from the JSON snapshot without having to walk the
+        ``phases`` array themselves.
+        """
+        current = self.current_phase
+        return current.name.value if current else None
+
     @property
     def is_terminal(self) -> bool:
         """Return True if the feature is done. Failed features can be resumed."""
@@ -218,10 +223,18 @@ class Feature(BaseModel):
 
 
 class WorkflowState(BaseModel):
-    """Top-level project state persisted in .devflow/state.json."""
+    """Top-level project state persisted in .devflow/state.json.
+
+    Contains only runtime state (features + timestamps).  Project
+    configuration (stack, base_branch, linear, backend) lives in
+    ``.devflow/config.yaml`` — see :mod:`devflow.core.config`.
+    """
+
+    model_config = {"extra": "ignore"}
+    """Ignore legacy config fields (stack, base_branch, linear_team_id)
+    that may still be present in old state.json files."""
 
     version: int = 1
-    stack: str | None = None
     features: dict[str, Feature] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -234,21 +247,32 @@ class WorkflowState(BaseModel):
         """Get a feature by ID, or None if not found."""
         return self.features.get(feature_id)
 
+    def children_of(self, parent_id: str) -> list[Feature]:
+        """Return all features whose parent_id matches *parent_id*."""
+        return [f for f in self.features.values() if f.parent_id == parent_id]
 
-class PhaseDefinition(BaseModel):
-    """Definition of a phase in a workflow YAML file."""
+    def epics(self) -> list[Feature]:
+        """Return features that have children (i.e. are epics)."""
+        parent_ids = {f.parent_id for f in self.features.values() if f.parent_id}
+        return [f for f in self.features.values() if f.id in parent_ids]
 
-    name: PhaseName
-    agent: str = ""
-    description: str = ""
-    required: bool = True
-    timeout: int = 300
-    model: str | None = None
+    def is_epic(self, feature_id: str) -> bool:
+        """Return True if *feature_id* has any child features."""
+        return any(f.parent_id == feature_id for f in self.features.values())
 
 
-class WorkflowDefinition(BaseModel):
-    """Definition of a complete workflow loaded from YAML."""
-
-    name: str
-    description: str = ""
-    phases: list[PhaseDefinition] = Field(default_factory=list)
+__all__ = [
+    "VALID_TRANSITIONS",
+    "ComplexityScore",
+    "Feature",
+    "FeatureMetadata",
+    "FeatureStatus",
+    "InvalidTransition",
+    "PhaseName",
+    "PhaseRecord",
+    "PhaseStatus",
+    "PhaseType",
+    "SyncResult",
+    "WorkflowState",
+    "generate_feature_id",
+]

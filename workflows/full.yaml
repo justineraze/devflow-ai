@@ -5,41 +5,34 @@ phases:
   - name: architecture
     agent: architect
     description: Analyze scope, map dependencies, make structural decisions
-    required: true
     timeout: 600
 
   - name: planning
     agent: planner
     description: Create detailed implementation plan based on architecture decisions
-    required: true
     timeout: 600
 
   - name: plan_review
     agent: reviewer
     description: Review the plan before implementation begins
-    required: true
     timeout: 600
 
   - name: implementing
     agent: developer
     description: Implement the plan step by step with tests
-    required: true
     timeout: 1800
 
   - name: reviewing
     agent: reviewer
     description: Full code review — correctness, security, quality, tests
-    required: true
     timeout: 600
 
   - name: fixing
     agent: developer
     description: Address review feedback
-    required: false
     timeout: 900
 
   - name: gate
     agent: tester
     description: Final quality gate — lint, tests, secrets, coverage audit
-    required: true
     timeout: 300

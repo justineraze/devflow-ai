@@ -44,19 +44,77 @@ Leaf and local changes skip the architect and go straight to planner.
 
 For cross-cutting and foundational changes:
 - Which modules import from the changed module?
-- What's the ripple effect? (change in models.py → workflow.py → track.py → cli.py)
+- What's the ripple effect? (change in models.py -> workflow.py -> track.py -> cli.py)
 - Are there circular dependencies to avoid?
 
 ```
-models.py ← workflow.py ← track.py ← cli.py
-    ↑            ↑
-    └── gate.py  └── build.py
-         ↑
+models.py <- workflow.py <- track.py <- cli.py
+    ^            ^
+    +-- gate.py  +-- build.py
+         ^
     install.py (independent)
     display.py (depends on models only)
 ```
 
-### Step 3 — Design the solution
+### Step 3 — Architecture checks (mandatory)
+
+Before designing the solution, run these four checks on every file the change
+touches or creates. Document the results — they feed the decision record.
+
+#### 3a. Single responsibility
+
+Each file modified or created has ONE responsibility. If the change puts two
+responsibilities into the same file, propose a split BEFORE implementing.
+
+Ask: "Can I describe this file's job in one sentence without using 'and'?"
+If the answer is no, the file does two things and needs splitting.
+
+#### 3b. Module placement
+
+Verify every piece of new code lands in the correct layer:
+
+| Layer | Directory | Contains |
+|-------|-----------|----------|
+| Domain | `core/` | Models, state machine, pure logic — no I/O |
+| Engine | `orchestration/` | Build loop, runner, prompt assembly |
+| Bridges | `integrations/` | Git, gate, detection — external tools |
+| Display | `ui/` | Rich panels, banners — no logic |
+| Setup | `setup/` | Install, doctor — one-time ops |
+| CLI | `cli.py` | Typer commands — zero business logic |
+
+If the feature places code in a module that doesn't match its layer, that's
+a placement error. Flag it and propose the correct location.
+
+#### 3c. Layering & coupling
+
+List every NEW import the change introduces between modules.
+Check direction against the allowed dependency flow:
+
+```
+cli.py -> orchestration/ -> core/
+                         -> integrations/
+ui/ -> core/ (models only)
+setup/ -> (independent)
+```
+
+Violations to catch:
+- `core/` importing from `orchestration/`, `ui/`, or `integrations/`
+- `integrations/` importing from `orchestration/`
+- Any circular import
+
+If a violation exists, propose a fix: dependency injection, callback, or
+moving the shared type into `core/`.
+
+#### 3d. API surface
+
+For each new file, list all public functions and their signatures.
+Apply these thresholds:
+
+- **>5 public functions** -> the module does too much. Propose a split.
+- **>3 parameters on a function** -> consider a config dataclass or builder.
+- **No type hints** -> reject. All public signatures must be fully typed.
+
+### Step 4 — Design the solution
 
 Produce architectural decisions:
 
@@ -76,7 +134,7 @@ Produce architectural decisions:
    Rule: expected failures return None or raise specific exceptions.
    Programming errors crash (don't catch TypeError, KeyError).
 
-### Step 4 — Decision record
+### Step 5 — Decision record
 
 Document each non-obvious decision with:
 - **Decision**: what you decided
@@ -92,6 +150,20 @@ Document each non-obvious decision with:
 - Type: [leaf | local | cross-cutting | foundational]
 - Blast radius: [list of affected modules]
 - Risk: [low | medium | high]
+
+### Architecture checks
+
+#### Single responsibility
+- [file]: [OK | VIOLATION — reason + proposed split]
+
+#### Module placement
+- [file]: [correct layer | MISPLACED — should be in X]
+
+#### Layering violations
+- [import A -> B]: [OK | VIOLATION — proposed fix]
+
+#### API surface
+- [new file]: [N public functions — OK | TOO LARGE — proposed split]
 
 ### Dependency impact
 [ASCII diagram showing affected modules and data flow]
@@ -123,3 +195,5 @@ Document each non-obvious decision with:
 - **Dependency direction** — imports must flow in one direction. If you need to call
   "upward", use dependency injection or callbacks.
 - **Max 3 new files per feature** — if you need more, the feature is too big. Split it.
+- **Architecture checks are not optional** — every output must include the four checks
+  from Step 3, even if all pass. Skipping a check is a failure.
