@@ -86,7 +86,7 @@ def _handle_post_phase_commit(
     phase_result = collect_phase_result(pre_phase_sha, success, output, metrics)
 
     callbacks.on_phase_success(phase.name, elapsed, metrics)
-    callbacks.on_phase_commits(phase_result)
+    callbacks.on_phase_commits(phase.name, phase_result)
     totals.add(
         phase.name, metrics, elapsed, model=model_label,
         commits=len(phase_result.commits),

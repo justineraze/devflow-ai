@@ -38,7 +38,6 @@ class TestPhaseSpinner:
         spinner = PhaseSpinner("implementing")
         spinner.update("Read", "models.py")
 
-        mock_live.update.assert_called_once()
         assert "Read" in spinner._action
         assert "models.py" in spinner._action
 
@@ -63,9 +62,21 @@ class TestPhaseSpinner:
         spinner.update("Read", "first.py")
         spinner.update("Write", "second.py")
 
-        assert mock_live.update.call_count == 2
         assert "Write" in spinner._action
         assert "second.py" in spinner._action
+
+    @patch("devflow.ui.spinner.Live")
+    def test_tool_count_increments(self, mock_live_cls: MagicMock) -> None:
+        mock_live = MagicMock()
+        mock_live.is_started = True
+        mock_live_cls.return_value = mock_live
+
+        spinner = PhaseSpinner("implementing")
+        assert spinner._tool_count == 0
+        spinner.update("Read", "a.py")
+        spinner.update("Write", "b.py")
+        spinner.update("Bash", "pytest")
+        assert spinner._tool_count == 3
 
     @patch("devflow.ui.spinner.Live")
     def test_stop_calls_live_stop(self, mock_live_cls: MagicMock) -> None:

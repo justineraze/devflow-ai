@@ -143,6 +143,7 @@ def run_gate(
 
             from devflow.core.console import console as gate_console
 
+            gate_console.print()
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[bold]{task.description}"),

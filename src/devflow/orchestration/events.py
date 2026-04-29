@@ -96,7 +96,7 @@ class BuildEventListener:
     on_phase_success: Callable[[str, float, PhaseMetrics], None] = field(default=_noop)
     on_phase_failure: Callable[[str, float, str], None] = field(default=_noop)
     on_phase_auto_retry: Callable[[str, float, str], None] = field(default=_noop)
-    on_phase_commits: Callable[[PhaseResult], None] = field(default=_noop)
+    on_phase_commits: Callable[[str, PhaseResult], None] = field(default=_noop)
     on_gate_panel: Callable[[str, Path | None], None] = field(default=_noop)
     on_build_summary: Callable[
         [Feature, BuildTotals, str | None, str, float | None], None

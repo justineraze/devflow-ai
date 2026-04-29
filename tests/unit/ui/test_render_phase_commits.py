@@ -8,14 +8,14 @@ from devflow.core.metrics import CommitInfo, PhaseMetrics, PhaseResult
 
 
 class TestRenderPhaseCommits:
-    def _capture(self, phase_result: PhaseResult) -> str:
+    def _capture(self, phase_result: PhaseResult, phase_name: str = "implementing") -> str:
         import devflow.ui.rendering as mod
 
         buf = StringIO()
         original = mod.console
         mod.console = Console(file=buf, force_terminal=False, width=120, no_color=True)
         try:
-            mod.render_phase_commits(phase_result)
+            mod.render_phase_commits(phase_name, phase_result)
         finally:
             mod.console = original
         return buf.getvalue()
@@ -64,6 +64,34 @@ class TestRenderPhaseCommits:
         )
         output = self._capture(result)
         assert output.strip() == ""
+
+    def test_planning_shows_step_count(self) -> None:
+        result = PhaseResult(
+            success=True,
+            output="Plan:\n- Step 1\n- Step 2\n- Step 3\n",
+            metrics=PhaseMetrics(),
+        )
+        output = self._capture(result, "planning")
+        assert "3 steps" in output
+
+    def test_reviewing_shows_verdict(self) -> None:
+        result = PhaseResult(
+            success=True,
+            output="Verdict: APPROVE\nLooks good.",
+            metrics=PhaseMetrics(),
+        )
+        output = self._capture(result, "reviewing")
+        assert "APPROVED" in output
+
+    def test_reviewing_shows_blocking_count(self) -> None:
+        result = PhaseResult(
+            success=True,
+            output="Verdict: REQUEST_CHANGES\n- [BLOCKING] Fix X\n- [BLOCKING] Fix Y\n",
+            metrics=PhaseMetrics(),
+        )
+        output = self._capture(result, "reviewing")
+        assert "REQUEST_CHANGES" in output
+        assert "2 blocking" in output
 
     def test_deletions_shown_in_single_commit(self) -> None:
         result = PhaseResult(

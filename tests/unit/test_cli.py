@@ -91,14 +91,6 @@ class TestInstallCommand:
 class TestDeprecatedCommands:
     """Deprecated shims still work but show a deprecation hint."""
 
-    def test_fix_still_registered(self) -> None:
-        result = runner.invoke(app, ["fix", "--help"])
-        assert result.exit_code == 0
-
-    def test_retry_still_registered(self) -> None:
-        result = runner.invoke(app, ["retry", "--help"])
-        assert result.exit_code == 0
-
     def test_log_still_registered(self) -> None:
         result = runner.invoke(app, ["log", "--help"])
         assert result.exit_code == 0

@@ -76,14 +76,14 @@ class TestRenderFeatureDetailComplexity:
 
 
 class TestRenderStatusTableComplexity:
-    def test_table_shows_score_suffix_when_complexity_set(self) -> None:
+    def test_table_shows_workflow(self) -> None:
         score = ComplexityScore(files_touched=2, integrations=2, security=1, scope=1)
         feature = _make_feature("standard", complexity=score)
         state = WorkflowState()
         state.add_feature(feature)
         output = _capture(render_status_table, state)
-        # Total is 6 → "standard (6/12)"
-        assert "6/12" in output
+        assert "standard" in output
+        assert "feat-001" in output
 
     def test_table_shows_plain_workflow_when_no_complexity(self) -> None:
         feature = _make_feature("standard", complexity=None)
@@ -91,5 +91,3 @@ class TestRenderStatusTableComplexity:
         state.add_feature(feature)
         output = _capture(render_status_table, state)
         assert "standard" in output
-        # No score suffix
-        assert "/12" not in output

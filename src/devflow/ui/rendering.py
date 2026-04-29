@@ -24,6 +24,8 @@ from devflow.core.metrics import (
     compute_cache_hit_rate,
 )
 from devflow.core.models import Feature, SyncResult
+from devflow.ui import theme
+from devflow.ui.theme import m as _m
 
 
 def _plural(n: int, word: str) -> str:
@@ -38,24 +40,18 @@ STACK_ICONS: dict[str, str] = {
     "javascript": "🟨",
 }
 
-MODEL_STYLES: dict[str, str] = {
-    "opus": "magenta bold",
-    "sonnet": "cyan bold",
-    "haiku": "green bold",
-}
-
 PHASE_DOT_COLORS: dict[str, str] = {
-    "done": "green",
-    "failed": "red",
-    "in_progress": "yellow",
-    "pending": "dim",
-    "skipped": "dim",
+    "done": theme.PHASE_DONE,
+    "failed": theme.PHASE_FAILED,
+    "in_progress": theme.PHASE_ACTIVE,
+    "pending": theme.PHASE_PENDING,
+    "skipped": theme.PHASE_SKIPPED,
 }
 
 
 def _model_badge(model: str) -> Text:
     """Colored pill-style label for a Claude model tier."""
-    style = MODEL_STYLES.get(model, "white bold")
+    style = theme.MODEL_STYLES.get(model, f"{theme.TEXT} bold")
     return Text(f" {model} ", style=f"reverse {style}", end="")
 
 
@@ -64,14 +60,14 @@ def _bar(ratio: float, width: int = 24) -> Text:
     ratio = max(0.0, min(1.0, ratio))
     filled = int(width * ratio)
     if ratio < 0.6:
-        color = "green"
+        color = theme.SUCCESS
     elif ratio < 0.85:
-        color = "yellow"
+        color = theme.WARNING
     else:
-        color = "red"
+        color = theme.ERROR
     bar = Text()
     bar.append("█" * filled, style=color)
-    bar.append("░" * (width - filled), style="dim")
+    bar.append("░" * (width - filled), style=theme.TEXT_MUTED)
     return bar
 
 
@@ -83,29 +79,29 @@ def render_build_banner(feature: Feature, branch: str, stack: str | None) -> Non
     icon = STACK_ICONS.get(stack_label, "📦")
     total_phases = len(feature.phases)
 
-    title = Text(feature.description, style="bold white")
+    title = Text(feature.description, style=f"bold {theme.TEXT}")
     meta = Text()
-    meta.append(feature.id, style="dim")
-    meta.append("  ·  ", style="dim")
-    meta.append(f"{icon} {stack_label}", style="cyan")
-    meta.append("  ·  ", style="dim")
-    meta.append(feature.workflow, style="cyan")
-    meta.append("  ·  ", style="dim")
-    meta.append(f"{total_phases} phases", style="cyan")
+    meta.append(feature.id, style=theme.TEXT_MUTED)
+    meta.append("  ·  ", style=theme.SEPARATOR)
+    meta.append(f"{icon} {stack_label}", style=theme.ACCENT)
+    meta.append("  ·  ", style=theme.SEPARATOR)
+    meta.append(feature.workflow, style=theme.ACCENT)
+    meta.append("  ·  ", style=theme.SEPARATOR)
+    meta.append(f"{total_phases} phases", style=theme.ACCENT)
 
     if feature.metadata.linear_issue_key:
-        meta.append("  ·  ", style="dim")
-        meta.append(f"Linear: {feature.metadata.linear_issue_key}", style="cyan")
+        meta.append("  ·  ", style=theme.SEPARATOR)
+        meta.append(f"Linear: {feature.metadata.linear_issue_key}", style=theme.ACCENT)
 
     branch_line = Text()
-    branch_line.append("🌿 ", style="green")
-    branch_line.append(branch, style="dim")
+    branch_line.append("🌿 ", style=theme.SUCCESS)
+    branch_line.append(branch, style=theme.TEXT_MUTED)
 
     content = Group(title, meta, branch_line)
     console.print()
-    console.print(Rule(style="cyan"))
+    console.print(Rule(style=theme.ACCENT))
     console.print(content)
-    console.print(Rule(style="cyan"))
+    console.print(Rule(style=theme.ACCENT))
     console.print()
 
 
@@ -116,11 +112,12 @@ def render_phase_header(
     if is_quiet():
         return
     header = Text()
-    header.append("▶ ", style="cyan bold")
-    header.append(f"phase {phase_num}/{total} · ", style="dim")
+    header.append("▶ ", style=f"{theme.ACCENT} bold")
+    header.append(f"phase {phase_num}/{total} · ", style=theme.TEXT_MUTED)
     header.append(phase_name, style="bold")
     header.append("   ")
     header.append_text(_model_badge(model))
+    console.print()
     console.print(header)
 
 
@@ -131,22 +128,22 @@ def render_phase_success(
     if is_quiet():
         return
     chip = Text("  ")
-    chip.append("✓ ", style="green bold")
+    chip.append("✓ ", style=f"{theme.SUCCESS} bold")
     chip.append(phase_name, style="bold")
-    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
+    chip.append(f"   {format_duration(elapsed_s)}", style=theme.TEXT_MUTED)
 
     if metrics.tool_count:
-        chip.append(f"   {metrics.tool_count} tools", style="dim")
+        chip.append(f"   {metrics.tool_count} tools", style=theme.TEXT_MUTED)
 
     if metrics.cost_usd:
-        chip.append(f"   {format_cost(metrics.cost_usd)}", style="yellow")
+        chip.append(f"   {format_cost(metrics.cost_usd)}", style=theme.COST)
 
     cache_rate = compute_cache_hit_rate(
         metrics.input_tokens, metrics.cache_creation, metrics.cache_read,
     )
     if cache_rate > 0:
         pct = int(cache_rate * 100)
-        chip.append(f"   cache {pct}%", style="green" if pct >= 80 else "yellow")
+        chip.append(f"   cache {pct}%", style=theme.CACHE_GOOD if pct >= 80 else theme.CACHE_LOW)
 
     console.print(chip)
     console.print()
@@ -157,13 +154,13 @@ def render_phase_failure(phase_name: str, elapsed_s: float, message: str) -> Non
     if is_quiet():
         return
     chip = Text("  ")
-    chip.append("✗ ", style="red bold")
+    chip.append("✗ ", style=f"{theme.ERROR} bold")
     chip.append(phase_name, style="bold")
-    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
+    chip.append(f"   {format_duration(elapsed_s)}", style=theme.TEXT_MUTED)
     console.print(chip)
     for line in message.split("\n")[:5]:
         if line.strip():
-            console.print(Text(f"    {line}", style="dim"))
+            console.print(Text(f"    {line}", style=theme.TEXT_MUTED))
     console.print()
 
 
@@ -172,33 +169,33 @@ def render_phase_auto_retry(phase_name: str, elapsed_s: float, message: str) -> 
     if is_quiet():
         return
     chip = Text("  ")
-    chip.append("↻ ", style="yellow bold")
-    chip.append(f"{phase_name} failed — auto-retrying via fixing", style="yellow")
-    chip.append(f"   {format_duration(elapsed_s)}", style="dim")
+    chip.append("↻ ", style=f"{theme.WARNING} bold")
+    chip.append(f"{phase_name} failed — auto-retrying via fixing", style=theme.WARNING)
+    chip.append(f"   {format_duration(elapsed_s)}", style=theme.TEXT_MUTED)
     console.print(chip)
     for line in message.split("\n")[:8]:
         if line.strip():
-            console.print(Text(f"    {line}", style="dim"))
+            console.print(Text(f"    {line}", style=theme.TEXT_MUTED))
     console.print()
 
 
 def _commit_line(c: CommitInfo, *, show_files: bool) -> Text:
     """Format a single commit line with SHA + message + file/insertion/deletion stats."""
     line = Text("  ")
-    line.append(f"  {c.sha} ", style="cyan dim")
-    line.append(c.message, style="dim")
+    line.append(f"  {c.sha} ", style=theme.COMMIT_SHA)
+    line.append(c.message, style=theme.TEXT_MUTED)
     if show_files:
         detail = f" ({len(c.files)} {_plural(len(c.files), 'file')}, +{c.insertions}"
         if c.deletions:
             detail += f", -{c.deletions}"
         detail += ")"
-        line.append(detail, style="dim")
+        line.append(detail, style=theme.TEXT_MUTED)
     return line
 
 
 def _commit_stat_line(files: int, insertions: int, deletions: int, *, bold: bool = False) -> Text:
     """Format a stat line with files/insertions/deletions counts."""
-    label_style = "dim bold" if bold else "dim"
+    label_style = f"{theme.TEXT_MUTED} bold" if bold else theme.TEXT_MUTED
     stat = Text("  ")
     prefix = "  Total: " if bold else "  "
     stat.append(
@@ -208,24 +205,62 @@ def _commit_stat_line(files: int, insertions: int, deletions: int, *, bold: bool
     if insertions:
         stat.append(
             f", {insertions} {_plural(insertions, 'insertion')}(+)",
-            style="green dim",
+            style=theme.INSERTION,
         )
     if deletions:
         stat.append(
             f", {deletions} {_plural(deletions, 'deletion')}(-)",
-            style="red dim",
+            style=theme.DELETION,
         )
     return stat
 
 
-def render_phase_commits(phase_result: PhaseResult) -> None:
-    """Render a detailed commit summary after an implementing/fixing phase.
+def _render_planning_detail(output: str) -> None:
+    """Extract and display plan stats from planning output."""
+    lines = output.strip().splitlines()
+    prefixes = ("- ", "* ", "1.", "2.", "3.", "4.", "5.", "6.", "7.", "8.", "9.")
+    step_count = sum(1 for ln in lines if ln.strip().startswith(prefixes))
+    if step_count:
+        console.print(Text(f"    {step_count} steps in plan", style=theme.TEXT_DIM))
 
-    Shows all commits made by the agent during the phase, plus any
-    auto-committed leftovers. Replaces the old single-diff display.
-    """
+
+def _render_review_detail(output: str) -> None:
+    """Extract and display review verdict from review output."""
+    lower = output.lower()
+    if "approve" in lower:
+        verdict = "APPROVED"
+        style = theme.SUCCESS
+    elif "request_changes" in lower or "request changes" in lower:
+        verdict = "REQUEST_CHANGES"
+        style = theme.WARNING
+    else:
+        return
+    blocking_prefixes = ("- [BLOCKING]", "- **BLOCKING**", "[BLOCKING]")
+    blocking = sum(
+        1 for ln in output.splitlines()
+        if ln.strip().startswith(blocking_prefixes)
+    )
+    line = Text(f"    {verdict}", style=style)
+    if blocking:
+        line.append(f" · {blocking} blocking", style=theme.ERROR)
+    console.print(line)
+
+
+def render_phase_commits(phase_name: str, phase_result: PhaseResult) -> None:
+    """Render phase-specific detail after completion."""
     if is_quiet():
         return
+
+    if phase_name == "planning":
+        _render_planning_detail(phase_result.output)
+        console.print()
+        return
+
+    if phase_name == "reviewing":
+        _render_review_detail(phase_result.output)
+        console.print()
+        return
+
     commits = phase_result.commits
     if not commits and not phase_result.uncommitted_changes:
         return
@@ -260,10 +295,10 @@ def _render_cost_by_model(snapshots: list[PhaseSnapshot]) -> Text | None:
     cost_parts = Text()
     for i, (tier, cost) in enumerate(sorted(model_costs.items(), key=lambda x: -x[1])):
         if i > 0:
-            cost_parts.append(", ", style="dim")
-        style = MODEL_STYLES.get(tier, "white bold")
+            cost_parts.append(", ", style=theme.TEXT_MUTED)
+        style = theme.MODEL_STYLES.get(tier, f"{theme.TEXT} bold")
         cost_parts.append(tier, style=style)
-        cost_parts.append(f" {format_cost(cost)}", style="dim")
+        cost_parts.append(f" {format_cost(cost)}", style=theme.TEXT_MUTED)
     return cost_parts
 
 
@@ -273,17 +308,17 @@ def _render_pr_or_branch(
     """Build the trailing PR-link line, or a branch hint when no PR exists."""
     if pr_url:
         link = Text()
-        link.append("🔗 ", style="green")
-        link.append(pr_url, style="blue underline")
+        link.append("🔗 ", style=theme.SUCCESS)
+        link.append(pr_url, style=f"{theme.ACCENT_ALT} underline")
         if feature.metadata.linear_issue_key:
-            link.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
+            link.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style=theme.ACCENT)
         return link
 
     hint = Text()
-    hint.append("branch: ", style="dim")
-    hint.append(branch, style="dim")
+    hint.append("branch: ", style=theme.TEXT_MUTED)
+    hint.append(branch, style=theme.TEXT_MUTED)
     if feature.metadata.linear_issue_key:
-        hint.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style="cyan")
+        hint.append(f"  ·  Linear: {feature.metadata.linear_issue_key}", style=theme.ACCENT)
     return hint
 
 
@@ -300,11 +335,11 @@ def render_build_summary(
     phase_dots = _render_phase_timeline(feature, totals)
 
     grid = Table.grid(expand=False, padding=(0, 2))
-    grid.add_column(justify="right", style="dim")
+    grid.add_column(justify="right", style=theme.TEXT_MUTED)
     grid.add_column()
 
     grid.add_row("Duration", format_duration(totals.duration_s))
-    grid.add_row("Cost", Text(format_cost(totals.cost_usd), style="yellow bold"))
+    grid.add_row("Cost", Text(format_cost(totals.cost_usd), style=f"{theme.COST} bold"))
     grid.add_row("Tools", str(totals.tool_count))
 
     cache_rate = compute_cache_hit_rate(
@@ -312,13 +347,13 @@ def render_build_summary(
     )
     if cache_rate > 0:
         cache_pct = int(cache_rate * 100)
-        cache_style = "green" if cache_pct >= 80 else "yellow"
+        cache_style = theme.CACHE_GOOD if cache_pct >= 80 else theme.CACHE_LOW
         total_in = totals.input_tokens + totals.cache_creation + totals.cache_read
         cache_text = Text()
         cache_text.append(f"{cache_pct}%", style=cache_style)
         cache_text.append(
             f" ({format_tokens(totals.cache_read)} read / {format_tokens(total_in)} total)",
-            style="dim",
+            style=theme.TEXT_MUTED,
         )
         grid.add_row("Cache", cache_text)
 
@@ -342,8 +377,8 @@ def render_build_summary(
     console.print()
     console.print(Panel(
         Group(*rows),
-        title=Text(" ✓ Build complete ", style="reverse green bold"),
-        border_style="green",
+        title=Text(" ✓ Build complete ", style=f"reverse {theme.SUCCESS} bold"),
+        border_style=theme.SUCCESS,
         padding=(1, 2),
     ))
 
@@ -353,9 +388,9 @@ def _budget_row(
 ) -> Text:
     """Compose one cost-budget row: label, progress bar, value, target, and percent."""
     row = Text()
-    row.append(label, style="dim")
+    row.append(label, style=theme.TEXT_MUTED)
     row.append_text(bar)
-    row.append(f"  {value} {of_value}  ", style="dim")
+    row.append(f"  {value} {of_value}  ", style=theme.TEXT_MUTED)
     row.append(pct.rjust(4), style="bold")
     return row
 
@@ -369,12 +404,12 @@ def _render_phase_timeline(feature: Feature, totals: BuildTotals) -> Table:
     dots: list[Text] = []
     labels: list[Text] = []
     for phase in feature.phases:
-        color = PHASE_DOT_COLORS.get(phase.status.value, "dim")
+        color = PHASE_DOT_COLORS.get(phase.status.value, theme.TEXT_MUTED)
         dot = Text(f"● {phase.name}", style=color)
         elapsed = totals.phase_durations.get(phase.name)
         label = Text(
             format_duration(elapsed) if elapsed else "—",
-            style="dim",
+            style=theme.TEXT_MUTED,
         )
         dots.append(dot)
         labels.append(label)
@@ -386,52 +421,55 @@ def _render_phase_timeline(feature: Feature, totals: BuildTotals) -> Table:
 
 def render_sync_summary(result: SyncResult) -> None:
     """Render a Rich panel summarising the outcome of ``devflow sync``."""
-    prefix = "[yellow]dry-run[/yellow] " if result.dry_run else ""
+    prefix = f"[{theme.WARNING}]dry-run[/{theme.WARNING}] " if result.dry_run else ""
 
     grid = Table.grid(expand=False, padding=(0, 2))
-    grid.add_column(justify="right", style="dim")
+    grid.add_column(justify="right", style=theme.TEXT_MUTED)
     grid.add_column()
 
     # Branches row.
     branch_text = Text()
     if result.branches_deleted:
-        branch_text.append(str(len(result.branches_deleted)), style="bold red")
-        branch_text.append(" deleted", style="dim")
-        branch_text.append(f"  ({', '.join(result.branches_deleted)})", style="dim")
+        branch_text.append(str(len(result.branches_deleted)), style=f"bold {theme.ERROR}")
+        branch_text.append(" deleted", style=theme.TEXT_MUTED)
+        branch_text.append(f"  ({', '.join(result.branches_deleted)})", style=theme.TEXT_MUTED)
     else:
-        branch_text.append("none", style="dim")
+        branch_text.append("none", style=theme.TEXT_MUTED)
     grid.add_row("Branches", branch_text)
 
     # Features row.
     feat_text = Text()
     if result.features_archived:
-        feat_text.append(str(len(result.features_archived)), style="bold green")
-        feat_text.append(" archived", style="dim")
-        feat_text.append(f"  ({', '.join(result.features_archived)})", style="dim")
+        feat_text.append(str(len(result.features_archived)), style=f"bold {theme.SUCCESS}")
+        feat_text.append(" archived", style=theme.TEXT_MUTED)
+        feat_text.append(f"  ({', '.join(result.features_archived)})", style=theme.TEXT_MUTED)
     else:
-        feat_text.append("none", style="dim")
+        feat_text.append("none", style=theme.TEXT_MUTED)
     grid.add_row("Features archived", feat_text)
 
     # Current branch.
-    cb_text = Text(result.current_branch or "—", style="cyan")
+    cb_text = Text(result.current_branch or "—", style=theme.ACCENT)
     grid.add_row("Current branch", cb_text)
 
     rows: list[Text | Table] = [grid]
 
     if result.dry_run and result.actions:
         rows.append(Text())
-        rows.append(Text("Actions that would run:", style="yellow dim"))
+        rows.append(Text("Actions that would run:", style=f"{theme.WARNING} dim"))
         for action in result.actions:
-            rows.append(Text(f"  • {action}", style="dim"))
+            rows.append(Text(f"  • {action}", style=theme.TEXT_MUTED))
 
-    title_style = "reverse yellow bold" if result.dry_run else "reverse green bold"
+    if result.dry_run:
+        title_style = f"reverse {theme.WARNING} bold"
+    else:
+        title_style = f"reverse {theme.SUCCESS} bold"
     title_label = "⏵ Sync (dry-run)" if result.dry_run else "✓ Sync complete"
 
     console.print()
     console.print(Panel(
         Group(*rows),
         title=Text(f" {prefix}{title_label} ", style=title_style),
-        border_style="yellow" if result.dry_run else "green",
+        border_style=theme.WARNING if result.dry_run else theme.SUCCESS,
         padding=(1, 2),
     ))
 
@@ -457,7 +495,7 @@ def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool)
     console.print(Panel(
         Markdown(plan_output),
         title="Plan proposé",
-        border_style="cyan",
+        border_style=theme.ACCENT,
         padding=(1, 2),
     ))
     console.print()
@@ -469,8 +507,8 @@ def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool)
     ).strip().lower()
     if confirm and confirm not in ("y", "yes", "o", "oui"):
         console.print()
-        console.print("[yellow]Build en pause.[/yellow]")
-        console.print(f"[dim]Le plan est sauvegardé dans {feature_id}.[/dim]")
+        console.print(_m(theme.WARNING, "Build en pause."))
+        console.print(_m(theme.TEXT_MUTED, f"Le plan est sauvegardé dans {feature_id}."))
         if create_pr:
             console.print()
             console.print("[bold]Reprendre avec :[/bold]")
@@ -481,26 +519,28 @@ def render_plan_confirmation(plan_output: str, feature_id: str, create_pr: bool)
     return True
 
 
-def render_do_banner(feature: Feature) -> None:
-    """Plain-text banner shown for ``devflow do`` (no PR mode)."""
-    console.print(f"[bold]do:[/bold] {feature.description}\n")
+def render_do_banner(_feature: Feature) -> None:
+    """No-op — banner printed early in cli.py before complexity scoring."""
 
 
 def render_resume_notice(feedback: str) -> None:
     """Notice line printed when a build resumes with user feedback."""
-    console.print(f"[yellow]↻ resumed with feedback:[/yellow] [dim]{feedback}[/dim]\n")
+    console.print(
+        f"{_m(theme.WARNING, '↻ resumed with feedback:')} "
+        f"{_m(theme.TEXT_MUTED, feedback)}\n"
+    )
 
 
 def render_pr_creating() -> None:
     """Status line printed while ``gh pr create`` is in flight."""
-    console.print("[dim]Creating PR…[/dim]")
+    console.print(f"[{theme.TEXT_MUTED}]Creating PR…[/{theme.TEXT_MUTED}]")
 
 
 def render_pr_failed() -> None:
     """Warning shown when ``gh pr create`` returns no URL."""
     console.print(
-        "[yellow]✗ PR creation failed — gh pr create returned no URL"
-        " — Fix: push the branch manually with git push -u origin HEAD[/yellow]\n"
+        f"[{theme.WARNING}]✗ PR creation failed — gh pr create returned no URL"
+        f" — Fix: push the branch manually with git push -u origin HEAD[/{theme.WARNING}]\n"
     )
 
 
@@ -508,32 +548,33 @@ def render_low_cache_warning(avg_cache: float) -> None:
     """Warn when the prompt cache hit rate has been consistently low."""
     pct = int(avg_cache * 100)
     console.print(
-        f"[yellow]⚠ Cache hit rate bas ({pct}%) "
+        f"[{theme.WARNING}]⚠ Cache hit rate bas ({pct}%) "
         "sur les 3 derniers builds. "
-        "Les prompts système ont peut-être changé.[/yellow]"
+        f"Les prompts système ont peut-être changé.[/{theme.WARNING}]"
     )
 
 
 def render_epic_complete(epic_id: str) -> None:
     """Banner shown when the last sub-feature of an epic finishes."""
     console.print(
-        f"[green bold]Epic {epic_id} — all sub-features done![/green bold]\n"
+        f"[{theme.SUCCESS} bold]Epic {epic_id} — all sub-features done![/{theme.SUCCESS} bold]\n"
     )
 
 
 def render_revert_hint(feature_id: str, initial_sha: str) -> None:
     """Failure-recovery hint after ``devflow do`` aborts a phase."""
     short = initial_sha[:7]
-    console.print("\n[yellow]Gate failed. Changes are still on your branch.[/yellow]")
-    console.print(f"[dim]Pour annuler : git reset --hard {short}[/dim]")
-    console.print(f"[dim]Pour réessayer : devflow build --retry {feature_id}[/dim]\n")
+    console.print(f"\n{_m(theme.WARNING, 'Gate failed. Changes are still on your branch.')}")
+    console.print(_m(theme.TEXT_MUTED, f"Pour annuler : git reset --hard {short}"))
+    retry_hint = f"Pour réessayer : devflow build --retry {feature_id}"
+    console.print(_m(theme.TEXT_MUTED, retry_hint) + "\n")
 
 
 def render_do_success(current_sha: str, initial_sha: str) -> None:
     """Success line printed at the end of ``devflow do``."""
     console.print(
-        f"[green bold]Done.[/green bold] HEAD is now {current_sha}."
-        f"\n[dim]Pour annuler : git reset --hard {initial_sha[:7]}[/dim]\n"
+        f"{_m(f'{theme.SUCCESS} bold', 'Done.')} HEAD is now {current_sha}.\n"
+        f"{_m(theme.TEXT_MUTED, f'Pour annuler : git reset --hard {initial_sha[:7]}')}\n"
     )
 
 
@@ -542,14 +583,14 @@ def render_doctor_report(report: GateReport) -> None:
     lines = Text()
     for check in report.checks:
         icon = "✓" if check.passed else "✗"
-        style = "green" if check.passed else "red"
+        style = theme.SUCCESS if check.passed else theme.ERROR
         lines.append(f"  {icon} ", style=style)
         lines.append(f"{check.name}: ", style="bold")
         lines.append(f"{check.message}\n", style=style)
         if check.details:
-            lines.append(f"    {check.details[:500]}\n", style="dim")
+            lines.append(f"    {check.details[:500]}\n", style=theme.TEXT_MUTED)
 
     verdict = "HEALTHY" if report.passed else "ISSUES FOUND"
-    border = "green" if report.passed else "red"
+    border = theme.SUCCESS if report.passed else theme.ERROR
 
     console.print(Panel(lines, title=f"Doctor — {verdict}", border_style=border))

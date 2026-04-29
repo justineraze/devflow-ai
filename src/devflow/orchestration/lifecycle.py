@@ -183,13 +183,6 @@ def retry_build(
         return feature
 
 
-def start_fix(description: str, base: Path | None = None) -> Feature:
-    """Start a bug fix using the quick workflow (no planning phase).
-
-    Always uses ``quick`` — complexity scoring is intentionally skipped.
-    """
-    return start_build(description, workflow_name="quick", base=base)
-
 
 def start_do(
     description: str,

@@ -10,6 +10,7 @@ from rich.text import Text
 from devflow.core.artifacts import read_json_artifact
 from devflow.core.console import console, is_quiet
 from devflow.core.gate_report import CheckResult, GateReport
+from devflow.ui import theme
 
 
 def render_gate_report(report: GateReport, *, verbose: bool = False) -> None:
@@ -24,19 +25,20 @@ def render_gate_report(report: GateReport, *, verbose: bool = False) -> None:
     """
     if is_quiet():
         return
+    console.print()
     body = Text()
     for idx, check in enumerate(report.checks):
         if check.skipped:
             icon, icon_style, name_style, msg_style = (
-                "⚠", "yellow bold", "yellow", "yellow",
+                "⚠", f"{theme.WARNING} bold", theme.WARNING, theme.WARNING,
             )
         elif check.passed:
             icon, icon_style, name_style, msg_style = (
-                "✓", "green bold", "white", "dim",
+                "✓", f"{theme.SUCCESS} bold", theme.TEXT, theme.TEXT_MUTED,
             )
         else:
             icon, icon_style, name_style, msg_style = (
-                "✗", "red bold", "red", "red",
+                "✗", f"{theme.ERROR} bold", theme.ERROR, theme.ERROR,
             )
 
         if idx:
@@ -45,23 +47,27 @@ def render_gate_report(report: GateReport, *, verbose: bool = False) -> None:
         body.append(check.name.ljust(12), style=f"bold {name_style}")
         body.append(check.message, style=msg_style)
         if verbose and check.duration_s > 0:
-            body.append(f"  ({check.duration_s:.2f}s)", style="dim")
+            body.append(f"  ({check.duration_s:.2f}s)", style=theme.TEXT_MUTED)
 
         if not check.passed and not check.skipped and check.details:
             for detail in check.details.split("\n")[:8]:
                 if detail.strip():
-                    body.append(f"\n       {detail[:200]}", style="dim red")
+                    err_dim = f"{theme.TEXT_MUTED} {theme.ERROR}"
+                    body.append(f"\n       {detail[:200]}", style=err_dim)
 
     if not report.passed:
-        verdict, verdict_style, border = "FAILED", "reverse red bold", "red"
+        verdict, verdict_style, border = "FAILED", f"reverse {theme.ERROR} bold", theme.ERROR
     elif report.has_skipped:
         verdict, verdict_style, border = (
-            "PASSED (with skipped)", "reverse yellow bold", "yellow",
+            "PASSED (with skipped)", f"reverse {theme.WARNING} bold", theme.WARNING,
         )
     else:
-        verdict, verdict_style, border = "PASSED", "reverse green bold", "green"
+        verdict, verdict_style, border = "PASSED", f"reverse {theme.SUCCESS} bold", theme.SUCCESS
 
-    subtitle = Text("custom (.devflow/gate.yaml)", style="dim") if report.custom else None
+    subtitle = (
+        Text("custom (.devflow/gate.yaml)", style=theme.TEXT_MUTED)
+        if report.custom else None
+    )
     console.print(Panel(
         body,
         title=Text(f" Gate — {verdict} ", style=verdict_style),

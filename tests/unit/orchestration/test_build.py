@@ -13,7 +13,6 @@ from devflow.orchestration.lifecycle import (
     resume_build,
     retry_build,
     start_build,
-    start_fix,
 )
 from devflow.orchestration.model_routing import get_phase_agent
 from devflow.orchestration.phase_exec import (
@@ -147,13 +146,6 @@ class TestStartBuild:
         assert len(feature.phases) == 4
         assert feature.phases[0].name == "planning"
 
-
-class TestStartFix:
-    def test_uses_quick_workflow(self, project_dir: Path) -> None:
-        feature = start_fix("Fix broken login", project_dir)
-        assert feature.workflow == "quick"
-        assert len(feature.phases) == 2
-        assert feature.phases[0].name == "implementing"
 
 
 class TestResumeBuild:

@@ -323,15 +323,26 @@ def _apply_auto_fixes(fixes: list[str], base: Path | None = None) -> None:
         console.print("[green]✓ Initialized .devflow/[/green]")
 
 
+def _check_backend() -> CheckResult:
+    """Check backend availability, handling missing registration."""
+    try:
+        backend = get_backend()
+    except RuntimeError:
+        return CheckResult(
+            name="backend",
+            passed=False,
+            message="No backend registered — run a build first or check config",
+        )
+    ok, msg = backend.check_available()
+    return CheckResult(name=backend.name, passed=ok, message=msg)
+
+
 def run_doctor(base: Path | None = None) -> GateReport:
     """Run all diagnostic checks and return the report."""
     report = GateReport()
 
     report.add(check_python_version())
-
-    backend = get_backend()
-    ok, msg = backend.check_available()
-    report.add(CheckResult(name=backend.name, passed=ok, message=msg))
+    report.add(_check_backend())
 
     report.add(check_cli_available("gh", ["gh", "--version"]))
     report.add(check_claude_default_model())

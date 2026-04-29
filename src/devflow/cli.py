@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -554,6 +555,7 @@ def do_task(
     from devflow.orchestration.build import execute_build_loop
     from devflow.orchestration.lifecycle import start_do
 
+    console.print(f"\n[bold]do:[/bold] {description[:80]}\n")
     _ensure_backend(backend)
     feature = start_do(description, workflow)
     success = execute_build_loop(
@@ -768,63 +770,6 @@ def install(
 # Deprecated shims — run the real command after a warning
 # ---------------------------------------------------------------------------
 
-@app.command(deprecated=True)
-def fix(
-    description: Annotated[str, typer.Argument(help="What to fix")],
-    base: Annotated[
-        str | None, typer.Option("--base", "-b", help="Base branch for PR (default: from state)")
-    ] = None,
-    verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
-    ] = False,
-) -> None:
-    """(Deprecated) Use ``devflow do`` or ``devflow build --workflow quick``."""
-    _deprecation_hint("fix", "devflow do")
-    from devflow.orchestration.build import execute_build_loop
-    from devflow.orchestration.lifecycle import start_fix
-
-    _ensure_backend()
-    feature = start_fix(description)
-    base_branch = _resolve_base_branch(base)
-    success = execute_build_loop(
-        feature, verbose=verbose, base_branch=base_branch,
-        callbacks=_build_callbacks(),
-    )
-    if not success:
-        raise typer.Exit(1)
-
-
-@app.command(name="retry", deprecated=True, hidden=True)
-def retry_cmd(
-    feature_id: Annotated[str, typer.Argument(help="Feature ID to retry")],
-    base: Annotated[
-        str | None, typer.Option("--base", "-b", help="Base branch for PR (default: from state)")
-    ] = None,
-    verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Stream every tool call instead of spinner")
-    ] = False,
-) -> None:
-    """(Deprecated) Use ``devflow build --retry <feat-id>``."""
-    _deprecation_hint("retry", f"devflow build --retry {feature_id}")
-    from devflow.core.errors import DevflowError
-    from devflow.orchestration.build import execute_build_loop
-    from devflow.orchestration.lifecycle import retry_build
-
-    _ensure_backend()
-    try:
-        feature = retry_build(feature_id)
-    except DevflowError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-
-    base_branch = _resolve_base_branch(base)
-    success = execute_build_loop(
-        feature, verbose=verbose, base_branch=base_branch,
-        callbacks=_build_callbacks(),
-    )
-    if not success:
-        raise typer.Exit(1)
-
 
 @app.command(name="log", deprecated=True, hidden=True)
 def log_cmd(
@@ -869,6 +814,9 @@ def doctor_cmd(
     from devflow.ui.rendering import render_doctor_report
 
     render_header(subtitle="Doctor diagnostic")
+
+    with contextlib.suppress(Exception):
+        _ensure_backend()
 
     if fix:
         from devflow.setup.doctor import run_doctor_fix

@@ -363,15 +363,15 @@ def execute_phase(
     """
     backend = get_backend()
 
-    system_prompt = build_system_prompt(phase.name, agent_name)
-    user_prompt = build_user_prompt(feature, phase)
-    tier = resolve_model(feature, phase)
-    model = backend.model_name(tier)
-    timeout = _phase_timeout(feature, phase)
-    cwd = cwd or Path.cwd()
-    agent_env = venv_env(cwd)
-
     with phase_tool_listener(phase.name) as ui_on_tool:
+        system_prompt = build_system_prompt(phase.name, agent_name)
+        user_prompt = build_user_prompt(feature, phase)
+        tier = resolve_model(feature, phase)
+        model = backend.model_name(tier)
+        timeout = _phase_timeout(feature, phase)
+        cwd = cwd or Path.cwd()
+        agent_env = venv_env(cwd)
+
         def _on_tool(tool: ToolUse) -> None:
             if verbose:
                 console.print(f"[dim]{format_tool_line(tool)}[/dim]")
